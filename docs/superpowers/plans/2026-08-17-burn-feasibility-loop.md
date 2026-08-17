@@ -805,7 +805,7 @@ git commit -m "feat: import PyTorch checkpoints with burn-store"
 - Consumes: `[batch, samples]` float32 waveform.
 - Produces: `[batch, tokens, output_dim]` float32 hidden features.
 
-- [ ] **Step 1: Write frame-count, normalization, and shape tests**
+- [x] **Step 1: Write frame-count, normalization, and shape tests**
 
 Required assertions:
 
@@ -872,7 +872,7 @@ fn odd_token_count_drops_the_last_token() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify model APIs are missing**
+- [x] **Step 2: Run tests and verify model APIs are missing**
 
 ```powershell
 cargo test -p feathertalk-models --test feather_hubert_shapes
@@ -880,7 +880,7 @@ cargo test -p feathertalk-models --test feather_hubert_shapes
 
 Expected: FAIL because FeatherHuBERT types do not exist.
 
-- [ ] **Step 3: Implement configuration and pure helpers**
+- [x] **Step 3: Implement configuration and pure helpers**
 
 Create:
 
@@ -939,7 +939,7 @@ pub fn make_even_tokens<B: Backend>(tokens: Tensor<B, 3>) -> Tensor<B, 3>;
 
 `normalize_waveform` must compute population variance with epsilon `1e-7`, matching NumPy `speech.var()`.
 
-- [ ] **Step 4: Implement `ConvNormAct1d` and the valid-convolution frontend**
+- [x] **Step 4: Implement `ConvNormAct1d` and the valid-convolution frontend**
 
 Use Burn `Conv1dConfig`, `PaddingConfig1d::Valid`, `GroupNormConfig`, and exact GELU. Build seven layers with:
 
@@ -950,7 +950,7 @@ const STRIDES: [usize; 7] = [5, 2, 2, 2, 2, 2, 2];
 
 Channel sequence is `[64, 128, 256, 384, config.channels, config.channels, config.channels]`. Every convolution has `bias=false`. Group count selects the first divisor from `[32, 16, 8, 4, 2]`, else 1.
 
-- [ ] **Step 5: Implement `DepthwiseTcnBlock`**
+- [x] **Step 5: Implement `DepthwiseTcnBlock`**
 
 The forward order is exact:
 
@@ -967,7 +967,7 @@ pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
 
 Use kernel 5, expansion from config, depthwise groups equal to expanded channels, symmetric padding `2 * dilation`, no convolution bias, and dilation cycle `[1, 2, 4, 8]`.
 
-- [ ] **Step 6: Implement `FeatherHubertEncoder`**
+- [x] **Step 6: Implement `FeatherHubertEncoder`**
 
 The module fields are named to match Python checkpoint prefixes:
 
@@ -985,7 +985,7 @@ pub struct FeatherHubertEncoder<B: Backend> {
 
 Forward accepts rank-2 waveform, inserts the channel dimension, executes frontend and TCN, applies final norm, GELU, 1x1 projection, swaps channel/time axes, and crops or zero-pads the token axis to `expected_hubert_frames`.
 
-- [ ] **Step 7: Run shape tests on CPU**
+- [x] **Step 7: Run shape tests on CPU**
 
 ```powershell
 cargo fmt --all
@@ -994,7 +994,7 @@ cargo test -p feathertalk-models --test feather_hubert_shapes
 
 Expected: PASS for micro and production configurations.
 
-- [ ] **Step 8: Commit FeatherHuBERT**
+- [x] **Step 8: Commit FeatherHuBERT**
 
 ```powershell
 git add crates/feathertalk-models/src/feather_hubert crates/feathertalk-models/tests/feather_hubert_shapes.rs
