@@ -39,7 +39,11 @@ pub(crate) fn map_key(kind: LegacyModelKind, key: &str) -> String {
 
 fn remapper_for(kind: LegacyModelKind) -> KeyRemapper {
     match kind {
-        LegacyModelKind::FeatherHubert => KeyRemapper::new(),
+        LegacyModelKind::FeatherHubert => KeyRemapper::new()
+            .add_pattern(r"((?:^|\.)(?:norm|final_norm))\.weight$", "$1.gamma")
+            .expect("reviewed literal regex")
+            .add_pattern(r"((?:^|\.)(?:norm|final_norm))\.bias$", "$1.beta")
+            .expect("reviewed literal regex"),
         LegacyModelKind::OriginalUnet => KeyRemapper::new()
             .add_pattern(r"\.double_conv\.0\.", ".first.")
             .expect("reviewed literal regex")
@@ -111,7 +115,26 @@ mod tests {
 
     #[test]
     fn feather_hubert_keys_are_unchanged() {
-        let key = "encoder.0.dw_conv.weight";
-        assert_eq!(map_key(LegacyModelKind::FeatherHubert, key), key);
+        assert_eq!(
+            map_key(LegacyModelKind::FeatherHubert, "encoder.0.dw_conv.weight"),
+            "encoder.0.dw_conv.weight"
+        );
+    }
+
+    #[test]
+    fn feather_hubert_group_norm_parameters_use_burn_names() {
+        let cases = [
+            (
+                "frontend.layers.0.norm.weight",
+                "frontend.layers.0.norm.gamma",
+            ),
+            ("frontend.layers.0.norm.bias", "frontend.layers.0.norm.beta"),
+            ("final_norm.weight", "final_norm.gamma"),
+            ("final_norm.bias", "final_norm.beta"),
+        ];
+
+        for (source, expected) in cases {
+            assert_eq!(map_key(LegacyModelKind::FeatherHubert, source), expected);
+        }
     }
 }
