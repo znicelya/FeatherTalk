@@ -1217,7 +1217,7 @@ git commit -m "feat: port Original UNet model to Burn"
 - Consumes: golden PTH weights and NPY tensors.
 - Proves: FeatherHuBERT and production Original UNet CPU forward parity.
 
-- [ ] **Step 1: Write metric unit tests**
+- [x] **Step 1: Write metric unit tests**
 
 ```rust
 use feathertalk_parity::metrics::{ParityError, compare_f32};
@@ -1261,7 +1261,7 @@ mean_abs = mean(abs(actual - expected))
 max_relative = max(abs(actual - expected) / max(abs(expected), 1e-7))
 ```
 
-- [ ] **Step 2: Write failing CPU model parity tests**
+- [x] **Step 2: Write failing CPU model parity tests**
 
 ```rust
 use feathertalk_parity::{
@@ -1307,7 +1307,7 @@ pub fn run_cpu_forward(
 ) -> Result<ParityMetrics, ParityError>;
 ```
 
-- [ ] **Step 3: Run tests and capture the first mismatch**
+- [x] **Step 3: Run tests and capture the first mismatch**
 
 ```powershell
 cargo test -p feathertalk-parity --test cpu_parity -- --nocapture
@@ -1315,7 +1315,7 @@ cargo test -p feathertalk-parity --test cpu_parity -- --nocapture
 
 Expected: FAIL with a concrete missing key, shape difference, or numerical mismatch.
 
-- [ ] **Step 4: Complete checkpoint key mappings from real apply reports**
+- [x] **Step 4: Complete checkpoint key mappings from real apply reports**
 
 Update only reviewed regex mappings. Do not enable partial loading. For every mapping, add a unit test that shows its Python source key and Burn destination key.
 
@@ -1328,7 +1328,7 @@ errors = 0
 ignored = only *.num_batches_tracked
 ```
 
-- [ ] **Step 5: Diagnose operator-level mismatches in dependency order**
+- [x] **Step 5: Diagnose operator-level mismatches in dependency order**
 
 When full output exceeds tolerance, add temporary assertions and permanent focused tests in this order:
 
@@ -1341,7 +1341,7 @@ When full output exceeds tolerance, add temporary assertions and permanent focus
 
 Fix the first divergent operation before checking later layers.
 
-- [ ] **Step 6: Run CPU parity to the approved threshold**
+- [x] **Step 6: Run CPU parity to the approved threshold**
 
 ```powershell
 cargo test -p feathertalk-parity --test cpu_parity --release -- --nocapture
@@ -1354,7 +1354,7 @@ feather_micro max_abs <= 1e-4
 unet_production max_abs <= 1e-4
 ```
 
-- [ ] **Step 7: Commit CPU parity**
+- [x] **Step 7: Commit CPU parity**
 
 ```powershell
 git add crates/feathertalk-parity crates/feathertalk-weights/src/key_map.rs

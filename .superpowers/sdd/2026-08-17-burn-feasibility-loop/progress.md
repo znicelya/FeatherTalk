@@ -7,3 +7,5 @@ Task 4: complete -- 1c62e36 -- 6 FeatherHuBERT tests and 39 workspace tests pass
 Task 4: review -- no Critical findings; strict checkpoint and CPU numerical parity are Task 6 acceptance criteria, WGPU parity is Task 8
 Task 5: complete -- 2785c03, cfc4c05 -- debug/release shape suites, strict micro import, weights tests, Clippy, rustfmt, and diff check passed; independent review fix round approved
 Task 5: review -- Important remapper path finding fixed in cfc4c05; scoped re-review approved with 0 open findings
+Task 6: complete -- 64aaf53, c67e578 -- release parity 24/24; Feather max_abs 1.0550022e-5, UNet max_abs 1.4901161e-7; workspace 75 tests passed
+Task 6: review -- 2 Important and 2 Minor findings fixed in c67e578; scoped re-review approved with 0 open findings
