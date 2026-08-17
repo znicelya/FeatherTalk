@@ -41,9 +41,9 @@ fn remapper_for(kind: LegacyModelKind) -> KeyRemapper {
     match kind {
         LegacyModelKind::FeatherHubert => KeyRemapper::new(),
         LegacyModelKind::OriginalUnet => KeyRemapper::new()
-            .add_pattern(r"\.double_conv\.0\.", ".double_conv.first.")
+            .add_pattern(r"\.double_conv\.0\.", ".first.")
             .expect("reviewed literal regex")
-            .add_pattern(r"\.double_conv\.1\.", ".double_conv.second.")
+            .add_pattern(r"\.double_conv\.1\.", ".second.")
             .expect("reviewed literal regex")
             .add_pattern(r"\.conv\.0\.", ".expand_conv.")
             .expect("reviewed literal regex")
@@ -56,6 +56,16 @@ fn remapper_for(kind: LegacyModelKind) -> KeyRemapper {
             .add_pattern(r"\.conv\.6\.", ".project_conv.")
             .expect("reviewed literal regex")
             .add_pattern(r"\.conv\.7\.", ".project_bn.")
+            .expect("reviewed literal regex")
+            .add_pattern(
+                r"(\.(?:expand_bn|depthwise_bn|project_bn|bn3|bn5))\.weight$",
+                "$1.gamma",
+            )
+            .expect("reviewed literal regex")
+            .add_pattern(
+                r"(\.(?:expand_bn|depthwise_bn|project_bn|bn3|bn5))\.bias$",
+                "$1.beta",
+            )
             .expect("reviewed literal regex")
             .add_pattern(r"^fuse_conv\.0\.", "fuse_first.")
             .expect("reviewed literal regex")
@@ -73,20 +83,25 @@ mod tests {
         let cases = [
             (
                 "down1.maxpool_conv.double_conv.0.conv.0.weight",
-                "down1.maxpool_conv.double_conv.first.expand_conv.weight",
+                "down1.maxpool_conv.first.expand_conv.weight",
             ),
             (
                 "down1.maxpool_conv.double_conv.1.conv.7.running_var",
-                "down1.maxpool_conv.double_conv.second.project_bn.running_var",
+                "down1.maxpool_conv.second.project_bn.running_var",
             ),
             (
                 "fuse_conv.0.double_conv.0.conv.3.weight",
-                "fuse_first.double_conv.first.depthwise_conv.weight",
+                "fuse_first.first.depthwise_conv.weight",
             ),
             (
                 "fuse_conv.1.double_conv.1.conv.6.weight",
-                "fuse_second.double_conv.second.project_conv.weight",
+                "fuse_second.second.project_conv.weight",
             ),
+            (
+                "down1.maxpool_conv.double_conv.0.conv.1.weight",
+                "down1.maxpool_conv.first.expand_bn.gamma",
+            ),
+            ("audio_model.bn3.bias", "audio_model.bn3.beta"),
         ];
 
         for (source, expected) in cases {
