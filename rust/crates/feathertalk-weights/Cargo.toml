@@ -11,4 +11,8 @@ burn-store.workspace = true
 hex.workspace = true
 serde.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+zip.workspace = true
