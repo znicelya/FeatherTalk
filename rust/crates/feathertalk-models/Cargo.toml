@@ -1,0 +1,17 @@
+[package]
+name = "feathertalk-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["wgpu"]
+wgpu = []
+metal = ["burn/metal"]
+vulkan = ["burn/vulkan"]
+
+[dependencies]
+burn.workspace = true
+serde.workspace = true
+thiserror.workspace = true

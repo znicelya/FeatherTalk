@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/feathertalk-models",
+  "crates/feathertalk-weights",
+  "crates/feathertalk-parity",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+burn = { version = "=0.21.0", default-features = false, features = ["std", "autodiff", "ndarray", "wgpu", "store"] }
+burn-store = { version = "=0.21.0", default-features = false, features = ["std", "pytorch", "safetensors"] }
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+ndarray = "0.17.1"
+ndarray-npy = "0.10.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.0"
+tempfile = "3.20"
+thiserror = "2.0"
+zip = { version = "6", default-features = false, features = ["deflate"] }
