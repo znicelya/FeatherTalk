@@ -577,7 +577,7 @@ git commit -m "test: freeze Burn parity fixtures"
 - Produces: `save_safetensors` for any Burn module implementing `ModuleSnapshot`.
 - Consumes: Burn `PytorchStore`, `SafetensorsStore`, and model-specific key remapping rules.
 
-- [ ] **Step 1: Write strict import tests**
+- [x] **Step 1: Write strict import tests**
 
 Define a local two-input/two-output Burn `Linear` fixture in the test file. Tests must cover:
 
@@ -645,7 +645,7 @@ fn imported_module_round_trips_through_safetensors() {
 
 Implement `extract_fixture`, `request_for`, `load_linear_safetensors`, and `assert_module_snapshots_equal` inside `legacy_import.rs`. Add `tempfile` and `zip` as dev-dependencies of `feathertalk-weights`; do not add a dependency on `feathertalk-parity`, because that would create a crate cycle.
 
-- [ ] **Step 2: Run tests and verify import APIs are missing**
+- [x] **Step 2: Run tests and verify import APIs are missing**
 
 ```powershell
 cargo test -p feathertalk-weights --test legacy_import
@@ -653,7 +653,7 @@ cargo test -p feathertalk-weights --test legacy_import
 
 Expected: FAIL because the importer types do not exist.
 
-- [ ] **Step 3: Define strict request and report types**
+- [x] **Step 3: Define strict request and report types**
 
 Create:
 
@@ -686,7 +686,7 @@ pub struct ImportReport {
 
 Default limits are 4 GiB source size, 10,000 tensors, and 2,000,000,000 elements.
 
-- [ ] **Step 4: Implement model-specific key remapping**
+- [x] **Step 4: Implement model-specific key remapping**
 
 FeatherHuBERT keeps these prefixes unchanged:
 
@@ -718,7 +718,7 @@ Original UNet uses these regex remaps before Burn's `PyTorchToBurnAdapter`:
 
 Keep `map_indices_contiguous(false)` so index changes only occur through reviewed remaps.
 
-- [ ] **Step 5: Implement bounded checkpoint inspection**
+- [x] **Step 5: Implement bounded checkpoint inspection**
 
 Before applying tensors:
 
@@ -732,7 +732,7 @@ Before applying tensors:
 
 Return typed `WeightImportError` variants for I/O, unsafe limits, unsupported structure, missing tensor, unexpected tensor, shape mismatch, dtype mismatch, duplicate key, and store errors.
 
-- [ ] **Step 6: Apply tensors and reject partial results**
+- [x] **Step 6: Apply tensors and reject partial results**
 
 Expose this generic function:
 
@@ -754,7 +754,7 @@ where
 
 `validate_apply_result` must require no missing tensors, no errors, and no unused tensors except the known ignored BatchNorm counter.
 
-- [ ] **Step 7: Implement safetensors output and round-trip validation**
+- [x] **Step 7: Implement safetensors output and round-trip validation**
 
 Expose:
 
@@ -776,7 +776,7 @@ where
 
 The test must load the saved file into a freshly initialized module and compare every tensor name, shape, dtype, and value.
 
-- [ ] **Step 8: Run strict import tests and commit**
+- [x] **Step 8: Run strict import tests and commit**
 
 ```powershell
 cargo fmt --all
