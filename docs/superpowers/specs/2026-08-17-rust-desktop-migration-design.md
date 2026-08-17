@@ -1,7 +1,7 @@
 # FeatherTalk Rust 桌面产品迁移设计
 
 日期：2026-08-17  
-状态：已确认，等待书面规格复核  
+状态：已确认
 目标平台：Windows、macOS、Linux  
 
 ## 1. 目标
@@ -100,20 +100,28 @@ UI 进程不持有 Burn 模型、WGPU device 或 FFmpeg 管线。worker 崩溃�
 
 ### 4.3 Rust workspace
 
+所有新 Rust 源码、Cargo 配置、Rust 专用工具、测试基准和迁移验收报告统一放在仓库顶层 `rust/` 目录。现有 Python/C++ 工程在迁移验收完成前保持原目录不动；最终删除旧实现时也不把 Rust 文件散落回仓库根目录。
+
 ```text
-crates/
-  app/          GPUI 桌面端
-  worker/       后台任务进程和 RPC 服务
-  domain/       项目、任务、模型、错误、进度类型
-  media/        FFmpeg、WAV、视频帧和图像读写
-  preprocess/   抽帧、人脸检测、关键点和素材包验证
-  audio/        FeatherHuBERT、波形处理和特征窗口
-  models/       Burn 模型定义
-  training/     数据集、损失、优化器和 checkpoint
-  inference/    UNet 推理、图像贴回和视频合成
-  weights/      PyTorch 权重导入和 safetensors
-  export/       部署包和 ONNX opset 17 导出
-  cli/          与 worker 能力一致的命令行入口
+rust/
+  Cargo.toml
+  rust-toolchain.toml
+  crates/
+    app/          GPUI 桌面端
+    worker/       后台任务进程和 RPC 服务
+    domain/       项目、任务、模型、错误、进度类型
+    media/        FFmpeg、WAV、视频帧和图像读写
+    preprocess/   抽帧、人脸检测、关键点和素材包验证
+    audio/        FeatherHuBERT、波形处理和特征窗口
+    models/       Burn 模型定义
+    training/     数据集、损失、优化器和 checkpoint
+    inference/    UNet 推理、图像贴回和视频合成
+    weights/      PyTorch 权重导入和 safetensors
+    export/       部署包和 ONNX opset 17 导出
+    cli/          与 worker 能力一致的命令行入口
+  tools/          Rust 迁移和兼容性工具
+  tests/          Rust golden 数据与端到端测试资源
+  docs/           Rust 迁移验收报告
 ```
 
 每个 crate 只通过 `domain` 中的版本化类型交换数据。`app` 不依赖 `models`、`training` 或模型计算使用的 WGPU crate。
