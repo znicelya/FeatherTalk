@@ -13,6 +13,7 @@ vulkan = ["feathertalk-models/vulkan"]
 
 [dependencies]
 burn.workspace = true
+cap-std.workspace = true
 clap.workspace = true
 feathertalk-models = { path = "../feathertalk-models" }
 feathertalk-weights = { path = "../feathertalk-weights" }

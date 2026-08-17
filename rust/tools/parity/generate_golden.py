@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 import tempfile
 import zipfile
@@ -29,29 +30,82 @@ ARCHIVE_NAME = "burn-feasibility-v1.zip"
 ARCHIVE_LIMIT_BYTES = 20 * 1024 * 1024
 FIXED_ZIP_TIME = (2026, 8, 17, 0, 0, 0)
 SEED = 20260817
+MIN_FORWARD_SENSITIVITY = 1e-3
+MIN_GRADIENT_OR_UPDATE = 1e-6
+REQUIRED_PYTHON = (3, 10, 16)
+REQUIRED_TORCH = "2.1.2+cu118"
+REQUIRED_NUMPY = "1.23.5"
 
 
-def deterministic_values(name: str, tensor: torch.Tensor) -> torch.Tensor:
+def deterministic_values(
+    name: str,
+    tensor: torch.Tensor,
+    normalization_weights: set[str],
+    normalization_biases: set[str],
+) -> torch.Tensor:
     if not tensor.is_floating_point():
         return torch.zeros_like(tensor)
-    offset = int.from_bytes(
-        hashlib.sha256(name.encode("utf-8")).digest()[:2], "little"
-    ) % 7
-    flat = torch.arange(tensor.numel(), dtype=torch.float32)
-    if name.endswith("running_var"):
-        values = 0.75 + (flat.remainder(17) / 64.0)
-    elif name.endswith("running_mean"):
-        values = (flat.remainder(11) - 5.0) / 512.0
+    if name.endswith("running_var") or name in normalization_weights:
+        return torch.ones_like(tensor)
+    if (
+        name.endswith("running_mean")
+        or name in normalization_biases
+        or name.endswith("bias")
+    ):
+        return torch.zeros_like(tensor)
+
+    fan_in = math.prod(tensor.shape[1:]) if tensor.ndim >= 2 else tensor.numel()
+    seed = int.from_bytes(
+        hashlib.sha256(name.encode("utf-8")).digest()[:8], "little"
+    ) & ((1 << 63) - 1)
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    codes = torch.randint(0, 8, tensor.shape, generator=generator)
+    codebook = torch.tensor(
+        [-7.0, -5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0],
+        dtype=torch.float32,
+    ) / math.sqrt(21.0)
+
+    if name.startswith("fuse_conv."):
+        gain = 1.25
+    elif name.startswith("audio_model."):
+        gain = 1.0
     else:
-        values = ((flat + offset).remainder(17) - 8.0) / 512.0
-    return values.reshape(tensor.shape).to(dtype=tensor.dtype)
+        gain = 0.5
+    scale = gain * math.sqrt(2.0 / max(fan_in, 1))
+    return (codebook[codes] * scale).to(dtype=tensor.dtype)
 
 
 def fill_state_dict(module: torch.nn.Module) -> None:
+    normalization_weights: set[str] = set()
+    normalization_biases: set[str] = set()
+    for module_name, child in module.named_modules():
+        if isinstance(child, (nn.modules.batchnorm._BatchNorm, nn.GroupNorm)):
+            prefix = f"{module_name}." if module_name else ""
+            if child.weight is not None:
+                normalization_weights.add(f"{prefix}weight")
+            if child.bias is not None:
+                normalization_biases.add(f"{prefix}bias")
+
     state = module.state_dict()
     for name, tensor in state.items():
-        tensor.copy_(deterministic_values(name, tensor))
+        tensor.copy_(
+            deterministic_values(
+                name,
+                tensor,
+                normalization_weights,
+                normalization_biases,
+            )
+        )
     module.load_state_dict(state)
+
+
+def max_abs_difference(left: torch.Tensor, right: torch.Tensor) -> float:
+    return torch.max(torch.abs(left - right)).item()
+
+
+def require_metric(name: str, value: float, minimum: float) -> None:
+    if not math.isfinite(value) or value < minimum:
+        raise RuntimeError(f"{name} is too small: {value} < {minimum}")
 
 
 class InvertedResidual(nn.Module):
@@ -322,6 +376,9 @@ def generate_feather_fixture(work: Path) -> dict[str, object]:
     )
     with torch.no_grad():
         output = model(waveform)
+        zero_output = model(torch.zeros_like(waveform))
+    sensitivity = max_abs_difference(output, zero_output)
+    require_metric("waveform_vs_zero_max_abs", sensitivity, MIN_FORWARD_SENSITIVITY)
 
     save_checkpoint(
         work / "weights/feather_micro.pth",
@@ -349,6 +406,7 @@ def generate_feather_fixture(work: Path) -> dict[str, object]:
         },
         "inputs": {"waveform": "arrays/feather_input.npy"},
         "expected": {"output": "arrays/feather_output.npy"},
+        "metrics": {"waveform_vs_zero_max_abs": sensitivity},
     }
 
 
@@ -360,6 +418,16 @@ def generate_production_unet_fixture(work: Path) -> dict[str, object]:
     audio = repeating_pattern((1, 16, 32, 32), 127, 63, 64.0)
     with torch.no_grad():
         output = model(image, audio)
+        alternate_image = model(1.0 - image, audio)
+        alternate_audio = model(image, -audio)
+    image_sensitivity = max_abs_difference(output, alternate_image)
+    audio_sensitivity = max_abs_difference(output, alternate_audio)
+    print(
+        "unet_production_sensitivity "
+        f"image={image_sensitivity:.9f} audio={audio_sensitivity:.9f}"
+    )
+    require_metric("image_branch_max_abs", image_sensitivity, MIN_FORWARD_SENSITIVITY)
+    require_metric("audio_branch_max_abs", audio_sensitivity, MIN_FORWARD_SENSITIVITY)
 
     save_checkpoint(
         work / "weights/unet_production.pth",
@@ -382,6 +450,10 @@ def generate_production_unet_fixture(work: Path) -> dict[str, object]:
             "audio": "arrays/unet_audio.npy",
         },
         "expected": {"output": "arrays/unet_output.npy"},
+        "metrics": {
+            "image_branch_max_abs": image_sensitivity,
+            "audio_branch_max_abs": audio_sensitivity,
+        },
     }
 
 
@@ -422,21 +494,44 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
     )
     model.train()
     optimizer.zero_grad(set_to_none=True)
+    parameter_names = [
+        "inc.inconv.conv.0.weight",
+        "audio_model.conv1.conv.0.weight",
+        "outc.conv.weight",
+    ]
+    named_parameters = dict(model.named_parameters())
+    before_step = {
+        name: named_parameters[name].detach().clone() for name in parameter_names
+    }
     prediction = model(image, audio)
     initial_loss_tensor = torch.mean(torch.abs(prediction - target))
     initial_loss_tensor.backward()
+    gradient_max_abs = {
+        name: named_parameters[name].grad.detach().abs().max().item()
+        for name in parameter_names
+    }
     optimizer.step()
+    update_max_abs = {
+        name: (named_parameters[name].detach() - before_step[name]).abs().max().item()
+        for name in parameter_names
+    }
+    for name in parameter_names:
+        require_metric(
+            f"gradient_max_abs[{name}]",
+            gradient_max_abs[name],
+            MIN_GRADIENT_OR_UPDATE,
+        )
+        require_metric(
+            f"update_max_abs[{name}]",
+            update_max_abs[name],
+            MIN_GRADIENT_OR_UPDATE,
+        )
 
     model.eval()
     with torch.no_grad():
         post_step_loss = torch.mean(torch.abs(model(image, audio) - target)).item()
 
     state = model.state_dict()
-    parameter_names = [
-        "inc.inconv.conv.0.weight",
-        "audio_model.conv1.conv.0.weight",
-        "outc.conv.weight",
-    ]
     batch_norm_names = [
         "inc.inconv.conv.1.running_mean",
         "inc.inconv.conv.1.running_var",
@@ -453,6 +548,14 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
         "batch_norm_state": batch_norm,
     }
     write_json(work / "arrays/train_expected.json", expected)
+    metrics = {
+        "image_parameter_gradient_max_abs": gradient_max_abs[parameter_names[0]],
+        "audio_parameter_gradient_max_abs": gradient_max_abs[parameter_names[1]],
+        "output_parameter_gradient_max_abs": gradient_max_abs[parameter_names[2]],
+        "image_parameter_update_max_abs": update_max_abs[parameter_names[0]],
+        "audio_parameter_update_max_abs": update_max_abs[parameter_names[1]],
+        "output_parameter_update_max_abs": update_max_abs[parameter_names[2]],
+    }
     print(
         "unet_micro_train_step "
         f"image={tuple(image.shape)} audio={tuple(audio.shape)} target={tuple(target.shape)} "
@@ -477,6 +580,7 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
             "target": "arrays/train_target.npy",
         },
         "expected_json": "arrays/train_expected.json",
+        "metrics": metrics,
     }
 
 
@@ -500,6 +604,14 @@ def write_deterministic_archive(work: Path, output_path: Path) -> None:
 
 
 def main() -> None:
+    actual_python = sys.version_info[:3]
+    if actual_python != REQUIRED_PYTHON:
+        raise RuntimeError(f"expected Python {REQUIRED_PYTHON}, got {actual_python}")
+    if torch.__version__ != REQUIRED_TORCH:
+        raise RuntimeError(f"expected torch {REQUIRED_TORCH}, got {torch.__version__}")
+    if np.__version__ != REQUIRED_NUMPY:
+        raise RuntimeError(f"expected numpy {REQUIRED_NUMPY}, got {np.__version__}")
+
     torch.manual_seed(SEED)
     torch.use_deterministic_algorithms(True)
     torch.set_num_threads(1)
