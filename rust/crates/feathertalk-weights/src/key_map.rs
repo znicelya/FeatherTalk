@@ -40,9 +40,15 @@ pub(crate) fn map_key(kind: LegacyModelKind, key: &str) -> String {
 fn remapper_for(kind: LegacyModelKind) -> KeyRemapper {
     match kind {
         LegacyModelKind::FeatherHubert => KeyRemapper::new()
-            .add_pattern(r"((?:^|\.)(?:norm|final_norm))\.weight$", "$1.gamma")
+            .add_pattern(
+                r"^((?:frontend\.layers|encoder)\.[0-9]+\.norm|final_norm)\.weight$",
+                "$1.gamma",
+            )
             .expect("reviewed literal regex")
-            .add_pattern(r"((?:^|\.)(?:norm|final_norm))\.bias$", "$1.beta")
+            .add_pattern(
+                r"^((?:frontend\.layers|encoder)\.[0-9]+\.norm|final_norm)\.bias$",
+                "$1.beta",
+            )
             .expect("reviewed literal regex"),
         LegacyModelKind::OriginalUnet => KeyRemapper::new()
             .add_pattern(r"\.double_conv\.0\.", ".first.")
@@ -129,12 +135,36 @@ mod tests {
                 "frontend.layers.0.norm.gamma",
             ),
             ("frontend.layers.0.norm.bias", "frontend.layers.0.norm.beta"),
+            ("encoder.11.norm.weight", "encoder.11.norm.gamma"),
+            ("encoder.11.norm.bias", "encoder.11.norm.beta"),
             ("final_norm.weight", "final_norm.gamma"),
             ("final_norm.bias", "final_norm.beta"),
         ];
 
         for (source, expected) in cases {
             assert_eq!(map_key(LegacyModelKind::FeatherHubert, source), expected);
+        }
+    }
+
+    #[test]
+    fn feather_hubert_group_norm_remaps_stop_at_reviewed_boundaries() {
+        for key in [
+            "auxiliary.norm.weight",
+            "other.final_norm.bias",
+            "frontend.layers.named.norm.weight",
+            "frontend.layers.0.other.norm.bias",
+        ] {
+            assert_eq!(map_key(LegacyModelKind::FeatherHubert, key), key);
+        }
+    }
+
+    #[test]
+    fn feather_model_kind_leaves_original_unet_keys_unchanged() {
+        for key in [
+            "down1.maxpool_conv.double_conv.0.conv.1.weight",
+            "audio_model.bn3.bias",
+        ] {
+            assert_eq!(map_key(LegacyModelKind::FeatherHubert, key), key);
         }
     }
 }
