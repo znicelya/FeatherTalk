@@ -1020,7 +1020,7 @@ git commit -m "feat: port FeatherHuBERT model to Burn"
 - Consumes: image `[batch, 6, 160, 160]` and audio `[batch, 16, 32, 32]`.
 - Produces: sigmoid image `[batch, 3, 160, 160]`.
 
-- [ ] **Step 1: Write block and full-model shape tests**
+- [x] **Step 1: Write block and full-model shape tests**
 
 Tests must assert:
 
@@ -1094,7 +1094,7 @@ fn output_is_bounded_by_sigmoid() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify UNet APIs are missing**
+- [x] **Step 2: Run tests and verify UNet APIs are missing**
 
 ```powershell
 cargo test -p feathertalk-models --test unet_shapes
@@ -1102,7 +1102,7 @@ cargo test -p feathertalk-models --test unet_shapes
 
 Expected: FAIL because UNet types do not exist.
 
-- [ ] **Step 3: Implement production and micro configurations**
+- [x] **Step 3: Implement production and micro configurations**
 
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1125,7 +1125,7 @@ impl OriginalUnetConfig {
 
 The micro configuration is test-only by convention; production callers must use `production()`. `InvertedResidualConfig`, `DownConfig`, and `AudioConvHubertConfig` must expose the constructors used by the tests above and initialize only the named Burn modules described in Steps 4-6.
 
-- [ ] **Step 4: Implement `InvertedResidual`**
+- [x] **Step 4: Implement `InvertedResidual`**
 
 Use explicit named fields so key remapping is reviewable:
 
@@ -1145,13 +1145,13 @@ pub struct InvertedResidual<B: Backend> {
 
 Forward order is Conv1x1, BatchNorm, ReLU, depthwise Conv3x3, BatchNorm, ReLU, project Conv1x1, BatchNorm, optional residual add. All convolutions have `bias=false`; depthwise groups equal hidden channels.
 
-- [ ] **Step 5: Implement double-conv, input, down, and up blocks**
+- [x] **Step 5: Implement double-conv, input, down, and up blocks**
 
 `DoubleConvDw` fields must be named `first` and `second`. `Up` must use Burn `Interpolate2dConfig` with linear mode, scale factor `[2.0, 2.0]`, and `align_corners=true`.
 
 Before concatenation, compare both spatial dimensions. If they differ, zero-pad symmetrically using the same left/right and top/bottom split as Python `F.pad`; reject a negative difference.
 
-- [ ] **Step 6: Implement the FeatherHuBERT audio branch**
+- [x] **Step 6: Implement the FeatherHuBERT audio branch**
 
 Do not implement the Wenet branch. Preserve the Python Hubert branch:
 
@@ -1164,7 +1164,7 @@ channels[3] -> channels[4] Conv3x3, stride 2, padding 3 + BN + ReLU
 two channels[4] residual inverted blocks
 ```
 
-- [ ] **Step 7: Implement the full UNet**
+- [x] **Step 7: Implement the full UNet**
 
 Use field names matching model concepts:
 
@@ -1189,7 +1189,7 @@ pub struct OriginalUnet<B: Backend> {
 
 Forward must reproduce the Python skip connections, concatenate image and audio bottlenecks on channel axis 1, and apply sigmoid after the final 1x1 convolution.
 
-- [ ] **Step 8: Run CPU shape tests and commit**
+- [x] **Step 8: Run CPU shape tests and commit**
 
 ```powershell
 cargo fmt --all
