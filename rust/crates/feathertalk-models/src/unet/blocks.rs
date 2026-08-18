@@ -4,7 +4,7 @@ use burn::nn::{
     conv::{Conv2d, Conv2dConfig},
     interpolate::{Interpolate2d, Interpolate2dConfig, InterpolateMode},
 };
-use burn::tensor::{Tensor, backend::Backend, ops::PadMode};
+use burn::tensor::{Int, Tensor, backend::Backend, ops::PadMode};
 
 #[derive(burn::module::Module, Debug)]
 pub struct InvertedResidual<B: Backend> {
@@ -152,7 +152,11 @@ impl<B: Backend> Up<B> {
     }
 
     pub fn forward(&self, input: Tensor<B, 4>, skip: Tensor<B, 4>) -> Tensor<B, 4> {
-        let input = self.up.forward(input);
+        let input = if B::ad_enabled(&input.device()) {
+            bilinear_upsample_2x_align_corners(input)
+        } else {
+            self.up.forward(input)
+        };
         let [_, _, input_h, input_w] = input.dims();
         let [_, _, skip_h, skip_w] = skip.dims();
         assert!(
@@ -176,6 +180,49 @@ impl<B: Backend> Up<B> {
         );
         self.conv.forward(Tensor::cat(vec![input, skip], 1))
     }
+}
+
+fn bilinear_upsample_2x_align_corners<B: Backend>(input: Tensor<B, 4>) -> Tensor<B, 4> {
+    let [_, _, height, width] = input.dims();
+    let input = interpolate_axis_align_corners(input, 2, height, height * 2);
+    interpolate_axis_align_corners(input, 3, width, width * 2)
+}
+
+fn interpolate_axis_align_corners<B: Backend>(
+    input: Tensor<B, 4>,
+    axis: usize,
+    input_size: usize,
+    output_size: usize,
+) -> Tensor<B, 4> {
+    let device = input.device();
+    let scale = (input_size - 1) as f64 / (output_size - 1) as f64;
+    let mut lower = Vec::with_capacity(output_size);
+    let mut upper = Vec::with_capacity(output_size);
+    let mut weights = Vec::with_capacity(output_size);
+
+    for output_index in 0..output_size {
+        let source = output_index as f64 * scale;
+        let lower_index = source.floor() as usize;
+        lower.push(lower_index as i32);
+        upper.push((lower_index + 1).min(input_size - 1) as i32);
+        weights.push((source - lower_index as f64) as f32);
+    }
+
+    let lower = input.clone().select(
+        axis,
+        Tensor::<B, 1, Int>::from_data(lower.as_slice(), &device),
+    );
+    let upper = input.select(
+        axis,
+        Tensor::<B, 1, Int>::from_data(upper.as_slice(), &device),
+    );
+    let weights = match axis {
+        2 => Tensor::<B, 1>::from_data(weights.as_slice(), &device).reshape([1, 1, output_size, 1]),
+        3 => Tensor::<B, 1>::from_data(weights.as_slice(), &device).reshape([1, 1, 1, output_size]),
+        _ => unreachable!("2D interpolation axis must be height or width"),
+    };
+
+    lower * (1.0 - weights.clone()) + upper * weights
 }
 
 #[derive(burn::module::Module, Debug)]

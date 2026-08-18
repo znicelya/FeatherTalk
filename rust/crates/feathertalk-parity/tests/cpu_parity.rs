@@ -1,6 +1,9 @@
 use feathertalk_parity::{
     archive::GoldenArchive,
-    fixture::{ForwardCase, run_cpu_forward, validate_forward_fixture},
+    fixture::{
+        ForwardCase, run_cpu_forward, run_cpu_train_step, validate_forward_fixture,
+        validate_train_step_fixture,
+    },
     metrics::{ParityError, compare_f32},
 };
 use ndarray::{ArrayD, IxDyn, array};
@@ -199,6 +202,157 @@ fn golden_forward_contracts_validate_without_forward() {
 }
 
 #[test]
+fn golden_train_step_contract_validates_without_forward() {
+    let fixture = golden_archive()
+        .load_fixture("unet_micro_train_step")
+        .unwrap();
+    validate_train_step_fixture(&fixture).unwrap();
+}
+
+#[test]
+fn train_step_contract_rejects_identity_kind_and_config_changes_without_forward() {
+    let archive = golden_archive();
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.id = "renamed_train_step".to_owned();
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "fixture_id",
+            ..
+        })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.kind = "original_unet".to_owned();
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract { field: "kind", .. })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture
+        .config
+        .insert("channels".to_owned(), json!([2, 4, 8, 16, 31]));
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "config",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn train_step_contract_rejects_optimizer_loss_and_mode_changes_without_forward() {
+    let archive = golden_archive();
+
+    for field in [
+        "type",
+        "learning_rate",
+        "beta1",
+        "beta2",
+        "epsilon",
+        "weight_decay",
+    ] {
+        let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+        fixture
+            .optimizer
+            .as_mut()
+            .unwrap()
+            .insert(field.to_owned(), json!("wrong"));
+        assert!(matches!(
+            validate_train_step_fixture(&fixture),
+            Err(ParityError::FixtureContract {
+                field: "optimizer",
+                ..
+            })
+        ));
+    }
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.loss = Some("mean_squared_error".to_owned());
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract { field: "loss", .. })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.expected_mode = Some("train".to_owned());
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "expected_mode",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn train_step_contract_rejects_input_parameter_and_batch_norm_changes_without_forward() {
+    let archive = golden_archive();
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture
+        .inputs
+        .insert("target".to_owned(), ArrayD::zeros(IxDyn(&[1, 3, 160, 159])));
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureArrayShape { name: "target", .. })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.expected.remove("inc.inconv.conv.0.weight");
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureArraySet {
+            role: "selected_parameter",
+            ..
+        })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.expected.insert(
+        "inc.inconv.conv.0.weight".to_owned(),
+        ArrayD::zeros(IxDyn(&[12, 6, 1, 2])),
+    );
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureArrayShape {
+            role: "selected_parameter",
+            name: "inc.inconv.conv.0.weight",
+            ..
+        })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture
+        .expected
+        .remove("audio_model.conv1.conv.1.running_mean");
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureArraySet {
+            role: "batch_norm_state",
+            ..
+        })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.expected.insert(
+        "audio_model.conv1.conv.1.running_var".to_owned(),
+        ArrayD::zeros(IxDyn(&[31])),
+    );
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureArrayShape {
+            role: "batch_norm_state",
+            name: "audio_model.conv1.conv.1.running_var",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn exact_arrays_have_zero_error() {
     let values = array![[1.0_f32, -2.0], [3.0, 4.0]].into_dyn();
     let metrics = compare_f32(values.view(), values.view()).unwrap();
@@ -306,4 +460,18 @@ fn unet_production_matches_python_on_cpu() {
     let metrics = run_cpu_forward(&golden_archive(), ForwardCase::UnetProduction).unwrap();
     println!("unet_production {metrics:?}");
     assert!(metrics.max_abs <= 1e-4, "{metrics:?}");
+}
+
+#[test]
+fn unet_micro_train_step_matches_python_on_cpu() {
+    let result = run_cpu_train_step(&golden_archive()).unwrap();
+    println!("unet_micro_train_step {result:?}");
+    assert!(result.initial_loss_relative <= 1e-3, "{result:?}");
+    assert!(result.post_step_loss_relative <= 1e-3, "{result:?}");
+    for (name, relative_error) in &result.selected_parameter_relative {
+        assert!(*relative_error <= 1e-3, "{name}: {relative_error}");
+    }
+    for (name, relative_error) in &result.batch_norm_state_relative {
+        assert!(*relative_error <= 1e-3, "{name}: {relative_error}");
+    }
 }

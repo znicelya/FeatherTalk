@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use burn::tensor::{Tensor, TensorData};
 use feathertalk_models::{
-    backend::CpuBackend, feather_hubert::FeatherHubertConfig, unet::OriginalUnetConfig,
+    backend::{CpuAutodiffBackend, CpuBackend},
+    feather_hubert::FeatherHubertConfig,
+    train_step::{adam_train_step, l1_loss},
+    unet::OriginalUnetConfig,
 };
 use feathertalk_weights::{LegacyImportRequest, LegacyModelKind, import_into};
 
@@ -348,6 +351,482 @@ fn array_from_tensor<const D: usize>(
         .to_vec::<f32>()
         .map_err(|error| ParityError::TensorData(error.to_string()))?;
     ArrayD::from_shape_vec(shape, values).map_err(|error| ParityError::Array(error.to_string()))
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct AdamOptimizerConfig {
+    #[serde(rename = "type")]
+    optimizer_type: OptimizerType,
+    learning_rate: f64,
+    beta1: f64,
+    beta2: f64,
+    epsilon: f64,
+    weight_decay: f64,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum OptimizerType {
+    Adam,
+}
+
+#[derive(Debug)]
+pub struct TrainStepParity {
+    pub initial_loss_relative: f32,
+    pub post_step_loss_relative: f32,
+    pub selected_parameter_relative: BTreeMap<String, f32>,
+    pub batch_norm_state_relative: BTreeMap<String, f32>,
+}
+
+const TRAIN_CASE: &str = "UnetMicroTrainStep";
+const TRAIN_FIXTURE_ID: &str = "unet_micro_train_step";
+const TRAIN_FIXTURE_KIND: &str = "original_unet_train_step";
+const TRAIN_WEIGHTS_ENTRY: &str = "weights/unet_micro_train.pth";
+
+const TRAIN_INPUTS: &[ArrayContract] = &[
+    ArrayContract {
+        name: "audio",
+        shape: UNET_AUDIO_SHAPE,
+    },
+    ArrayContract {
+        name: "image",
+        shape: UNET_IMAGE_SHAPE,
+    },
+    ArrayContract {
+        name: "target",
+        shape: UNET_OUTPUT_SHAPE,
+    },
+];
+const TRAIN_PARAMETERS: &[ArrayContract] = &[
+    ArrayContract {
+        name: "inc.inconv.conv.0.weight",
+        shape: &[12, 6, 1, 1],
+    },
+    ArrayContract {
+        name: "audio_model.conv1.conv.0.weight",
+        shape: &[32, 16, 1, 1],
+    },
+    ArrayContract {
+        name: "outc.conv.weight",
+        shape: &[3, 2, 1, 1],
+    },
+];
+const TRAIN_BATCH_NORM_STATE: &[ArrayContract] = &[
+    ArrayContract {
+        name: "inc.inconv.conv.1.running_mean",
+        shape: &[12],
+    },
+    ArrayContract {
+        name: "inc.inconv.conv.1.running_var",
+        shape: &[12],
+    },
+    ArrayContract {
+        name: "audio_model.conv1.conv.1.running_mean",
+        shape: &[32],
+    },
+    ArrayContract {
+        name: "audio_model.conv1.conv.1.running_var",
+        shape: &[32],
+    },
+];
+
+pub fn validate_train_step_fixture(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    validate_contract_field(
+        fixture.id == TRAIN_FIXTURE_ID,
+        "fixture_id",
+        TRAIN_FIXTURE_ID,
+        &fixture.id,
+    )?;
+    validate_contract_field(
+        fixture.kind == TRAIN_FIXTURE_KIND,
+        "kind",
+        TRAIN_FIXTURE_KIND,
+        &fixture.kind,
+    )?;
+    validate_contract_field(
+        fixture.weights_entry == TRAIN_WEIGHTS_ENTRY,
+        "weights_entry",
+        TRAIN_WEIGHTS_ENTRY,
+        &fixture.weights_entry,
+    )?;
+
+    let expected_config = UnetForwardConfig {
+        channels: [2, 4, 8, 16, 32],
+        mode: UnetMode::Hubert,
+        n_channels: 6,
+    };
+    let actual_config = parse_structured_map("config", &fixture.config, &expected_config)?;
+    if actual_config != expected_config {
+        return Err(train_contract_mismatch(
+            "config",
+            &expected_config,
+            &actual_config,
+        ));
+    }
+
+    let expected_optimizer = AdamOptimizerConfig {
+        optimizer_type: OptimizerType::Adam,
+        learning_rate: 1e-3,
+        beta1: 0.9,
+        beta2: 0.999,
+        epsilon: 1e-8,
+        weight_decay: 0.0,
+    };
+    let optimizer = fixture
+        .optimizer
+        .as_ref()
+        .ok_or_else(|| train_contract_mismatch("optimizer", &expected_optimizer, &"missing"))?;
+    let actual_optimizer = parse_structured_map("optimizer", optimizer, &expected_optimizer)?;
+    if actual_optimizer != expected_optimizer {
+        return Err(train_contract_mismatch(
+            "optimizer",
+            &expected_optimizer,
+            &actual_optimizer,
+        ));
+    }
+
+    let expected_loss = "mean_absolute_error";
+    let actual_loss = fixture.loss.as_deref().unwrap_or("missing");
+    if actual_loss != expected_loss {
+        return Err(train_contract_mismatch(
+            "loss",
+            &expected_loss,
+            &actual_loss,
+        ));
+    }
+
+    let expected_mode = "eval";
+    let actual_mode = fixture.expected_mode.as_deref().unwrap_or("missing");
+    if actual_mode != expected_mode {
+        return Err(train_contract_mismatch(
+            "expected_mode",
+            &expected_mode,
+            &actual_mode,
+        ));
+    }
+
+    validate_train_inputs(fixture)?;
+    validate_array_subset(
+        TRAIN_CASE,
+        "selected_parameter",
+        &fixture.expected,
+        TRAIN_PARAMETERS,
+    )?;
+    validate_array_subset(
+        TRAIN_CASE,
+        "batch_norm_state",
+        &fixture.expected,
+        TRAIN_BATCH_NORM_STATE,
+    )?;
+    validate_expected_array_set(fixture)?;
+    validate_training_scalars(fixture)?;
+    Ok(())
+}
+
+fn validate_contract_field(
+    valid: bool,
+    field: &'static str,
+    expected: &str,
+    actual: &str,
+) -> Result<(), ParityError> {
+    if valid {
+        Ok(())
+    } else {
+        Err(ParityError::FixtureContract {
+            case: TRAIN_CASE,
+            field,
+            expected: expected.to_owned(),
+            actual: actual.to_owned(),
+        })
+    }
+}
+
+fn train_contract_mismatch(
+    field: &'static str,
+    expected: &impl std::fmt::Debug,
+    actual: &impl std::fmt::Debug,
+) -> ParityError {
+    ParityError::FixtureContract {
+        case: TRAIN_CASE,
+        field,
+        expected: format!("{expected:?}"),
+        actual: format!("{actual:?}"),
+    }
+}
+
+fn parse_structured_map<T>(
+    field: &'static str,
+    map: &BTreeMap<String, Value>,
+    expected: &T,
+) -> Result<T, ParityError>
+where
+    T: serde::de::DeserializeOwned + std::fmt::Debug,
+{
+    let value = Value::Object(map.clone().into_iter().collect());
+    serde_json::from_value(value).map_err(|error| ParityError::FixtureContract {
+        case: TRAIN_CASE,
+        field,
+        expected: format!("{expected:?}"),
+        actual: format!("invalid structured metadata: {error}"),
+    })
+}
+
+fn validate_train_inputs(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    let expected_names = TRAIN_INPUTS.iter().map(|c| c.name).collect::<BTreeSet<_>>();
+    let actual_names = fixture
+        .inputs
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if actual_names != expected_names {
+        return Err(ParityError::FixtureArraySet {
+            case: TRAIN_CASE,
+            role: "input",
+            expected: expected_names.into_iter().map(str::to_owned).collect(),
+            actual: actual_names.into_iter().map(str::to_owned).collect(),
+        });
+    }
+    for contract in TRAIN_INPUTS {
+        let actual = &fixture.inputs[contract.name];
+        if actual.shape() != contract.shape {
+            return Err(ParityError::FixtureArrayShape {
+                case: TRAIN_CASE,
+                role: "input",
+                name: contract.name,
+                expected: contract.shape.to_vec(),
+                actual: actual.shape().to_vec(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_array_subset(
+    case: &'static str,
+    role: &'static str,
+    arrays: &BTreeMap<String, ArrayD<f32>>,
+    contracts: &[ArrayContract],
+) -> Result<(), ParityError> {
+    let expected_names = contracts.iter().map(|c| c.name).collect::<BTreeSet<_>>();
+    let actual_names = arrays
+        .keys()
+        .map(String::as_str)
+        .filter(|n| expected_names.contains(n))
+        .collect::<BTreeSet<_>>();
+    if actual_names != expected_names {
+        return Err(ParityError::FixtureArraySet {
+            case,
+            role,
+            expected: expected_names.into_iter().map(str::to_owned).collect(),
+            actual: actual_names.into_iter().map(str::to_owned).collect(),
+        });
+    }
+    for contract in contracts {
+        let actual = &arrays[contract.name];
+        if actual.shape() != contract.shape {
+            return Err(ParityError::FixtureArrayShape {
+                case,
+                role,
+                name: contract.name,
+                expected: contract.shape.to_vec(),
+                actual: actual.shape().to_vec(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_expected_array_set(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    let expected = TRAIN_PARAMETERS
+        .iter()
+        .chain(TRAIN_BATCH_NORM_STATE.iter())
+        .map(|c| c.name)
+        .collect::<BTreeSet<_>>();
+    let actual = fixture
+        .expected
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(ParityError::FixtureArraySet {
+            case: TRAIN_CASE,
+            role: "expected",
+            expected: expected.into_iter().map(str::to_owned).collect(),
+            actual: actual.into_iter().map(str::to_owned).collect(),
+        })
+    }
+}
+
+fn validate_training_scalars(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    let expected = BTreeSet::from(["initial_loss", "post_step_loss"]);
+    let actual = fixture
+        .scalars
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if actual != expected || fixture.scalars.values().any(|v| !v.is_finite()) {
+        return Err(ParityError::FixtureContract {
+            case: TRAIN_CASE,
+            field: "scalars",
+            expected: "finite initial_loss and post_step_loss".to_owned(),
+            actual: format!("{:?}", fixture.scalars),
+        });
+    }
+    Ok(())
+}
+
+pub fn run_cpu_train_step(archive: &GoldenArchive) -> Result<TrainStepParity, ParityError> {
+    use burn::module::AutodiffModule;
+    use burn::optim::AdamConfig;
+    archive
+        .verify_sidecar_sha256()
+        .map_err(ParityError::ArchiveVerification)?;
+    let fixture = archive.load_fixture(TRAIN_FIXTURE_ID)?;
+    validate_train_step_fixture(&fixture)?;
+
+    let temp = tempfile::tempdir().map_err(FixtureError::from)?;
+    let extracted = temp.path().join("fixture");
+    archive.extract_to(&extracted)?;
+    let request = LegacyImportRequest {
+        path: extracted.join(TRAIN_WEIGHTS_ENTRY),
+        kind: LegacyModelKind::OriginalUnet,
+        ..Default::default()
+    };
+    let device = Default::default();
+    let mut model = OriginalUnetConfig::parity_micro().init::<CpuAutodiffBackend>(&device);
+    import_into::<CpuAutodiffBackend, _>(&mut model, &request)?;
+
+    let image = train_tensor_from_fixture(&fixture, "image", UNET_IMAGE_SHAPE, &device)?;
+    let audio = train_tensor_from_fixture(&fixture, "audio", UNET_AUDIO_SHAPE, &device)?;
+    let target = train_tensor_from_fixture(&fixture, "target", UNET_OUTPUT_SHAPE, &device)?;
+
+    let mut optimizer = AdamConfig::new()
+        .with_beta_1(0.9)
+        .with_beta_2(0.999)
+        .with_epsilon(1e-8)
+        .init();
+    let (model, initial_loss) = adam_train_step(
+        model,
+        &mut optimizer,
+        image.clone(),
+        audio.clone(),
+        target.clone(),
+        1e-3,
+    );
+
+    let model = model.valid();
+    let post_step_loss =
+        l1_loss(model.forward(image.inner(), audio.inner()), target.inner()).into_scalar();
+
+    let mut parameters = BTreeMap::new();
+    parameters.insert(
+        "inc.inconv.conv.0.weight".to_owned(),
+        array_from_tensor(model.inc.inconv.expand_conv.weight.val())?,
+    );
+    parameters.insert(
+        "audio_model.conv1.conv.0.weight".to_owned(),
+        array_from_tensor(model.audio_model.conv1.expand_conv.weight.val())?,
+    );
+    parameters.insert(
+        "outc.conv.weight".to_owned(),
+        array_from_tensor(model.outc.conv.weight.val())?,
+    );
+
+    let mut batch_norm_state = BTreeMap::new();
+    batch_norm_state.insert(
+        "inc.inconv.conv.1.running_mean".to_owned(),
+        array_from_tensor(model.inc.inconv.expand_bn.running_mean.value_sync())?,
+    );
+    batch_norm_state.insert(
+        "inc.inconv.conv.1.running_var".to_owned(),
+        array_from_tensor(model.inc.inconv.expand_bn.running_var.value_sync())?,
+    );
+    batch_norm_state.insert(
+        "audio_model.conv1.conv.1.running_mean".to_owned(),
+        array_from_tensor(model.audio_model.conv1.expand_bn.running_mean.value_sync())?,
+    );
+    batch_norm_state.insert(
+        "audio_model.conv1.conv.1.running_var".to_owned(),
+        array_from_tensor(model.audio_model.conv1.expand_bn.running_var.value_sync())?,
+    );
+
+    Ok(TrainStepParity {
+        initial_loss_relative: compare_scalar(
+            initial_loss,
+            fixture.scalars["initial_loss"] as f32,
+        )?,
+        post_step_loss_relative: compare_scalar(
+            post_step_loss,
+            fixture.scalars["post_step_loss"] as f32,
+        )?,
+        selected_parameter_relative: compare_named_arrays(
+            parameters,
+            &fixture.expected,
+            TRAIN_PARAMETERS,
+        )?,
+        batch_norm_state_relative: compare_named_arrays(
+            batch_norm_state,
+            &fixture.expected,
+            TRAIN_BATCH_NORM_STATE,
+        )?,
+    })
+}
+
+fn train_tensor_from_fixture(
+    fixture: &GoldenFixture,
+    name: &'static str,
+    expected_shape: &[usize],
+    device: &burn::tensor::Device<CpuAutodiffBackend>,
+) -> Result<Tensor<CpuAutodiffBackend, 4>, ParityError> {
+    let array = fixture
+        .inputs
+        .get(name)
+        .ok_or_else(|| ParityError::MissingArray(name.to_owned()))?;
+    if array.ndim() != 4 || array.shape() != expected_shape {
+        return Err(ParityError::TensorShape {
+            name,
+            expected: expected_shape.to_vec(),
+            actual: array.shape().to_vec(),
+        });
+    }
+    Ok(Tensor::from_data(
+        TensorData::new(
+            array.iter().copied().collect::<Vec<_>>(),
+            array.shape().to_vec(),
+        ),
+        device,
+    ))
+}
+
+fn compare_scalar(actual: f32, expected: f32) -> Result<f32, ParityError> {
+    let actual = ndarray::arr0(actual).into_dyn();
+    let expected = ndarray::arr0(expected).into_dyn();
+    Ok(compare_f32(actual.view(), expected.view())?.max_relative)
+}
+
+fn compare_named_arrays(
+    actual: BTreeMap<String, ArrayD<f32>>,
+    expected: &BTreeMap<String, ArrayD<f32>>,
+    contracts: &[ArrayContract],
+) -> Result<BTreeMap<String, f32>, ParityError> {
+    contracts
+        .iter()
+        .map(|contract| {
+            let actual = actual
+                .get(contract.name)
+                .ok_or_else(|| ParityError::MissingArray(contract.name.to_owned()))?;
+            let expected = expected
+                .get(contract.name)
+                .ok_or_else(|| ParityError::MissingArray(contract.name.to_owned()))?;
+            Ok((
+                contract.name.to_owned(),
+                compare_f32(actual.view(), expected.view())?.max_relative,
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]
