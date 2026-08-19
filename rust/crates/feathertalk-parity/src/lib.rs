@@ -3,3 +3,4 @@
 pub mod archive;
 pub mod fixture;
 pub mod metrics;
+pub mod probe;

@@ -1,11 +1,18 @@
 use ndarray::ArrayD;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 
 use burn::tensor::{Tensor, TensorData};
+use burn::{
+    optim::{AdamConfig, GradientsParams, Optimizer},
+    tensor::ElementConversion,
+};
 use feathertalk_models::{
-    backend::{CpuAutodiffBackend, CpuBackend},
+    backend::{CpuAutodiffBackend, CpuBackend, GpuAutodiffBackend, GpuBackend},
     feather_hubert::FeatherHubertConfig,
     train_step::{adam_train_step, l1_loss},
     unet::OriginalUnetConfig,
@@ -354,6 +361,61 @@ fn array_from_tensor<const D: usize>(
     ArrayD::from_shape_vec(shape, values).map_err(|error| ParityError::Array(error.to_string()))
 }
 
+fn tensor_from_gpu_array<const D: usize>(
+    name: &'static str,
+    array: &ArrayD<f32>,
+    expected_shape: &[usize],
+    device: &burn::tensor::Device<GpuBackend>,
+) -> Result<Tensor<GpuBackend, D>, ParityError> {
+    if array.ndim() != D || array.shape() != expected_shape {
+        return Err(ParityError::TensorShape {
+            name,
+            expected: expected_shape.to_vec(),
+            actual: array.shape().to_vec(),
+        });
+    }
+    Ok(Tensor::from_data(
+        TensorData::new(
+            array.iter().copied().collect::<Vec<_>>(),
+            array.shape().to_vec(),
+        ),
+        device,
+    ))
+}
+
+fn tensor_from_gpu_ad_array<const D: usize>(
+    name: &'static str,
+    array: &ArrayD<f32>,
+    expected_shape: &[usize],
+    device: &burn::tensor::Device<GpuAutodiffBackend>,
+) -> Result<Tensor<GpuAutodiffBackend, D>, ParityError> {
+    if array.ndim() != D || array.shape() != expected_shape {
+        return Err(ParityError::TensorShape {
+            name,
+            expected: expected_shape.to_vec(),
+            actual: array.shape().to_vec(),
+        });
+    }
+    Ok(Tensor::from_data(
+        TensorData::new(
+            array.iter().copied().collect::<Vec<_>>(),
+            array.shape().to_vec(),
+        ),
+        device,
+    ))
+}
+
+fn array_from_gpu_tensor<const D: usize>(
+    tensor: Tensor<GpuBackend, D>,
+) -> Result<ArrayD<f32>, ParityError> {
+    let shape = tensor.dims().to_vec();
+    let values = tensor
+        .into_data()
+        .to_vec::<f32>()
+        .map_err(|error| ParityError::TensorData(error.to_string()))?;
+    ArrayD::from_shape_vec(shape, values).map_err(|error| ParityError::Array(error.to_string()))
+}
+
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct AdamOptimizerConfig {
@@ -378,6 +440,279 @@ pub struct TrainStepParity {
     pub post_step_loss_relative: f32,
     pub selected_parameter_relative: BTreeMap<String, f32>,
     pub batch_norm_state_relative: BTreeMap<String, f32>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct WgpuForwardResult {
+    pub execution: crate::probe::ExecutionEvidence,
+    pub metrics: ParityMetrics,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct WgpuTrainStepResult {
+    pub execution: crate::probe::ExecutionEvidence,
+    pub initial_loss: f32,
+    pub gradient_norm: f32,
+    pub output_weight_changed: bool,
+}
+
+pub fn run_wgpu_forward(
+    archive: &GoldenArchive,
+    case: ForwardCase,
+    graphics: crate::probe::GraphicsSelection,
+) -> Result<WgpuForwardResult, ParityError> {
+    let graphics = graphics.resolved();
+    graphics.validate_for_target()?;
+    let (metrics, execution) = match graphics {
+        crate::probe::GraphicsSelection::Auto => run_wgpu_forward_with::<
+            burn::backend::wgpu::graphics::AutoGraphicsApi,
+        >(archive, case, "auto")?,
+        crate::probe::GraphicsSelection::Dx12 => {
+            run_wgpu_forward_with::<burn::backend::wgpu::graphics::Dx12>(archive, case, "dx12")?
+        }
+        crate::probe::GraphicsSelection::Metal => {
+            run_wgpu_forward_with::<burn::backend::wgpu::graphics::Metal>(archive, case, "metal")?
+        }
+        crate::probe::GraphicsSelection::Vulkan => {
+            run_wgpu_forward_with::<burn::backend::wgpu::graphics::Vulkan>(archive, case, "vulkan")?
+        }
+    };
+    Ok(WgpuForwardResult { execution, metrics })
+}
+
+pub fn run_wgpu_train_step(
+    archive: &GoldenArchive,
+    graphics: crate::probe::GraphicsSelection,
+    full_production_model: bool,
+) -> Result<WgpuTrainStepResult, ParityError> {
+    let graphics = graphics.resolved();
+    graphics.validate_for_target()?;
+    match graphics {
+        crate::probe::GraphicsSelection::Auto => run_wgpu_train_step_with::<
+            burn::backend::wgpu::graphics::AutoGraphicsApi,
+        >(archive, "auto", full_production_model),
+        crate::probe::GraphicsSelection::Dx12 => run_wgpu_train_step_with::<
+            burn::backend::wgpu::graphics::Dx12,
+        >(archive, "dx12", full_production_model),
+        crate::probe::GraphicsSelection::Metal => run_wgpu_train_step_with::<
+            burn::backend::wgpu::graphics::Metal,
+        >(archive, "metal", full_production_model),
+        crate::probe::GraphicsSelection::Vulkan => run_wgpu_train_step_with::<
+            burn::backend::wgpu::graphics::Vulkan,
+        >(
+            archive, "vulkan", full_production_model
+        ),
+    }
+}
+
+pub(crate) fn probe_wgpu_with<G: burn::backend::wgpu::graphics::GraphicsApi>(
+    requested_graphics: &str,
+) -> Result<crate::probe::ExecutionEvidence, ParityError> {
+    let (device, execution) = init_wgpu::<G>(requested_graphics)?;
+    let value = Tensor::<GpuBackend, 1>::from_data(TensorData::from([1.0_f32, 2.0]), &device)
+        .sum()
+        .into_scalar()
+        .elem::<f32>();
+    if !value.is_finite() || (value - 3.0).abs() > f32::EPSILON {
+        return Err(ParityError::Backend(format!(
+            "WGPU execution probe returned {value}"
+        )));
+    }
+    Ok(execution)
+}
+
+fn init_wgpu<G: burn::backend::wgpu::graphics::GraphicsApi>(
+    requested_graphics: &str,
+) -> Result<
+    (
+        burn::tensor::Device<GpuBackend>,
+        crate::probe::ExecutionEvidence,
+    ),
+    ParityError,
+> {
+    static RUNTIME: OnceLock<
+        Result<
+            (
+                burn::backend::wgpu::WgpuDevice,
+                crate::probe::ExecutionEvidence,
+            ),
+            String,
+        >,
+    > = OnceLock::new();
+    let result = RUNTIME.get_or_init(|| {
+        let device: burn::tensor::Device<GpuBackend> = Default::default();
+        let setup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            burn::backend::wgpu::init_setup::<G>(&device, Default::default())
+        }))
+        .map_err(panic_message)?;
+        let info = setup.adapter.get_info();
+        let used_cpu_fallback = format!("{:?}", info.device_type) == "Cpu";
+        if used_cpu_fallback {
+            return Err(format!(
+                "WGPU selected CPU adapter {} instead of a GPU",
+                info.name
+            ));
+        }
+        let graphics = format!("{:?}", setup.backend).to_ascii_lowercase();
+        Ok((
+            device,
+            crate::probe::ExecutionEvidence {
+                backend: "wgpu".to_owned(),
+                graphics: if graphics.is_empty() {
+                    requested_graphics.to_owned()
+                } else {
+                    graphics
+                },
+                device: format!("{} ({:?})", info.name, info.device_type),
+                used_cpu_fallback,
+            },
+        ))
+    });
+    let (device, evidence) = result
+        .as_ref()
+        .map_err(|error| ParityError::Backend(error.clone()))?;
+    if requested_graphics != "auto" && evidence.graphics != requested_graphics {
+        return Err(ParityError::Backend(format!(
+            "WGPU runtime already initialized with {}, requested {}",
+            evidence.graphics, requested_graphics
+        )));
+    }
+    Ok((device.clone(), evidence.clone()))
+}
+
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|value| (*value).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown WGPU initialization panic".to_owned())
+}
+
+fn run_wgpu_forward_with<G: burn::backend::wgpu::graphics::GraphicsApi>(
+    archive: &GoldenArchive,
+    case: ForwardCase,
+    requested_graphics: &str,
+) -> Result<(ParityMetrics, crate::probe::ExecutionEvidence), ParityError> {
+    archive
+        .verify_sidecar_sha256()
+        .map_err(ParityError::ArchiveVerification)?;
+    let fixture = archive.load_fixture(case.fixture_id())?;
+    validate_forward_fixture(&fixture, case)?;
+    let expected = fixture
+        .expected
+        .get("output")
+        .ok_or_else(|| ParityError::MissingArray("output".to_owned()))?;
+    let temp = tempfile::tempdir().map_err(FixtureError::from)?;
+    let extracted = temp.path().join("fixture");
+    archive.extract_to(&extracted)?;
+    let request = LegacyImportRequest {
+        path: extracted.join(case.weights_entry()),
+        kind: case.weight_kind(),
+        ..Default::default()
+    };
+    let (device, execution) = init_wgpu::<G>(requested_graphics)?;
+    let actual = match case {
+        ForwardCase::FeatherMicro => {
+            let mut model = FeatherHubertConfig::parity_micro().init::<GpuBackend>(&device);
+            import_into::<GpuBackend, _>(&mut model, &request)?;
+            let input = tensor_from_gpu_array::<2>(
+                "waveform",
+                &fixture.inputs["waveform"],
+                FEATHER_WAVEFORM_SHAPE,
+                &device,
+            )?;
+            array_from_gpu_tensor(model.forward(input))?
+        }
+        ForwardCase::UnetProduction => {
+            let mut model = OriginalUnetConfig::production().init::<GpuBackend>(&device);
+            import_into::<GpuBackend, _>(&mut model, &request)?;
+            let image = tensor_from_gpu_array::<4>(
+                "image",
+                &fixture.inputs["image"],
+                UNET_IMAGE_SHAPE,
+                &device,
+            )?;
+            let audio = tensor_from_gpu_array::<4>(
+                "audio",
+                &fixture.inputs["audio"],
+                UNET_AUDIO_SHAPE,
+                &device,
+            )?;
+            array_from_gpu_tensor(model.forward(image, audio))?
+        }
+    };
+    Ok((compare_f32(actual.view(), expected.view())?, execution))
+}
+
+fn run_wgpu_train_step_with<G: burn::backend::wgpu::graphics::GraphicsApi>(
+    archive: &GoldenArchive,
+    requested_graphics: &str,
+    full_production_model: bool,
+) -> Result<WgpuTrainStepResult, ParityError> {
+    archive
+        .verify_sidecar_sha256()
+        .map_err(ParityError::ArchiveVerification)?;
+    let _ = full_production_model;
+    let case = ForwardCase::UnetProduction;
+    let fixture = archive.load_fixture(case.fixture_id())?;
+    validate_forward_fixture(&fixture, case)?;
+    let temp = tempfile::tempdir().map_err(FixtureError::from)?;
+    let extracted = temp.path().join("fixture");
+    archive.extract_to(&extracted)?;
+    let request = LegacyImportRequest {
+        path: extracted.join(case.weights_entry()),
+        kind: case.weight_kind(),
+        ..Default::default()
+    };
+    let (device, execution) = init_wgpu::<G>(requested_graphics)?;
+    let mut model = OriginalUnetConfig::production().init::<GpuAutodiffBackend>(&device);
+    import_into::<GpuAutodiffBackend, _>(&mut model, &request)?;
+    let image = tensor_from_gpu_ad_array::<4>(
+        "image",
+        &fixture.inputs["image"],
+        UNET_IMAGE_SHAPE,
+        &device,
+    )?;
+    let audio = tensor_from_gpu_ad_array::<4>(
+        "audio",
+        &fixture.inputs["audio"],
+        UNET_AUDIO_SHAPE,
+        &device,
+    )?;
+    let target = Tensor::<GpuAutodiffBackend, 4>::zeros([1, 3, 160, 160], &device);
+    let prediction = model.forward(image, audio);
+    let loss = l1_loss(prediction, target);
+    let initial_loss = loss.clone().into_scalar().elem::<f32>();
+    let raw_gradients = loss.backward();
+    let gradient = model
+        .outc
+        .conv
+        .weight
+        .grad(&raw_gradients)
+        .ok_or_else(|| ParityError::Backend("output weight gradient is missing".to_owned()))?;
+    let gradient_norm = gradient.abs().mean().into_scalar().elem::<f32>();
+    let gradients = GradientsParams::from_grads(raw_gradients, &model);
+    let before = model.outc.conv.weight.val().into_data();
+    let mut optimizer = AdamConfig::new()
+        .with_beta_1(0.9)
+        .with_beta_2(0.999)
+        .with_epsilon(1e-8)
+        .init();
+    let model = optimizer.step(1e-3, model, gradients);
+    let after = model.outc.conv.weight.val().into_data();
+    let before = before
+        .to_vec::<f32>()
+        .map_err(|error| ParityError::TensorData(error.to_string()))?;
+    let after = after
+        .to_vec::<f32>()
+        .map_err(|error| ParityError::TensorData(error.to_string()))?;
+    let output_weight_changed = before.iter().zip(after.iter()).any(|(a, b)| a != b);
+    Ok(WgpuTrainStepResult {
+        execution,
+        initial_loss,
+        gradient_norm,
+        output_weight_changed,
+    })
 }
 
 const TRAIN_CASE: &str = "UnetMicroTrainStep";

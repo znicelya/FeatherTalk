@@ -13,4 +13,5 @@ Task 6: review -- 2 Important and 2 Minor findings fixed in c67e578; scoped re-r
 Task 7: complete -- pending commit; CPU parity 33/33, model train-step tests 3/3, Clippy -D warnings and rustfmt clean; selected parameter max relative error 7.203512e-6 and BN state max relative error 8.699233e-5
 Task 7: review -- L1 cusp metrics and deterministic train-input provenance are enforced by negative contract tests; fixture archive sidecar updated and verified
 
-Task 8: in progress -- explicit WGPU probe, parity CLI, ignored WGPU tests, and feasibility report
+Task 8: complete -- pending commit; explicit DX12 probe, parity CLI, ignored WGPU forward/train tests, and feasibility report all verified
+Task 8: status -- Windows adapter NVIDIA GeForce RTX 2060 (DiscreteGpu), CPU fallback false; WGPU suite 3/3; workspace tests, Clippy, fmt, CPU parity 33/33, and diff check passed; Decision: GO

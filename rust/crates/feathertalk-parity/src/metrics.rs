@@ -1,7 +1,8 @@
 use ndarray::ArrayViewD;
+use serde::Serialize;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ParityMetrics {
     pub max_abs: f32,
     pub mean_abs: f32,
@@ -10,6 +11,8 @@ pub struct ParityMetrics {
 
 #[derive(Debug, Error)]
 pub enum ParityError {
+    #[error("backend initialization failed: {0}")]
+    Backend(String),
     #[error("array shapes differ: actual {actual:?}, expected {expected:?}")]
     ShapeMismatch {
         actual: Vec<usize>,
