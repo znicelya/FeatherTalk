@@ -22,6 +22,7 @@ pub struct GoldenFixture {
     pub id: String,
     pub schema_version: u32,
     pub fixture_set: String,
+    pub generator: Option<BTreeMap<String, Value>>,
     pub kind: String,
     pub weights_entry: String,
     pub config: BTreeMap<String, Value>,
@@ -430,6 +431,10 @@ const TRAIN_BATCH_NORM_STATE: &[ArrayContract] = &[
         shape: &[32],
     },
 ];
+const TRAIN_L1_RESIDUAL_MARGIN: f64 = 1e-3;
+const TRAIN_TARGET_ELEMENTS: f64 = (3 * 160 * 160) as f64;
+const TRAIN_INPUT_SEED: u64 = 3;
+const TRAIN_INPUT_DTYPE: &str = "float32";
 
 pub fn validate_train_step_fixture(fixture: &GoldenFixture) -> Result<(), ParityError> {
     validate_contract_field(
@@ -521,6 +526,8 @@ pub fn validate_train_step_fixture(fixture: &GoldenFixture) -> Result<(), Parity
     )?;
     validate_expected_array_set(fixture)?;
     validate_training_scalars(fixture)?;
+    validate_training_metrics(fixture)?;
+    validate_training_provenance(fixture)?;
     Ok(())
 }
 
@@ -673,6 +680,58 @@ fn validate_training_scalars(fixture: &GoldenFixture) -> Result<(), ParityError>
             field: "scalars",
             expected: "finite initial_loss and post_step_loss".to_owned(),
             actual: format!("{:?}", fixture.scalars),
+        });
+    }
+    Ok(())
+}
+
+fn validate_training_metrics(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    let residual = fixture
+        .metrics
+        .get("initial_l1_residual_min_abs")
+        .copied()
+        .unwrap_or(f64::NAN);
+    let adjusted = fixture
+        .metrics
+        .get("l1_cusp_adjusted_elements")
+        .copied()
+        .unwrap_or(f64::NAN);
+    let valid_residual = residual.is_finite() && residual >= TRAIN_L1_RESIDUAL_MARGIN;
+    let valid_adjusted = adjusted.is_finite()
+        && adjusted.fract() == 0.0
+        && adjusted > 0.0
+        && adjusted <= TRAIN_TARGET_ELEMENTS;
+    if !valid_residual || !valid_adjusted {
+        return Err(ParityError::FixtureContract {
+            case: TRAIN_CASE,
+            field: "training_metrics",
+            expected: format!(
+                "finite initial_l1_residual_min_abs >= {TRAIN_L1_RESIDUAL_MARGIN} and positive integral l1_cusp_adjusted_elements <= {TRAIN_TARGET_ELEMENTS}"
+            ),
+            actual: format!(
+                "initial_l1_residual_min_abs={residual}, l1_cusp_adjusted_elements={adjusted}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_training_provenance(fixture: &GoldenFixture) -> Result<(), ParityError> {
+    let generator = fixture.generator.as_ref();
+    let seed = generator
+        .and_then(|metadata| metadata.get("train_input_seed"))
+        .and_then(Value::as_u64);
+    let dtype = generator
+        .and_then(|metadata| metadata.get("train_input_dtype"))
+        .and_then(Value::as_str);
+    if seed != Some(TRAIN_INPUT_SEED) || dtype != Some(TRAIN_INPUT_DTYPE) {
+        return Err(ParityError::FixtureContract {
+            case: TRAIN_CASE,
+            field: "generator",
+            expected: format!(
+                "train_input_seed={TRAIN_INPUT_SEED} and train_input_dtype={TRAIN_INPUT_DTYPE}"
+            ),
+            actual: format!("train_input_seed={seed:?}, train_input_dtype={dtype:?}"),
         });
     }
     Ok(())

@@ -210,6 +210,83 @@ fn golden_train_step_contract_validates_without_forward() {
 }
 
 #[test]
+fn golden_train_fixture_records_l1_cusp_adjustments() {
+    let fixture = golden_archive()
+        .load_fixture("unet_micro_train_step")
+        .unwrap();
+    let adjusted = fixture
+        .metrics
+        .get("l1_cusp_adjusted_elements")
+        .copied()
+        .expect("generator must record L1 cusp adjustments");
+    assert!(adjusted > 0.0, "target should avoid at least one L1 cusp");
+}
+
+#[test]
+fn train_step_contract_rejects_missing_l1_cusp_metrics() {
+    let archive = golden_archive();
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.metrics.remove("initial_l1_residual_min_abs");
+
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "training_metrics",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn train_step_contract_rejects_l1_cusp_metric_boundaries() {
+    let archive = golden_archive();
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture.metrics.insert(
+        "initial_l1_residual_min_abs".to_owned(),
+        1e-3 - f64::EPSILON,
+    );
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "training_metrics",
+            ..
+        })
+    ));
+
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    fixture
+        .metrics
+        .insert("l1_cusp_adjusted_elements".to_owned(), 1.5);
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "training_metrics",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn train_step_contract_rejects_input_provenance_changes() {
+    let archive = golden_archive();
+    let mut fixture = archive.load_fixture("unet_micro_train_step").unwrap();
+    let generator = fixture
+        .generator
+        .as_mut()
+        .expect("training fixture generator metadata");
+    generator.insert("train_input_seed".to_owned(), serde_json::json!(4));
+
+    assert!(matches!(
+        validate_train_step_fixture(&fixture),
+        Err(ParityError::FixtureContract {
+            field: "generator",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn train_step_contract_rejects_identity_kind_and_config_changes_without_forward() {
     let archive = golden_archive();
 

@@ -32,6 +32,8 @@ FIXED_ZIP_TIME = (2026, 8, 17, 0, 0, 0)
 SEED = 20260817
 MIN_FORWARD_SENSITIVITY = 1e-3
 MIN_GRADIENT_OR_UPDATE = 1e-6
+MIN_L1_RESIDUAL_MARGIN = 1e-3
+TRAIN_INPUT_SEED = 3
 REQUIRED_PYTHON = (3, 10, 16)
 REQUIRED_TORCH = "2.1.2+cu118"
 REQUIRED_NUMPY = "1.23.5"
@@ -321,6 +323,31 @@ def repeating_pattern(
     return values.reshape(shape)
 
 
+def make_l1_safe_target(
+    prediction: torch.Tensor, target: torch.Tensor, margin: float
+) -> tuple[torch.Tensor, int]:
+    """Move only cusp-near target elements while preserving their signs."""
+    residual = prediction - target
+    cusp = residual.abs() <= margin
+    direction = torch.where(
+        residual >= 0.0,
+        torch.ones_like(residual),
+        -torch.ones_like(residual),
+    )
+    distance = margin * 2.0
+    preferred = prediction - direction * distance
+    fallback = prediction + direction * distance
+    safe = torch.where(
+        (preferred >= 0.0) & (preferred <= 1.0),
+        preferred,
+        fallback,
+    )
+    adjusted = torch.where(cusp, safe, target)
+    if adjusted.min().item() < 0.0 or adjusted.max().item() > 1.0:
+        raise RuntimeError("L1-safe target left the normalized [0, 1] range")
+    return adjusted, int(cusp.sum().item())
+
+
 def save_array(path: Path, tensor: torch.Tensor) -> dict[str, object]:
     array = tensor.detach().cpu().numpy().astype(np.float32, copy=False)
     np.save(path, array, allow_pickle=False)
@@ -472,15 +499,33 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
     channels = [2, 4, 8, 16, 32]
     model = ConfigurableUnet(channels).cpu()
     fill_state_dict(model)
+
+    generator = torch.Generator(device="cpu").manual_seed(TRAIN_INPUT_SEED)
+    image = torch.rand(
+        (1, 6, 160, 160), dtype=torch.float32, device="cpu", generator=generator
+    )
+    audio = (
+        torch.rand(
+            (1, 16, 32, 32), dtype=torch.float32, device="cpu", generator=generator
+        )
+        * 2.0
+        - 1.0
+    )
+    target = repeating_pattern((1, 3, 160, 160), 89, 0, 88.0)
+    preview_model = ConfigurableUnet(channels).cpu()
+    preview_model.load_state_dict(model.state_dict())
+    preview_model.train()
+    with torch.no_grad():
+        preview = preview_model(image, audio)
+    target, l1_cusp_adjusted_elements = make_l1_safe_target(
+        preview, target, MIN_L1_RESIDUAL_MARGIN
+    )
+
     save_checkpoint(
         work / "weights/unet_micro_train.pth",
         model,
         {"channels": channels, "mode": "hubert", "n_channels": 6},
     )
-
-    image = repeating_pattern((1, 6, 160, 160), 97, 0, 96.0)
-    audio = repeating_pattern((1, 16, 32, 32), 67, 33, 34.0)
-    target = repeating_pattern((1, 3, 160, 160), 89, 0, 88.0)
     save_array(work / "arrays/train_image.npy", image)
     save_array(work / "arrays/train_audio.npy", audio)
     save_array(work / "arrays/train_target.npy", target)
@@ -504,6 +549,12 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
         name: named_parameters[name].detach().clone() for name in parameter_names
     }
     prediction = model(image, audio)
+    initial_residual_min_abs = torch.min(torch.abs(prediction - target)).item()
+    require_metric(
+        "initial_l1_residual_min_abs",
+        initial_residual_min_abs,
+        MIN_L1_RESIDUAL_MARGIN,
+    )
     initial_loss_tensor = torch.mean(torch.abs(prediction - target))
     initial_loss_tensor.backward()
     gradient_max_abs = {
@@ -555,6 +606,8 @@ def generate_micro_train_fixture(work: Path) -> dict[str, object]:
         "image_parameter_update_max_abs": update_max_abs[parameter_names[0]],
         "audio_parameter_update_max_abs": update_max_abs[parameter_names[1]],
         "output_parameter_update_max_abs": update_max_abs[parameter_names[2]],
+        "initial_l1_residual_min_abs": initial_residual_min_abs,
+        "l1_cusp_adjusted_elements": float(l1_cusp_adjusted_elements),
     }
     print(
         "unet_micro_train_step "
@@ -640,6 +693,8 @@ def main() -> None:
                 "torch": torch.__version__,
                 "numpy": np.__version__,
                 "device": "cpu",
+                "train_input_seed": TRAIN_INPUT_SEED,
+                "train_input_dtype": "float32",
             },
             "fixtures": fixtures,
         }

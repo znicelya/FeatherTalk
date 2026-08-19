@@ -122,7 +122,7 @@ struct Manifest {
     #[serde(default, rename = "seed")]
     _seed: Option<u64>,
     #[serde(default, rename = "generator")]
-    _generator: Option<BTreeMap<String, Value>>,
+    generator: Option<BTreeMap<String, Value>>,
     fixtures: BTreeMap<String, FixtureManifest>,
 }
 
@@ -383,6 +383,7 @@ impl GoldenArchive {
             id: id.to_owned(),
             schema_version: manifest.schema_version,
             fixture_set: manifest.fixture_set,
+            generator: manifest.generator,
             kind: fixture.kind.clone(),
             weights_entry: fixture.weights.clone(),
             config: fixture.config.clone(),
