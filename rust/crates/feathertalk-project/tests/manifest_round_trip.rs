@@ -44,5 +44,8 @@ fn asset_manifest_round_trips_lifecycle_and_feature_type() {
     let json = serde_json::to_string(&manifest).unwrap();
     assert!(json.contains("preparing"));
     assert!(json.contains("feather_hubert"));
-    assert_eq!(serde_json::from_str::<AssetManifest>(&json).unwrap(), manifest);
+    assert_eq!(
+        serde_json::from_str::<AssetManifest>(&json).unwrap(),
+        manifest
+    );
 }
