@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/feathertalk-preprocess",
   "crates/feathertalk-media",
   "crates/feathertalk-project",
   "crates/feathertalk-models",
