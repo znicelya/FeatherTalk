@@ -70,3 +70,4 @@ syncnet_ckpt/
 !demo/*.jpg
 !demo/*.png
 !demo/*.mp4
+.worktrees/
