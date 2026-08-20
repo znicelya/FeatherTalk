@@ -10,10 +10,12 @@ pub fn audio_window_indices(
             frame_count,
         });
     }
-    let center = frame_index as i64;
-    let count = frame_count as i64;
     Ok(std::array::from_fn(|slot| {
-        let index = center + slot as i64 - 4;
-        (index >= 0 && index < count).then_some(index as usize)
+        let index = if slot < 4 {
+            frame_index.checked_sub(4 - slot)
+        } else {
+            frame_index.checked_add(slot - 4)
+        };
+        index.filter(|value| *value < frame_count)
     }))
 }

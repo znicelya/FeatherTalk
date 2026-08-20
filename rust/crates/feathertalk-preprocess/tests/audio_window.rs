@@ -45,3 +45,22 @@ fn rejects_empty_and_out_of_range_frames() {
         Err(PreprocessError::FrameIndexOutOfRange { .. })
     ));
 }
+
+#[test]
+fn handles_large_usize_indices_without_signed_overflow() {
+    let frame_count = usize::MAX;
+    let frame_index = usize::MAX - 1;
+    assert_eq!(
+        audio_window_indices(frame_index, frame_count).unwrap(),
+        [
+            Some(usize::MAX - 5),
+            Some(usize::MAX - 4),
+            Some(usize::MAX - 3),
+            Some(usize::MAX - 2),
+            Some(usize::MAX - 1),
+            None,
+            None,
+            None,
+        ]
+    );
+}
