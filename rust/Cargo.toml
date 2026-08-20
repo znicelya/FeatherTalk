@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/feathertalk-project",
   "crates/feathertalk-models",
   "crates/feathertalk-weights",
   "crates/feathertalk-parity",
