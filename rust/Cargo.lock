@@ -2390,6 +2390,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-media"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "feathertalk-models"
 version = "0.1.0"
 dependencies = [
