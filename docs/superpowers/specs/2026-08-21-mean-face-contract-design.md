@@ -5,13 +5,15 @@ Status: Approved for specification review
 
 ## Purpose
 
-Extend `feathertalk-pfld` with strict loading for the Python baseline's `mean_face.txt`. The resulting immutable value supplies the 220 normalized coordinates added to PFLD model output before scaling to the detector crop.
+Extend `feathertalk-pfld` with the Python baseline's fixed 220-value mean face compiled into the crate. The resulting immutable value supplies the normalized coordinates added to PFLD model output before scaling to the detector crop.
 
 ## Scope
 
 Included:
 
-- Read a mean-face text file from a caller-provided path.
+- Embed the fixed mean-face values in Rust source as a crate-level constant.
+- Decode model output using the embedded mean face by default.
+- Read a mean-face text file from a caller-provided path for compatibility and fixture validation.
 - Require valid UTF-8.
 - Parse ASCII whitespace-separated `f32` tokens.
 - Require exactly 220 finite values.
@@ -22,9 +24,8 @@ Included:
 Excluded:
 
 - PFLD checkpoint loading or model execution.
-- Embedding or copying the current mean-face values into Rust source.
 - Image decoding, crop construction, and pixel normalization.
-- Writing or modifying `mean_face.txt`.
+- Writing or modifying the repository fixture `data_utils/mean_face.txt`.
 
 ## Public API
 
@@ -32,6 +33,8 @@ Excluded:
 pub struct MeanFace {
     values: [f32; PFLD_OUTPUT_VALUE_COUNT],
 }
+
+pub const MEAN_FACE: MeanFace;
 
 impl MeanFace {
     pub fn values(&self) -> &[f32; PFLD_OUTPUT_VALUE_COUNT];
@@ -42,6 +45,11 @@ pub fn read_mean_face(path: &Path) -> Result<MeanFace, PfldError>;
 pub fn decode_landmarks_with_mean_face(
     model_output: &[f32],
     mean_face: &MeanFace,
+    crop: CropGeometry,
+) -> Result<PFLDLandmarks, PfldError>;
+
+pub fn decode_landmarks_with_default_mean_face(
+    model_output: &[f32],
     crop: CropGeometry,
 ) -> Result<PFLDLandmarks, PfldError>;
 ```
@@ -58,9 +66,11 @@ pub fn decode_landmarks(
 
 The typed convenience decoder delegates to the existing numerical implementation using `mean_face.values()` so there is one coordinate-mapping path.
 
+`decode_landmarks_with_default_mean_face` delegates through `MEAN_FACE`, so production callers do not need to load an external file.
+
 ## Parsing Rules
 
-`read_mean_face` applies these rules in order:
+`MEAN_FACE` contains exactly the 220 values from the Python baseline as a compile-time `[f32; 220]` value. `read_mean_face` applies these rules in order when validating an external fixture or compatibility file:
 
 1. Read the complete file with `std::fs::read`.
 2. Reject invalid UTF-8.
@@ -93,7 +103,8 @@ Existing `NonFiniteValue { field, index }` is reused with `field == "mean_face"`
 
 Focused tests cover:
 
-- The repository's current `data_utils/mean_face.txt`: exactly 220 values and known first/last values.
+- The embedded `MEAN_FACE`: exactly 220 values and known first/last values.
+- The repository's current `data_utils/mean_face.txt`: parses to the same fixed values.
 - Spaces, tabs, CRLF, and newlines.
 - Missing file and invalid UTF-8.
 - Malformed token with exact zero-based index.

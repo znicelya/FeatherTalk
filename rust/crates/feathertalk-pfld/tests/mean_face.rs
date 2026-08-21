@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use feathertalk_pfld::{
-    CropGeometry, MeanFace, PFLD_OUTPUT_VALUE_COUNT, PfldError, decode_landmarks,
-    decode_landmarks_with_mean_face, read_mean_face,
+    CropGeometry, MEAN_FACE, MeanFace, PFLD_OUTPUT_VALUE_COUNT, PfldError, decode_landmarks,
+    decode_landmarks_with_default_mean_face, decode_landmarks_with_mean_face, read_mean_face,
 };
 
 fn crop() -> CropGeometry {
@@ -43,6 +43,7 @@ fn reads_repository_mean_face_fixture() {
         mean_face.values()[PFLD_OUTPUT_VALUE_COUNT - 1],
         expected_last
     );
+    assert_eq!(mean_face.values(), MEAN_FACE.values());
 }
 
 #[test]
@@ -142,4 +143,23 @@ fn typed_decoder_matches_slice_decoder() {
 #[test]
 fn mean_face_is_a_public_value_type() {
     let _: Option<MeanFace> = None;
+}
+
+#[test]
+fn exposes_the_embedded_mean_face_constant() {
+    assert_eq!(MEAN_FACE.values().len(), PFLD_OUTPUT_VALUE_COUNT);
+    assert_eq!(MEAN_FACE.values()[0], 0.07823661);
+    let expected_last: f32 = "0.66389504".parse().unwrap();
+    assert_eq!(
+        MEAN_FACE.values()[PFLD_OUTPUT_VALUE_COUNT - 1],
+        expected_last
+    );
+}
+
+#[test]
+fn default_decoder_uses_the_embedded_mean_face() {
+    let model_output = vec![0.0; PFLD_OUTPUT_VALUE_COUNT];
+    let expected = decode_landmarks_with_mean_face(&model_output, &MEAN_FACE, crop()).unwrap();
+    let actual = decode_landmarks_with_default_mean_face(&model_output, crop()).unwrap();
+    assert_eq!(actual, expected);
 }

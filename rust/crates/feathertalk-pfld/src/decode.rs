@@ -1,4 +1,4 @@
-use crate::{MeanFace, PfldError};
+use crate::{MEAN_FACE, MeanFace, PfldError};
 
 pub const PFLD_OUTPUT_VALUE_COUNT: usize = 220;
 pub const PFLD_LANDMARK_COUNT: usize = 110;
@@ -59,6 +59,13 @@ pub fn decode_landmarks_with_mean_face(
     crop: CropGeometry,
 ) -> Result<PFLDLandmarks, PfldError> {
     decode_landmarks(model_output, mean_face.values(), crop)
+}
+
+pub fn decode_landmarks_with_default_mean_face(
+    model_output: &[f32],
+    crop: CropGeometry,
+) -> Result<PFLDLandmarks, PfldError> {
+    decode_landmarks_with_mean_face(model_output, &MEAN_FACE, crop)
 }
 
 fn validate_length(field: &'static str, actual: usize) -> Result<(), PfldError> {
