@@ -8,6 +8,7 @@ members = [
   "crates/feathertalk-models",
   "crates/feathertalk-weights",
   "crates/feathertalk-parity",
+  "crates/feathertalk-pfld",
 ]
 
 [workspace.package]

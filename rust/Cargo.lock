@@ -2435,6 +2435,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-pfld"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "feathertalk-preprocess"
 version = "0.1.0"
 dependencies = [
