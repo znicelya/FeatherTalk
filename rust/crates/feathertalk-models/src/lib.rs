@@ -4,4 +4,7 @@ pub mod pfld;
 pub mod train_step;
 pub mod unet;
 
-pub use pfld::{PFLD_GhostOne, PFLD_INPUT_CHANNELS, PFLD_OUTPUT_VALUES, PfldConfig};
+pub use pfld::{
+    GhostOneBottleneck, GhostOneModule, PFLD_GhostOne, PFLD_INPUT_CHANNELS, PFLD_OUTPUT_VALUES,
+    PfldConfig,
+};
