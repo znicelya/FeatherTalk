@@ -1,7 +1,26 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error)]
 pub enum PfldError {
+    #[error("I/O error during {operation} at {path}: {source}")]
+    Io {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("mean face file is not valid UTF-8: {path}")]
+    InvalidUtf8 { path: PathBuf },
+    #[error("invalid mean face token at index {index} in {path}")]
+    InvalidMeanFaceToken { path: PathBuf, index: usize },
+    #[error("invalid mean face count in {path}: expected {expected}, got {actual}")]
+    InvalidMeanFaceCount {
+        path: PathBuf,
+        expected: usize,
+        actual: usize,
+    },
     #[error("invalid vector length for {field}: expected {expected}, got {actual}")]
     InvalidVectorLength {
         field: &'static str,
