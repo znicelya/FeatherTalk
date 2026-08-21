@@ -1,10 +1,18 @@
 use feathertalk_face::{
-    Detection, DetectionConfig, ImageSize, ResizeTransform, decode_level, generate_anchor_centers,
-    non_max_suppression, resize_with_padding,
+    Detection, DetectionConfig, FaceCropGeometry, ImageSize, RectI, ResizeTransform,
+    compute_face_crop_geometry, decode_level, generate_anchor_centers, non_max_suppression,
+    resize_with_padding,
 };
 
 #[test]
 fn crate_root_exposes_schema_one_postprocess_api() {
+    let _: fn(ImageSize, [f32; 4]) -> Result<FaceCropGeometry, _> = compute_face_crop_geometry;
+    let _: RectI = RectI {
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+    };
     let transform: ResizeTransform = resize_with_padding(ImageSize {
         width: 640,
         height: 640,

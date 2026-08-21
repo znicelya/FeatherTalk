@@ -26,4 +26,9 @@ pub enum FaceError {
     },
     #[error("invalid detection geometry at index {index}")]
     InvalidDetectionGeometry { index: usize },
+    #[error("invalid crop geometry for {field}: {message}")]
+    InvalidCropGeometry {
+        field: &'static str,
+        message: String,
+    },
 }
