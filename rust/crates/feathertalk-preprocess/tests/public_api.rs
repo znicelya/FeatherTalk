@@ -1,14 +1,15 @@
 use std::path::Path;
 
 use feathertalk_preprocess::{
-    Point, audio_window_indices, compute_face_bbox, default_crop_spec, read_landmarks,
+    PFLD_LANDMARK_COUNT, Point, audio_window_indices, compute_face_bbox, default_crop_spec,
+    read_landmarks,
 };
 
 #[test]
 fn crate_root_exposes_read_only_preprocess_contract() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face.lms");
-    let contents = (0..68)
+    let contents = (0..PFLD_LANDMARK_COUNT)
         .map(|i| format!("{} {}\n", i + 1, i + 2))
         .collect::<String>();
     std::fs::write(&path, contents).unwrap();

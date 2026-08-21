@@ -14,7 +14,7 @@ The crate provides strict `.lms` parsing, face bounding-box calculation, fixed c
 Included:
 
 - Strict UTF-8 `.lms` parsing.
-- Exactly 68 non-empty landmark points.
+- Exactly 110 non-empty landmark points, matching the Python PFLD output.
 - Finite, non-negative coordinate validation.
 - Face bbox calculation using the existing point indices.
 - Fixed crop, inner-region, border, and mouth-mask geometry.
@@ -75,7 +75,7 @@ Parsing rules:
 - Reject malformed or extra tokens.
 - Reject `NaN`, positive infinity, and negative infinity.
 - Reject negative coordinates.
-- Require exactly 68 points.
+- Require exactly 110 points.
 - Preserve source line numbers in line-specific errors.
 
 `Landmarks` cannot be created with a public mutable point vector. A later model adapter may use `points()` for read-only access.
@@ -174,7 +174,7 @@ Errors retain paths and source I/O errors for diagnostics while exposing stable 
 
 Tests use temporary files and crate-root imports. They cover:
 
-- Valid 68-point parsing and whitespace handling.
+- Valid 110-point parsing and whitespace handling.
 - Missing file, invalid UTF-8, malformed line, extra token, wrong point count, non-finite coordinate, and negative coordinate errors.
 - Exact bbox calculation and invalid geometry rejection.
 - Exact default crop constants and border invariant.

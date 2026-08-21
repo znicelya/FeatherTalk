@@ -28,7 +28,7 @@ Excluded:
 - Image loading, resizing, normalization, channel order, or blob creation.
 - SCRFD ONNX parsing or Burn model execution.
 - GPU/WGPU devices.
-- PFLD inference and 68-point landmarks.
+- PFLD inference and 110-point landmarks.
 - Frame anomaly classification and asset manifest updates.
 
 ## 3. Crate Boundary

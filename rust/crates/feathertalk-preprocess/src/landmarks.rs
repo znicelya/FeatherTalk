@@ -5,6 +5,8 @@ use std::{
 
 use crate::PreprocessError;
 
+pub const PFLD_LANDMARK_COUNT: usize = 110;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub x: f32,
@@ -68,10 +70,10 @@ pub fn read_landmarks(path: &Path) -> Result<Landmarks, PreprocessError> {
         }
         points.push(Point { x, y });
     }
-    if points.len() != 68 {
+    if points.len() != PFLD_LANDMARK_COUNT {
         return Err(PreprocessError::WrongLandmarkCount {
             path: path.to_path_buf(),
-            expected: 68,
+            expected: PFLD_LANDMARK_COUNT,
             actual: points.len(),
         });
     }

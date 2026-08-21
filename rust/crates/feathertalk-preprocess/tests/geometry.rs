@@ -1,12 +1,14 @@
 use feathertalk_preprocess::{
-    FaceBoundingBox, MaskRect, PreprocessError, compute_face_bbox, default_crop_spec,
-    read_landmarks,
+    FaceBoundingBox, MaskRect, PFLD_LANDMARK_COUNT, PreprocessError, compute_face_bbox,
+    default_crop_spec, read_landmarks,
 };
 
 fn landmarks_file(x1: f32, x31: f32, y52: f32) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face.lms");
-    let mut lines = (0..68).map(|_| "0 0".to_owned()).collect::<Vec<_>>();
+    let mut lines = (0..PFLD_LANDMARK_COUNT)
+        .map(|_| "0 0".to_owned())
+        .collect::<Vec<_>>();
     lines[1] = format!("{x1} 0");
     lines[31] = format!("{x31} 0");
     lines[52] = format!("0 {y52}");

@@ -1,18 +1,20 @@
 use std::path::Path;
 
-use feathertalk_preprocess::{Point, PreprocessError, read_landmarks};
+use feathertalk_preprocess::{PFLD_LANDMARK_COUNT, Point, PreprocessError, read_landmarks};
 
 fn content() -> String {
-    (0..68).map(|i| format!("{} {}\n", i + 1, i + 2)).collect()
+    (0..PFLD_LANDMARK_COUNT)
+        .map(|i| format!("{} {}\n", i + 1, i + 2))
+        .collect()
 }
 
 #[test]
-fn parses_exactly_68_points_and_ignores_blank_lines() {
+fn parses_exactly_110_points_and_ignores_blank_lines() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face.lms");
     std::fs::write(&path, format!("\n{}\n", content())).unwrap();
     let landmarks = read_landmarks(&path).unwrap();
-    assert_eq!(landmarks.points().len(), 68);
+    assert_eq!(landmarks.points().len(), PFLD_LANDMARK_COUNT);
     assert_eq!(landmarks.points()[0], Point { x: 1.0, y: 2.0 });
 }
 
@@ -27,14 +29,23 @@ fn rejects_wrong_count_and_invalid_lines() {
     ));
     std::fs::write(
         &path,
-        content().lines().take(67).collect::<Vec<_>>().join("\n"),
+        content().lines().take(109).collect::<Vec<_>>().join("\n"),
     )
     .unwrap();
     assert!(matches!(
         read_landmarks(&path),
         Err(PreprocessError::WrongLandmarkCount {
-            expected: 68,
-            actual: 67,
+            expected: 110,
+            actual: 109,
+            ..
+        })
+    ));
+    std::fs::write(&path, format!("{}0 0\n", content())).unwrap();
+    assert!(matches!(
+        read_landmarks(&path),
+        Err(PreprocessError::WrongLandmarkCount {
+            expected: 110,
+            actual: 111,
             ..
         })
     ));
