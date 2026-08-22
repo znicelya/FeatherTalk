@@ -795,7 +795,7 @@ generator
 generator.run_from_cli();
 ```
 
-Use an RAII current-directory guard so the original directory is restored after both success and panic. Wrap only `generator.run_from_cli()` in `catch_unwind(AssertUnwindSafe(...))`, map a panic to `ToolError::Generation`, and let the staging `TempDir` clean up on failure. After success, require exactly `scrfd_2.5g_kps.rs` and `scrfd_2.5g_kps.bpk`, rename the source inside staging to `scrfd_2_5g.rs`, require exactly those two final files, rename `staged_output` to the still-absent destination, drop the now-empty `TempDir`, and return paths rooted at the published destination.
+Use an RAII current-directory guard so the original directory is restored after both success and panic. Wrap only `generator.run_from_cli()` in `catch_unwind(AssertUnwindSafe(...))`, map a panic to `ToolError::Generation`, and let the staging `TempDir` clean up on failure. Because Burn's `Path::file_stem` uses the last dot as the extension separator, the successful generator emits exactly `scrfd_2.rs` and `scrfd_2.bpk`; rename those inside staging to `scrfd_2_5g.rs` and `scrfd_2.5g_kps.bpk`, require exactly those two final files, rename `staged_output` to the still-absent destination, drop the now-empty `TempDir`, and return paths rooted at the published destination.
 
 - [ ] **Step 5: Run source inspection and explicit generation smoke tests**
 
