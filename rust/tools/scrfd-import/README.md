@@ -21,5 +21,12 @@ license status `NOASSERTION` with `redistribution_approved: false`.
 The Python/OpenCV fixture generator is separate and is only used for Task 5:
 
 ```powershell
+python -m venv tools\scrfd-import\.venv
+tools\scrfd-import\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r tools\scrfd-import\python\requirements-fixture.txt
+tools\scrfd-import\.venv\Scripts\python.exe tools\scrfd-import\python\generate_fixture.py --repo-root .. --destination crates\feathertalk-scrfd\tests\fixtures\opencv_cpu_v1
 tools\scrfd-import\.venv\Scripts\python.exe tools\scrfd-import\python\generate_fixture.py --repo-root .. --verify-against crates\feathertalk-scrfd\tests\fixtures\opencv_cpu_v1
 ```
+
+The fixture command requires Python 3.11 exactly at the major/minor level and
+pins NumPy 2.2.6 plus opencv-python-headless 4.12.0.88. Runtime and ordinary
+Rust tests never invoke Python, OpenCV, or the ONNX parser.
