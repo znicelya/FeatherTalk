@@ -16,4 +16,5 @@ tempfile.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+feathertalk-models = { path = "../feathertalk-models", default-features = false }
 zip.workspace = true

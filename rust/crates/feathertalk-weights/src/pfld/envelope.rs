@@ -110,17 +110,43 @@ fn validate_tensor_mapping(
             "{name} must be a tensor dictionary"
         )));
     };
-    if require_non_empty && tensors.is_empty() {
+    let tensor_count = tensors
+        .iter()
+        .filter(|(key, value)| key.as_str() != "_metadata" && matches!(value, PickleValue::None))
+        .count();
+    if require_non_empty && tensor_count == 0 {
         return Err(WeightImportError::InvalidPfldEnvelope(format!(
             "{name} must not be empty"
         )));
     }
-    if tensors
-        .values()
-        .any(|value| !matches!(value, PickleValue::None))
-    {
+    for (key, value) in tensors {
+        if key == "_metadata" {
+            validate_state_dict_metadata(value, name)?;
+        } else if !matches!(value, PickleValue::None) {
+            return Err(WeightImportError::InvalidPfldEnvelope(format!(
+                "{name} must contain only tensors and standard _metadata"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_state_dict_metadata(value: &PickleValue, name: &str) -> Result<(), WeightImportError> {
+    let PickleValue::Dict(metadata) = value else {
         return Err(WeightImportError::InvalidPfldEnvelope(format!(
-            "{name} must contain only tensors"
+            "{name}._metadata must be a dictionary"
+        )));
+    };
+    if metadata.values().any(|value| {
+        !matches!(
+            value,
+            PickleValue::Dict(entry)
+                if entry.len() == 1
+                    && matches!(entry.get("version"), Some(PickleValue::Int(_)))
+        )
+    }) {
+        return Err(WeightImportError::InvalidPfldEnvelope(format!(
+            "{name}._metadata entries must contain only an integer version"
         )));
     }
     Ok(())
@@ -341,6 +367,53 @@ mod tests {
                 .map(|(key, value)| (key.to_owned(), value))
                 .collect(),
         )
+    }
+
+    #[test]
+    fn accepts_standard_pytorch_state_dict_metadata() {
+        let backbone = PickleValue::Dict(
+            [
+                ("conv8.0.weight".to_owned(), PickleValue::None),
+                (
+                    "_metadata".to_owned(),
+                    PickleValue::Dict(
+                        [
+                            (
+                                "".to_owned(),
+                                PickleValue::Dict(
+                                    [("version".to_owned(), PickleValue::Int(1))]
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                            ),
+                            (
+                                "conv8.0".to_owned(),
+                                PickleValue::Dict(
+                                    [("version".to_owned(), PickleValue::Int(2))]
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                            ),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        assert_eq!(
+            validate_envelope(root([
+                ("epoch", PickleValue::Int(335)),
+                ("pfld_backbone", backbone),
+            ]))
+            .unwrap(),
+            PfldEnvelope {
+                has_auxiliarynet: false
+            }
+        );
     }
 
     #[test]
