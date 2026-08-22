@@ -30,3 +30,19 @@ tools\scrfd-import\.venv\Scripts\python.exe tools\scrfd-import\python\generate_f
 The fixture command requires Python 3.11 exactly at the major/minor level and
 pins NumPy 2.2.6 plus opencv-python-headless 4.12.0.88. Runtime and ordinary
 Rust tests never invoke Python, OpenCV, or the ONNX parser.
+
+SCRFD acceptance compares every element of all nine raw OpenCV outputs on the
+NdArray CPU backend (`max_abs <= 1e-3`, `mean_abs <= 1e-4`):
+
+```powershell
+cargo test -p feathertalk-scrfd --test parity -- --nocapture
+```
+
+An ignored WGPU smoke test checks artifact loading, one forward pass, and all
+public tensor shapes when a compatible adapter is available:
+
+```powershell
+cargo test -p feathertalk-scrfd --test wgpu_smoke -- --ignored --nocapture
+```
+
+WGPU is not required for ordinary CPU acceptance.

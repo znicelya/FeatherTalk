@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use burn::{backend::NdArray, tensor::Tensor};
 use feathertalk_scrfd::ScrfdArtifactPaths;
 use ndarray::ArrayD;
 use ndarray_npy::ReadNpyExt;
@@ -281,4 +282,69 @@ fn require_eq<T: std::fmt::Debug + PartialEq>(
         ));
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParityMetrics {
+    pub max_abs: f32,
+    pub mean_abs: f32,
+    pub max_relative: f32,
+}
+
+pub fn compare_f32(actual: &[f32], expected: &[f32]) -> Result<ParityMetrics, String> {
+    if actual.len() != expected.len() || actual.is_empty() {
+        return Err("arrays must have the same nonzero length".to_owned());
+    }
+    let mut max_abs = 0.0_f64;
+    let mut sum_abs = 0.0_f64;
+    let mut max_relative = 0.0_f64;
+    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+        if !actual.is_finite() || !expected.is_finite() {
+            return Err(format!("non-finite value at index {index}"));
+        }
+        let actual = f64::from(actual);
+        let expected = f64::from(expected);
+        let absolute = (actual - expected).abs();
+        max_abs = max_abs.max(absolute);
+        sum_abs += absolute;
+        max_relative = max_relative.max(absolute / expected.abs().max(1e-7));
+    }
+    Ok(ParityMetrics {
+        max_abs: max_abs as f32,
+        mean_abs: (sum_abs / actual.len() as f64) as f32,
+        max_relative: max_relative as f32,
+    })
+}
+
+pub fn assert_cpu_tensor_matches_fixture<const D: usize>(
+    tensor: Tensor<NdArray<f32>, D>,
+    path: &Path,
+) {
+    let expected = read_array(path).unwrap();
+    let raw_shape = expected.shape().to_vec();
+    let public_shape = match (D, raw_shape.as_slice()) {
+        (2, [1, anchors, 1]) => vec![1, *anchors],
+        (3, [1, anchors, width]) => vec![1, *anchors, *width],
+        _ => panic!(
+            "{}: fixture shape {raw_shape:?} is incompatible with public rank {D}",
+            path.display(),
+        ),
+    };
+    assert_eq!(
+        tensor.dims().to_vec(),
+        public_shape,
+        "{}: public tensor shape mismatch",
+        path.display()
+    );
+
+    let actual = tensor.into_data().to_vec::<f32>().unwrap();
+    let expected = expected.iter().copied().collect::<Vec<_>>();
+    let metrics = compare_f32(&actual, &expected).unwrap();
+    assert!(metrics.max_abs <= 1e-3, "{}: {metrics:?}", path.display());
+    assert!(metrics.mean_abs <= 1e-4, "{}: {metrics:?}", path.display());
+    assert!(
+        metrics.max_relative.is_finite(),
+        "{}: {metrics:?}",
+        path.display()
+    );
 }
