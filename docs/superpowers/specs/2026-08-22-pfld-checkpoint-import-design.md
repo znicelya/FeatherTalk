@@ -1,7 +1,7 @@
 # PFLD Checkpoint Import Design
 
 Date: 2026-08-22
-Status: Approved for specification review
+Status: Approved for implementation planning
 
 ## Purpose
 
