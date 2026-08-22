@@ -1,3 +1,6 @@
+mod artifact;
+#[cfg(scrfd_generated)]
+pub mod convert;
 mod onnx;
 
 use std::{
@@ -9,6 +12,10 @@ use std::{
 
 use feathertalk_scrfd::{SCRFD_SOURCE_ONNX_BYTES, SCRFD_SOURCE_ONNX_SHA256};
 use sha2::{Digest, Sha256};
+
+pub use artifact::{
+    compare_snapshots, ensure_destination_absent, snapshot_map, validate_apply_result,
+};
 
 pub const SOURCE_RELATIVE_PATH: &str = "data_utils/scrfd_2.5g_kps.onnx";
 
