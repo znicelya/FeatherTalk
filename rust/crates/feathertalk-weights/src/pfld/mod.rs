@@ -19,9 +19,14 @@ use crate::{
     },
 };
 
+mod artifact;
 mod envelope;
 mod key_map;
 
+use artifact::{
+    ensure_destination_absent, publish_staged_artifacts, verify_staged_artifacts,
+    write_staged_artifacts,
+};
 use envelope::{PfldInspection, inspect_checkpoint, validate_envelope};
 use key_map::pfld_remapper;
 
@@ -109,9 +114,65 @@ pub struct PfldImportReport {
     pub applied: Vec<String>,
 }
 
+/// Strictly imports a PFLD checkpoint, verifies its staged artifacts, and then replaces the caller.
+///
+/// The autodiff-module association is used only to construct an independent Burn module copy.
+/// Burn 0.21's ordinary `Clone` shares `RunningState` storage such as BatchNorm statistics.
+pub fn import_pfld_checkpoint<B, M>(
+    module: &mut M,
+    request: &PfldImportRequest,
+) -> Result<PfldImportReport, WeightImportError>
+where
+    B: Backend,
+    M: ModuleSnapshot<B> + HasAutodiffModule<Autodiff<B>>,
+{
+    if request.destination_dir.as_os_str().is_empty() {
+        return Err(WeightImportError::ArtifactValidation(
+            "destination directory must not be empty".to_owned(),
+        ));
+    }
+    ensure_destination_absent(&request.destination_dir)?;
+    let parent = request
+        .destination_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err(WeightImportError::ArtifactValidation(
+            "destination directory parent must exist and be a directory".to_owned(),
+        ));
+    }
+
+    let snapshot = SnapshotFile::copy_from(&request.checkpoint, request.max_file_bytes)?;
+    let prepared = prepare_pfld_import::<B, M>(module, &snapshot, request)?;
+    let staged = write_staged_artifacts::<B, M>(
+        &prepared.candidate,
+        snapshot.path(),
+        &prepared.source_file_name,
+        &prepared.source_sha256,
+        &prepared.inspection,
+        parent,
+    )?;
+    verify_staged_artifacts::<B, M>(
+        module,
+        &prepared.candidate,
+        snapshot.path(),
+        &prepared.inspection,
+        &staged,
+    )?;
+    let manifest = publish_staged_artifacts(staged, &request.destination_dir)?;
+    *module = *prepared.candidate;
+
+    Ok(PfldImportReport {
+        destination_dir: request.destination_dir.clone(),
+        manifest,
+        applied: prepared.applied,
+    })
+}
+
 #[derive(Debug)]
 struct PreparedPfldImport<M> {
-    candidate: M,
+    candidate: Box<M>,
     source_file_name: String,
     source_sha256: String,
     inspection: PfldInspection,
@@ -127,16 +188,34 @@ fn configure_pfld_store(path: &Path) -> PytorchStore {
         .remap(pfld_remapper())
 }
 
-fn clone_module_detached<B, M>(module: &M) -> M
+// Derived train/valid conversion for the production graph can exceed the default Windows test
+// thread stack. Returning a Box keeps the large converted module out of the caller's return slot.
+const PFLD_DETACHED_CLONE_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+fn clone_module_detached<B, M>(module: &mut M) -> Result<Box<M>, WeightImportError>
 where
     B: Backend,
     M: ModuleSnapshot<B> + HasAutodiffModule<Autodiff<B>>,
 {
-    module.clone().train::<Autodiff<B>>().valid()
+    // A mutable scoped borrow is Send under Module's existing Send contract, so callers don't need
+    // an additional Sync bound even though the conversion itself runs on a dedicated stack.
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("feathertalk-pfld-detached-clone".to_owned())
+            .stack_size(PFLD_DETACHED_CLONE_STACK_BYTES)
+            .spawn_scoped(scope, move || {
+                let cloned = (*module).clone();
+                Box::new(cloned.train::<Autodiff<B>>().valid())
+            })
+            .map_err(|error| WeightImportError::Store(error.to_string()))?;
+        handle
+            .join()
+            .map_err(|_| WeightImportError::Store("PFLD detached clone thread panicked".to_owned()))
+    })
 }
 
 fn prepare_pfld_import<B, M>(
-    module: &M,
+    module: &mut M,
     snapshot: &SnapshotFile,
     request: &PfldImportRequest,
 ) -> Result<PreparedPfldImport<M>, WeightImportError>
@@ -150,7 +229,7 @@ where
     let inspection = inspect_checkpoint(snapshot.path(), envelope, request)?;
     validate_target_contract::<B, M>(module, &inspection)?;
     let mut store = configure_pfld_store(snapshot.path());
-    let mut candidate = clone_module_detached::<B, M>(module);
+    let mut candidate = clone_module_detached::<B, M>(module)?;
     let result = candidate
         .load_from(&mut store)
         .map_err(|error| WeightImportError::Store(error.to_string()))?;
@@ -309,8 +388,8 @@ mod tests {
     #[test]
     fn detached_clone_keeps_batch_norm_running_state_independent() {
         let device = Default::default();
-        let original = BatchNormConfig::new(2).init::<CpuBackend>(&device);
-        let candidate = clone_module_detached::<CpuBackend, _>(&original);
+        let mut original = BatchNormConfig::new(2).init::<CpuBackend>(&device);
+        let candidate = clone_module_detached::<CpuBackend, _>(&mut original).unwrap();
 
         candidate
             .running_mean
@@ -331,7 +410,7 @@ mod tests {
     #[test]
     fn real_checkpoint_prepares_a_complete_candidate_without_mutating_source_model() {
         let device = Default::default();
-        let model = PFLD_GhostOne::<CpuBackend>::new(PfldConfig::production(), &device);
+        let mut model = PFLD_GhostOne::<CpuBackend>::new(PfldConfig::production(), &device);
         let before = capture_module_data(&model);
         let snapshot = SnapshotFile::copy_from(
             &checkpoint_path(),
@@ -340,7 +419,8 @@ mod tests {
         .unwrap();
         let request = request_for(checkpoint_path(), PathBuf::from("unused"));
 
-        let prepared = prepare_pfld_import::<CpuBackend, _>(&model, &snapshot, &request).unwrap();
+        let prepared =
+            prepare_pfld_import::<CpuBackend, _>(&mut model, &snapshot, &request).unwrap();
 
         assert_module_data_unchanged::<CpuBackend, _>(&before, &model);
         assert_eq!(prepared.applied.len(), 1_735);
@@ -357,7 +437,7 @@ mod tests {
     #[test]
     fn incompatible_module_fails_before_any_caller_mutation() {
         let device = Default::default();
-        let model = LinearConfig::new(2, 2).init::<CpuBackend>(&device);
+        let mut model = LinearConfig::new(2, 2).init::<CpuBackend>(&device);
         let before = capture_module_data(&model);
         let snapshot = SnapshotFile::copy_from(
             &checkpoint_path(),
@@ -366,7 +446,8 @@ mod tests {
         .unwrap();
         let request = request_for(checkpoint_path(), PathBuf::from("unused"));
 
-        let error = prepare_pfld_import::<CpuBackend, _>(&model, &snapshot, &request).unwrap_err();
+        let error =
+            prepare_pfld_import::<CpuBackend, _>(&mut model, &snapshot, &request).unwrap_err();
 
         assert!(matches!(
             error,
