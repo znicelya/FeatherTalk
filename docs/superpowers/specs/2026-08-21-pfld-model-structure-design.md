@@ -70,7 +70,7 @@ At width factor `0.5`, the channel and spatial contract is:
 | x4 | average pool `input_size / 16` | 72 | 1x1 |
 | conv6 | GhostOne bottleneck, stride 1 | 8 | 12x12 |
 | conv7 | MobileOne, 3x3, stride 1 | 16 | 12x12 |
-| conv8 | Conv block, 1x1, no BatchNorm | 64 | 1x1 |
+| conv8 | Conv block, 12x12 (`input_size / 16`), no BatchNorm | 64 | 1x1 |
 | x5 | conv8 output | 64 | 1x1 |
 | head | concatenate x1..x5, 1x1 convolution | 220 | 1x1 |
 | output | flatten | 220 | N/A |

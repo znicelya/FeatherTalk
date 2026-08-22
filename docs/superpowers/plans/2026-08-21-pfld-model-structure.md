@@ -176,7 +176,7 @@ conv4: 40 -> 48 (hidden 100), then 48 -> 48 (hidden 120), twice
 conv5: 48 -> 72 (hidden 168), then 72 -> 72 (hidden 252), three times
 conv6: 72 -> 8 (hidden 108), stride 1
 conv7: 8 -> 16, 3x3, stride 1
-conv8: 16 -> 64, 1x1, stride 1, no BatchNorm, with ReLU
+conv8: 16 -> 64, `input_size / 16` (12x12), stride 1, no BatchNorm, with ReLU
 head: 256 -> 220, 1x1
 ```
 

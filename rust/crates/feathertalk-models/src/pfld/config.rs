@@ -22,4 +22,8 @@ impl PfldConfig {
     pub const fn output_values(&self) -> usize {
         self.landmark_count * 2
     }
+
+    pub const fn pooled_channels(&self) -> usize {
+        32 + 40 + 48 + 72 + 64
+    }
 }

@@ -1,15 +1,17 @@
 use burn::nn::{BatchNorm, BatchNormConfig, Relu, conv::Conv2d};
 use burn::tensor::{Tensor, backend::Backend};
 
-#[derive(Debug)]
+#[derive(burn::module::Module, Debug)]
 pub struct MobileOneBlock<B: Backend> {
     branches: Vec<(Conv2d<B>, BatchNorm<B>)>,
     scale: Option<(Conv2d<B>, BatchNorm<B>)>,
     skip: Option<BatchNorm<B>>,
+    #[module(skip)]
     activation: bool,
 }
 
 impl<B: Backend> MobileOneBlock<B> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         in_channels: usize,
         out_channels: usize,

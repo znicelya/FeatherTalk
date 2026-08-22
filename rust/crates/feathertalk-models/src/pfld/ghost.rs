@@ -2,10 +2,11 @@ use burn::tensor::{Tensor, backend::Backend};
 
 use super::mobileone::MobileOneBlock;
 
-#[derive(Debug)]
+#[derive(burn::module::Module, Debug)]
 pub struct GhostOneModule<B: Backend> {
     primary: MobileOneBlock<B>,
     cheap: MobileOneBlock<B>,
+    #[module(skip)]
     out_channels: usize,
 }
 
@@ -54,7 +55,7 @@ impl<B: Backend> GhostOneModule<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(burn::module::Module, Debug)]
 pub struct GhostOneBottleneck<B: Backend> {
     ghost: GhostOneModule<B>,
     depthwise: Option<MobileOneBlock<B>>,
