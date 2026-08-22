@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::source::{DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_TENSOR_COUNT, DEFAULT_MAX_TOTAL_ELEMENTS};
 
+mod key_map;
+
 pub const PFLD_CHECKPOINT_EPOCH: u64 = 335;
 pub const PFLD_ARCHITECTURE_VERSION: &str = "burn-pfld-structure-v1";
 
