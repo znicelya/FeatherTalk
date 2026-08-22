@@ -1,7 +1,7 @@
 # SCRFD Burn Inference Design
 
 Date: 2026-08-22
-Status: Approved design; implementation plan pending written-spec review
+Status: Approved for implementation planning
 
 ## 1. Purpose
 
@@ -94,6 +94,7 @@ The development-only converter lives outside the workspace member list:
 ```text
 rust/tools/scrfd-import/
   Cargo.toml
+  build.rs
   src/bin/generate.rs
   src/bin/convert.rs
   python/generate_fixture.py
@@ -104,6 +105,11 @@ rust/tools/scrfd-import/
 `rust/Cargo.toml` lists `tools/scrfd-import` under `workspace.exclude`, and the
 tool manifest pins its own exact dependencies. Consequently
 `cargo build/test --workspace` never compiles the importer.
+
+The tool's conditional `build.rs` only copies a caller-selected staged Rust
+source file into Cargo's `OUT_DIR` so `convert.rs` can compile that exact
+module. It does not parse ONNX, run model generation, or execute during normal
+workspace builds.
 
 The converter may create temporary source, debug, and `.bpk` files. It writes
 the final source and artifacts to a caller-selected destination only after all
@@ -149,10 +155,12 @@ caller's device, applies the verified weights, and stores the validated
 manifest. `forward` validates the input shape before invoking the graph. The
 model does not mutate between calls.
 
-Burn ONNX's generated `LoadStrategy::None` source contains an internal
-burnpack-bytes constructor used by the development converter. The generated
-module is private, that constructor is not re-exported, and the runtime loader
-accepts only the verified safetensors artifact.
+Burn ONNX's generated `LoadStrategy::None` source contains no built-in
+burnpack or safetensors loading constructor. The development converter must
+construct the generated `Model` with `Model::new`, apply the temporary
+`.bpk` through `BurnpackStore`, and then save a standard safetensors file.
+The generated module is private, and the runtime loader accepts only the
+verified safetensors artifact.
 
 ## 5. Public API and tensor contract
 
@@ -340,9 +348,11 @@ The pinned tool performs the following deterministic steps:
    simplification enabled, and `LoadStrategy::None` to generate readable Rust
    source and a temporary `.bpk` state file.
 3. Compile `convert.rs` with `SCRFD_GENERATED_RS` pointing at that staged source,
-   include the exact staged module, construct it from the staged `.bpk` bytes,
-   and convert its state to safetensors. The source published to the crate is
-   byte-for-byte the source compiled by this conversion step.
+   include the exact staged module, construct `Model::new`, call
+   `model.load_from(&mut BurnpackStore::from_file(...))`, and save its state to
+   safetensors. The source
+   published to the crate is byte-for-byte the source compiled by this
+   conversion step.
 4. Load the safetensors into a fresh model and compare every tensor snapshot
    before publishing anything.
 5. Hash the generated source and safetensors, write the manifest, and publish
