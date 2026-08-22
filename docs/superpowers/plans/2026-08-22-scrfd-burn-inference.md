@@ -14,7 +14,7 @@
 - Start execution through `superpowers:using-git-worktrees` in an isolated branch/worktree named `scrfd-burn-inference`, suggested path `E:\workspace\github\FeatherTalk\.worktrees\scrfd-burn-inference`.
 - Run Rust workspace commands from that worktree's `rust/` directory unless a step explicitly targets the standalone importer manifest.
 - Preserve the user-owned untracked file `demo/kanghui_training_video_featherhubert_188_latest/README.txt`; never add, delete, overwrite, or move it.
-- Source ONNX is exactly `data_utils/scrfd_2.5g_kps.onnx`, 3,291,017 bytes, lowercase SHA-256 `32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a`, default-domain opset 12, input `images [1,3,640,640]`, and outputs `out0..out8`.
+- Source ONNX is exactly `data_utils/scrfd_2.5g_kps.onnx`, 3,291,017 bytes, lowercase SHA-256 `32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a`, default-domain opset 12, input `images [1,3,640,640]`, and outputs `out0..out8`.
 - Raw ONNX output shapes are `out0 [1,12800,1]`, `out1 [1,3200,1]`, `out2 [1,800,1]`, `out3 [1,12800,4]`, `out4 [1,3200,4]`, `out5 [1,800,4]`, `out6 [1,12800,10]`, `out7 [1,3200,10]`, and `out8 [1,800,10]`.
 - Public score tensors remove only the final singleton dimension; bbox and keypoint tensors preserve their raw values and shapes.
 - The public model accepts only `Tensor<B, 4>` shaped `[1,3,640,640]`; do not add dynamic batches or pixel/image preprocessing.
@@ -114,7 +114,7 @@ fn valid_manifest() -> ScrfdArtifactManifest {
             format: "onnx".to_owned(),
             file_name: "scrfd_2.5g_kps.onnx".to_owned(),
             file_bytes: 3_291_017,
-            sha256: "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a"
+            sha256: "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a"
                 .to_owned(),
             opset: 12,
             input_name: "images".to_owned(),
@@ -468,7 +468,7 @@ pub const SCRFD_ARCHITECTURE_VERSION: u32 = 1;
 pub const SCRFD_MODEL_KIND: &str = "scrfd_2.5g_kps";
 pub const SCRFD_SOURCE_ONNX_BYTES: u64 = 3_291_017;
 pub const SCRFD_SOURCE_ONNX_SHA256: &str =
-    "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a";
+    "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a";
 pub const SCRFD_SOURCE_OPSET: u64 = 12;
 pub const SCRFD_INPUT_SHAPE: [usize; 4] = [1, 3, 640, 640];
 pub const SCRFD_STRIDES: [u32; 3] = [8, 16, 32];
@@ -1715,7 +1715,7 @@ onnx_path = repo_root / "data_utils" / "scrfd_2.5g_kps.onnx"
 onnx_bytes = onnx_path.read_bytes()
 assert len(onnx_bytes) == 3_291_017
 assert hashlib.sha256(onnx_bytes).hexdigest() == (
-    "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a"
+    "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a"
 )
 if args.destination is not None:
     destination = args.destination.resolve()
@@ -1810,7 +1810,7 @@ manifest = {
     "source": {
         "file_name": "scrfd_2.5g_kps.onnx",
         "file_bytes": 3291017,
-        "sha256": "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a",
+        "sha256": "32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a",
     },
     "generator": {
         "python_version": "3.11",

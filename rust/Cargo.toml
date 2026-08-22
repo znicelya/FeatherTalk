@@ -9,7 +9,9 @@ members = [
   "crates/feathertalk-weights",
   "crates/feathertalk-parity",
   "crates/feathertalk-pfld",
+  "crates/feathertalk-scrfd",
 ]
+exclude = ["tools/scrfd-import"]
 
 [workspace.package]
 version = "0.1.0"

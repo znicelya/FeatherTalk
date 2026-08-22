@@ -122,7 +122,7 @@ The source ONNX is not copied into the new crate. The tool reads the existing
 ```text
 file name: scrfd_2.5g_kps.onnx
 size:     3,291,017 bytes
-sha256:   32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05edbe0b46e7b38e7a1eca22e99a
+sha256:   32d20c77b9e2dc1d07e94c2ab9d25bdd5cd05eddbe0b46e7b38e7a1eca22e99a
 ```
 
 The manifest records the source hash rather than making the runtime depend on
