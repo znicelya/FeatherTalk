@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::source::{DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_TENSOR_COUNT, DEFAULT_MAX_TOTAL_ELEMENTS};
 
+mod envelope;
 mod key_map;
 
 pub const PFLD_CHECKPOINT_EPOCH: u64 = 335;
