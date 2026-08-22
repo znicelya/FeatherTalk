@@ -20,4 +20,16 @@ pub enum WeightImportError {
     DuplicateKey(String),
     #[error("Burn store error: {0}")]
     Store(String),
+    #[error("invalid PFLD checkpoint envelope: {0}")]
+    InvalidPfldEnvelope(String),
+    #[error("invalid PFLD epoch: expected {expected}, got {actual}")]
+    InvalidPfldEpoch { expected: u64, actual: String },
+    #[error("invalid PFLD ignored tensor set: {0}")]
+    InvalidPfldIgnoredSet(String),
+    #[error("artifact destination already exists: {}", .0.display())]
+    ArtifactDestinationExists(std::path::PathBuf),
+    #[error("artifact validation failed: {0}")]
+    ArtifactValidation(String),
+    #[error("manifest error: {0}")]
+    Manifest(String),
 }
