@@ -147,7 +147,7 @@ fn require_positive(field: &str, value: u64) -> Result<(), ScrfdError> {
 }
 
 fn require_shape(field: &str, actual: &[usize], expected: &[usize]) -> Result<(), ScrfdError> {
-    if actual.iter().any(|dimension| *dimension == 0) {
+    if actual.contains(&0) {
         return Err(invalid(field, "dimensions must be greater than zero"));
     }
     if actual != expected {

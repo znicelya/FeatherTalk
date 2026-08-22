@@ -1,8 +1,13 @@
 //! SCRFD Burn model artifact and raw inference contract.
 
+mod artifact;
 mod error;
+mod generated;
 mod manifest;
+mod model;
+mod output;
 
+pub use artifact::ScrfdArtifactPaths;
 pub use error::ScrfdError;
 pub use manifest::{
     SCRFD_ANCHORS, SCRFD_ARCHITECTURE_VERSION, SCRFD_INPUT_SHAPE, SCRFD_MODEL_KIND,
@@ -11,3 +16,5 @@ pub use manifest::{
     ScrfdInputManifest, ScrfdLevelManifest, ScrfdLicenseManifest, ScrfdOutputManifest,
     ScrfdSourceManifest, ScrfdWeightManifest,
 };
+pub use model::ScrfdModel;
+pub use output::{ScrfdLevelOutput, ScrfdRawOutput};
