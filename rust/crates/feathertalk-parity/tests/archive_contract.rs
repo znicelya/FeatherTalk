@@ -224,7 +224,12 @@ fn extraction_rejects_an_existing_destination_symlink() {
     std::os::unix::fs::symlink(&target, &destination).unwrap();
     #[cfg(windows)]
     if let Err(error) = std::os::windows::fs::symlink_dir(&target, &destination) {
-        if error.kind() == std::io::ErrorKind::PermissionDenied {
+        // Windows without Developer Mode/SeCreateSymbolicLinkPrivilege reports
+        // ERROR_PRIVILEGE_NOT_HELD (1314), which is not consistently classified
+        // as ErrorKind::PermissionDenied across supported Rust toolchains.
+        if error.kind() == std::io::ErrorKind::PermissionDenied
+            || error.raw_os_error() == Some(1314)
+        {
             return;
         }
         panic!("failed to create test symlink: {error}");

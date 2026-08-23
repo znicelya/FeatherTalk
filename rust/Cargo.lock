@@ -2438,8 +2438,30 @@ dependencies = [
 name = "feathertalk-pfld"
 version = "0.1.0"
 dependencies = [
+ "burn",
+ "burn-store",
+ "feathertalk-models",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "feathertalk-pfld-artifact"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "feathertalk-models",
+ "feathertalk-pfld",
+ "feathertalk-weights",
+ "hex",
+ "safetensors 0.7.0",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]

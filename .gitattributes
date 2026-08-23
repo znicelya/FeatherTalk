@@ -2,3 +2,6 @@ rust/crates/feathertalk-scrfd/src/generated/scrfd_2_5g.rs text eol=lf
 rust/crates/feathertalk-scrfd/src/generated/artifact_contract.rs text eol=lf
 rust/crates/feathertalk-scrfd/artifacts/scrfd_2_5g/manifest.json text eol=lf
 rust/crates/feathertalk-scrfd/tests/fixtures/opencv_cpu_v1/fixture.json text eol=lf
+rust/crates/feathertalk-pfld/artifacts/pfld_ghost_one/manifest.json text eol=lf
+rust/crates/feathertalk-pfld/artifacts/pfld_ghost_one/model.safetensors binary
+rust/crates/feathertalk-pfld/tests/fixtures/pytorch_cpu_v1/fixture.json text eol=lf
