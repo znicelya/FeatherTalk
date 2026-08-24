@@ -1,6 +1,6 @@
 use super::{
-    AudioConvHubert, Down, InvertedResidual, MobileOneAudioConvHubert, MobileOneDown, MobileOneUp,
-    OriginalUnet,
+    AudioConvHubert, Down, InvertedResidual, MobileOneAudioConvHubert, MobileOneDown,
+    MobileOneUnet, MobileOneUp, OriginalUnet,
 };
 use burn::nn::{BatchNormConfig, PaddingConfig2d, conv::Conv2dConfig};
 use burn::tensor::backend::Backend;
@@ -111,6 +111,10 @@ impl MobileOneUnetConfig {
             channels: [2, 4, 8, 16, 32],
             num_conv_branches: 2,
         }
+    }
+
+    pub fn init<B: Backend>(&self, device: &B::Device) -> MobileOneUnet<B> {
+        MobileOneUnet::new(self.channels, self.num_conv_branches, device)
     }
 }
 

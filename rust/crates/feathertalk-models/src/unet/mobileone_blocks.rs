@@ -1,4 +1,5 @@
-use crate::MobileOneBlock;
+use crate::{MobileOneBlock, ReparameterizedMobileOneBlock};
+use burn::module::{Param, RunningState};
 use burn::nn::{
     BatchNorm, Relu,
     conv::Conv2d,
@@ -65,6 +66,35 @@ impl<B: Backend> MobileOneSeparableBlock<B> {
             output
         }
     }
+
+    pub(crate) fn reparameterize(&self) -> ReparameterizedMobileOneSeparableBlock<B> {
+        ReparameterizedMobileOneSeparableBlock {
+            depthwise: self.depthwise.reparameterize(),
+            pointwise: self.pointwise.reparameterize(),
+            use_residual: self.use_residual,
+        }
+    }
+}
+
+#[derive(burn::module::Module, Debug)]
+pub struct ReparameterizedMobileOneSeparableBlock<B: Backend> {
+    pub depthwise: ReparameterizedMobileOneBlock<B>,
+    pub pointwise: ReparameterizedMobileOneBlock<B>,
+    #[module(skip)]
+    use_residual: bool,
+}
+
+impl<B: Backend> ReparameterizedMobileOneSeparableBlock<B> {
+    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        let output = self
+            .pointwise
+            .forward(self.depthwise.forward(input.clone()));
+        if self.use_residual {
+            input + output
+        } else {
+            output
+        }
+    }
 }
 
 #[derive(burn::module::Module, Debug)]
@@ -104,6 +134,25 @@ impl<B: Backend> MobileOneDoubleConv<B> {
     pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
         self.second.forward(self.first.forward(input))
     }
+
+    pub(crate) fn reparameterize(&self) -> ReparameterizedMobileOneDoubleConv<B> {
+        ReparameterizedMobileOneDoubleConv {
+            first: self.first.reparameterize(),
+            second: self.second.reparameterize(),
+        }
+    }
+}
+
+#[derive(burn::module::Module, Debug)]
+pub struct ReparameterizedMobileOneDoubleConv<B: Backend> {
+    pub first: ReparameterizedMobileOneSeparableBlock<B>,
+    pub second: ReparameterizedMobileOneSeparableBlock<B>,
+}
+
+impl<B: Backend> ReparameterizedMobileOneDoubleConv<B> {
+    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        self.second.forward(self.first.forward(input))
+    }
 }
 
 #[derive(burn::module::Module, Debug)]
@@ -132,6 +181,23 @@ impl<B: Backend> MobileOneDown<B> {
     pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
         self.maxpool_conv.forward(input)
     }
+
+    pub(crate) fn reparameterize(&self) -> ReparameterizedMobileOneDown<B> {
+        ReparameterizedMobileOneDown {
+            maxpool_conv: self.maxpool_conv.reparameterize(),
+        }
+    }
+}
+
+#[derive(burn::module::Module, Debug)]
+pub struct ReparameterizedMobileOneDown<B: Backend> {
+    pub maxpool_conv: ReparameterizedMobileOneDoubleConv<B>,
+}
+
+impl<B: Backend> ReparameterizedMobileOneDown<B> {
+    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        self.maxpool_conv.forward(input)
+    }
 }
 
 #[derive(burn::module::Module, Debug)]
@@ -157,6 +223,26 @@ impl<B: Backend> MobileOneUp<B> {
         }
     }
 
+    pub fn forward(&self, input: Tensor<B, 4>, skip: Tensor<B, 4>) -> Tensor<B, 4> {
+        self.conv
+            .forward(upsample_and_concat(&self.up, input, skip))
+    }
+
+    pub(crate) fn reparameterize(&self) -> ReparameterizedMobileOneUp<B> {
+        ReparameterizedMobileOneUp {
+            up: self.up.clone(),
+            conv: self.conv.reparameterize(),
+        }
+    }
+}
+
+#[derive(burn::module::Module, Debug)]
+pub struct ReparameterizedMobileOneUp<B: Backend> {
+    pub up: Interpolate2d,
+    pub conv: ReparameterizedMobileOneDoubleConv<B>,
+}
+
+impl<B: Backend> ReparameterizedMobileOneUp<B> {
     pub fn forward(&self, input: Tensor<B, 4>, skip: Tensor<B, 4>) -> Tensor<B, 4> {
         self.conv
             .forward(upsample_and_concat(&self.up, input, skip))
@@ -195,6 +281,14 @@ impl<B: Backend> ConvBnAct<B> {
     pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
         self.activation
             .forward(self.batch_norm.forward(self.conv.forward(input)))
+    }
+
+    pub(crate) fn detached_clone(&self) -> Self {
+        Self {
+            conv: detached_conv2d(&self.conv),
+            batch_norm: detached_batch_norm(&self.batch_norm),
+            activation: Relu,
+        }
     }
 }
 
@@ -275,5 +369,66 @@ impl<B: Backend> MobileOneAudioConvHubert<B> {
         let output = self.conv5.forward(output);
         let output = self.conv6.forward(output);
         self.conv7.forward(output)
+    }
+
+    pub(crate) fn reparameterize(&self) -> ReparameterizedMobileOneAudioConvHubert<B> {
+        ReparameterizedMobileOneAudioConvHubert {
+            conv1: self.conv1.reparameterize(),
+            conv2: self.conv2.reparameterize(),
+            conv3: self.conv3.reparameterize(),
+            conv4: self.conv4.reparameterize(),
+            conv5: self.conv5.detached_clone(),
+            conv6: self.conv6.reparameterize(),
+            conv7: self.conv7.reparameterize(),
+        }
+    }
+}
+
+#[derive(burn::module::Module, Debug)]
+pub struct ReparameterizedMobileOneAudioConvHubert<B: Backend> {
+    pub conv1: ReparameterizedMobileOneSeparableBlock<B>,
+    pub conv2: ReparameterizedMobileOneSeparableBlock<B>,
+    pub conv3: ReparameterizedMobileOneBlock<B>,
+    pub conv4: ReparameterizedMobileOneSeparableBlock<B>,
+    pub conv5: ConvBnAct<B>,
+    pub conv6: ReparameterizedMobileOneSeparableBlock<B>,
+    pub conv7: ReparameterizedMobileOneSeparableBlock<B>,
+}
+
+impl<B: Backend> ReparameterizedMobileOneAudioConvHubert<B> {
+    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        let output = self.conv1.forward(input);
+        let output = self.conv2.forward(output);
+        let output = self.conv3.forward(output);
+        let output = self.conv4.forward(output);
+        let output = self.conv5.forward(output);
+        let output = self.conv6.forward(output);
+        self.conv7.forward(output)
+    }
+}
+
+pub(crate) fn detached_conv2d<B: Backend>(source: &Conv2d<B>) -> Conv2d<B> {
+    Conv2d {
+        weight: Param::from_tensor(source.weight.val().detach()),
+        bias: source
+            .bias
+            .as_ref()
+            .map(|bias| Param::from_tensor(bias.val().detach())),
+        stride: source.stride,
+        kernel_size: source.kernel_size,
+        dilation: source.dilation,
+        groups: source.groups,
+        padding: source.padding.clone(),
+    }
+}
+
+fn detached_batch_norm<B: Backend>(source: &BatchNorm<B>) -> BatchNorm<B> {
+    BatchNorm {
+        gamma: Param::from_tensor(source.gamma.val().detach()),
+        beta: Param::from_tensor(source.beta.val().detach()),
+        running_mean: RunningState::new(source.running_mean.value().detach()),
+        running_var: RunningState::new(source.running_var.value().detach()),
+        momentum: source.momentum,
+        epsilon: source.epsilon,
     }
 }

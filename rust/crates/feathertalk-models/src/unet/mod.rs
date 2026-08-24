@@ -4,6 +4,7 @@ mod audio;
 mod blocks;
 mod config;
 mod mobileone_blocks;
+mod mobileone_model;
 mod model;
 
 pub use audio::AudioConvHubert;
@@ -13,4 +14,5 @@ pub use config::{
     MobileOneDownConfig, MobileOneUnetConfig, MobileOneUpConfig, OriginalUnetConfig,
 };
 pub use mobileone_blocks::{MobileOneAudioConvHubert, MobileOneDown, MobileOneUp};
+pub use mobileone_model::{MobileOneUnet, MobileOneUnetInference};
 pub use model::OriginalUnet;
