@@ -3,6 +3,8 @@ mod data;
 mod error;
 mod losses;
 mod perceptual;
+#[allow(dead_code)]
+mod random;
 mod vgg19;
 
 pub use artifact::{

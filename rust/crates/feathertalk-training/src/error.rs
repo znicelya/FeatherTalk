@@ -12,6 +12,12 @@ pub enum TrainingError {
     InvalidDataLoaderState(String),
     #[error("data loader arithmetic overflow while {operation}")]
     DataLoaderOverflow { operation: &'static str },
+    #[error("unable to allocate epoch permutation for {samples} samples")]
+    PermutationAllocation {
+        samples: u64,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
     #[error("invalid VGG19 package: {0}")]
     InvalidPackage(String),
     #[error("VGG19 package hash mismatch for {file}: expected {expected}, got {actual}")]
