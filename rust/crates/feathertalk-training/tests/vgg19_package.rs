@@ -33,6 +33,27 @@ fn valid_three_file_package_loads_all_fourteen_tensors() {
 }
 
 #[test]
+fn loaded_vgg_parameters_are_marked_no_grad() {
+    let fixture = valid_package();
+    let loaded = load_vgg19_package::<burn::backend::Autodiff<CpuBackend>>(
+        &fixture.directory,
+        &Default::default(),
+    )
+    .unwrap();
+
+    assert!(!loaded.conv1_1.weight.val().is_require_grad());
+    assert!(
+        !loaded
+            .conv3_3
+            .bias
+            .as_ref()
+            .unwrap()
+            .val()
+            .is_require_grad()
+    );
+}
+
+#[test]
 fn unknown_manifest_field_is_rejected() {
     let fixture = valid_package();
     let path = fixture.directory.join(MANIFEST_FILE_NAME);
