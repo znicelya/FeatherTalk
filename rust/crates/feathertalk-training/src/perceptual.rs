@@ -23,7 +23,7 @@ pub fn perceptual_mse<B: Backend>(
     Ok((predicted - expected).square().mean())
 }
 
-fn validate_image_pair<B: Backend>(
+pub(crate) fn validate_image_pair<B: Backend>(
     prediction: &Tensor<B, 4>,
     target: &Tensor<B, 4>,
 ) -> Result<(), TrainingError> {
