@@ -59,6 +59,9 @@ impl<B: Backend> MobileOneBlock<B> {
         assert!(in_channels > 0);
         assert!(out_channels > 0);
         assert!(kernel_size > 0 && kernel_size % 2 == 1);
+        if kernel_size > 1 {
+            assert_eq!(padding, kernel_size / 2);
+        }
         assert!(stride.into_iter().all(|value| matches!(value, 1 | 2)));
         assert!(groups > 0);
         assert!(num_conv_branches > 0);

@@ -25,6 +25,14 @@ fn anisotropic_stride_halves_only_width() {
     assert_eq!(block.forward(input).dims(), [1, 8, 12, 7]);
 }
 
+#[test]
+#[should_panic]
+fn scaled_branch_rejects_non_centered_padding_during_construction() {
+    let device = Default::default();
+    let _block =
+        MobileOneBlock::<CpuBackend>::new_with_stride(4, 8, 3, [1, 2], 0, 1, 2, false, &device);
+}
+
 fn assert_reparameterized_close(block: MobileOneBlock<CpuBackend>, input: Tensor<CpuBackend, 4>) {
     let expected = block
         .forward(input.clone())
@@ -64,4 +72,12 @@ fn reparameterized_depthwise_block_matches_training_graph() {
     let device = Default::default();
     let block = MobileOneBlock::<CpuBackend>::new(4, 4, 3, 2, 1, 4, 2, true, &device);
     assert_reparameterized_close(block, Tensor::ones([1, 4, 8, 8], &device));
+}
+
+#[test]
+fn reparameterized_anisotropic_stride_matches_training_graph() {
+    let device = Default::default();
+    let block =
+        MobileOneBlock::<CpuBackend>::new_with_stride(4, 8, 3, [1, 2], 1, 1, 2, false, &device);
+    assert_reparameterized_close(block, Tensor::ones([1, 4, 8, 10], &device));
 }
