@@ -243,6 +243,21 @@ impl<D: TrainingDataset> TrainingDataLoader<D> {
         })
     }
 
+    pub fn restore(dataset: D, state: DataLoaderState) -> Result<Self, TrainingError> {
+        let dataset_frame_count = dataset.frame_count();
+        state.validate(dataset_frame_count)?;
+        let sample_count = state.config.sample_count(state.frame_count)?;
+        let permutation = epoch_permutation(sample_count, state.config.seed, state.epoch)?;
+        let loader_id = allocate_loader_id()?;
+        Ok(Self {
+            dataset,
+            state,
+            sample_count,
+            permutation,
+            loader_id,
+        })
+    }
+
     pub fn state(&self) -> &DataLoaderState {
         &self.state
     }
