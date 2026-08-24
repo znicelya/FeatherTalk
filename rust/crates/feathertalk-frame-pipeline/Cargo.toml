@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+hex.workspace = true
 feathertalk-face = { path = "../feathertalk-face" }
 feathertalk-pfld = { path = "../feathertalk-pfld" }
 serde.workspace = true

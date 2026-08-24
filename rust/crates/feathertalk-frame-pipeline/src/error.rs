@@ -9,4 +9,48 @@ pub enum PipelineError {
     },
     #[error("invalid quality report field {field}: {message}")]
     InvalidReport { field: String, message: String },
+    #[error("media tool failed during {operation}: exit={exit_code:?}, stderr={stderr}")]
+    ToolFailed {
+        operation: &'static str,
+        exit_code: Option<i32>,
+        stderr: String,
+    },
+    #[error("media tool timed out during {operation} after {timeout_ms} ms")]
+    ToolTimedOut {
+        operation: &'static str,
+        timeout_ms: u64,
+    },
+    #[error("media tool output exceeded {limit} bytes during {operation} on {stream}: {actual}")]
+    ToolOutputTooLarge {
+        operation: &'static str,
+        stream: &'static str,
+        limit: usize,
+        actual: usize,
+    },
+    #[error("failed to spawn media tool during {operation}: {message}")]
+    ToolSpawn {
+        operation: &'static str,
+        message: String,
+    },
+    #[error("I/O error during {operation} at {path}: {source}")]
+    Io {
+        operation: &'static str,
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("frame output is missing: {path}")]
+    FrameMissing { path: std::path::PathBuf },
+    #[error("frame output is not a regular non-symlink file: {path}")]
+    FrameNotRegular { path: std::path::PathBuf },
+    #[error("frame output is empty: {path}")]
+    FrameEmpty { path: std::path::PathBuf },
+    #[error("frame output exceeds {limit} bytes: {path} ({actual})")]
+    FrameTooLarge {
+        path: std::path::PathBuf,
+        limit: u64,
+        actual: u64,
+    },
+    #[error("output destination already exists: {path}")]
+    OutputDestinationExists { path: std::path::PathBuf },
 }
