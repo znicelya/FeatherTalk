@@ -53,4 +53,9 @@ pub enum PipelineError {
     },
     #[error("output destination already exists: {path}")]
     OutputDestinationExists { path: std::path::PathBuf },
+    #[error("{component} adapter failed: {message}")]
+    Adapter {
+        component: &'static str,
+        message: String,
+    },
 }
