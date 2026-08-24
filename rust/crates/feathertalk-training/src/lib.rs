@@ -3,7 +3,6 @@ mod data;
 mod error;
 mod losses;
 mod perceptual;
-#[allow(dead_code)]
 mod random;
 mod vgg19;
 
@@ -13,8 +12,9 @@ pub use artifact::{
     Vgg19PackageManifest, Vgg19SourceManifest, load_vgg19_package, read_vgg19_manifest,
 };
 pub use data::{
-    DATA_LOADER_STATE_SCHEMA_VERSION, DataLoaderConfig, DataLoaderState, RandomAlgorithm,
-    SamplingConfig, SamplingKind, TrainingSample,
+    DATA_LOADER_STATE_SCHEMA_VERSION, DataLoaderConfig, DataLoaderState, PreparedBatch,
+    RandomAlgorithm, SamplingConfig, SamplingKind, TrainingDataLoader, TrainingDataset,
+    TrainingSample,
 };
 pub use error::TrainingError;
 pub use losses::{

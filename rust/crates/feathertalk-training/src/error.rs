@@ -18,6 +18,14 @@ pub enum TrainingError {
         #[source]
         source: std::collections::TryReserveError,
     },
+    #[error("unable to allocate prepared batch buffers for {items} items")]
+    BatchAllocation {
+        items: u64,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+    #[error("prepared batch is stale or belongs to another data loader")]
+    StalePreparedBatch,
     #[error("invalid VGG19 package: {0}")]
     InvalidPackage(String),
     #[error("VGG19 package hash mismatch for {file}: expected {expected}, got {actual}")]
