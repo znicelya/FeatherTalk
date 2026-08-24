@@ -28,3 +28,41 @@ facebook/hubert-large-ls960-ft
 FeatherHuBERT checkpoints are regular PyTorch `.pth` files. They are not included in the source
 tree and are ignored by git by default. You can use the checkpoint from the demo training asset
 pack or place your own externally trained checkpoint wherever you prefer.
+
+## VGG19 perceptual weights
+
+The training perceptual extractor uses the torchvision VGG19 `features.14` convolution output
+(`VGG19_Weights.IMAGENET1K_V1`). The fixed source URL is:
+
+```text
+https://download.pytorch.org/models/vgg19-dcbb9e9d.pth
+```
+
+The official file used for numerical parity has SHA-256
+`dcbb9e9dad569fff7a846263a77324fc34978fea2bfb039c012d710e1776ae44`.
+
+The source checkpoint is not bundled in this repository. Build a runtime package only from an
+explicitly supplied source file and an independently reviewed license bundle:
+
+```powershell
+cargo run -p feathertalk-vgg19-package -- --source <path-to-vgg19-dcbb9e9d.pth> --licenses <path-to-reviewed-LICENSES.json> --destination <new-vgg19-package-directory>
+```
+
+The runtime directory is intentionally limited to these three regular files:
+
+```text
+manifest.json
+model.safetensors
+LICENSES.json
+```
+
+The loader verifies the manifest schema, source/model/license hashes, byte lengths, tensor names,
+shapes, dtypes, and license entries before returning frozen parameters. It never downloads
+weights, searches a cache, parses a `.pth` file, or falls back to random parameters. The input
+contract remains BGR float32 values in `[0,1]` with no ImageNet normalization, matching the
+existing training semantics.
+
+`rust/tests/fixtures/vgg19/LICENSES.local-parity.json` is an honest local numerical-parity record
+only; it is not approval to redistribute the pretrained weights. A release package must provide
+an independently reviewed `LICENSES.json` and record the source, model, and license hashes in its
+manifest.
