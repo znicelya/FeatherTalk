@@ -2531,6 +2531,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-training"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "burn-store",
+ "feathertalk-weights",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zip 6.0.0",
+]
+
+[[package]]
 name = "feathertalk-weights"
 version = "0.1.0"
 dependencies = [

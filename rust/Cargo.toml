@@ -12,6 +12,7 @@ members = [
   "crates/feathertalk-scrfd",
   "crates/feathertalk-frame-pipeline",
   "crates/feathertalk-audio",
+  "crates/feathertalk-training",
   "tools/pfld-artifact",
 ]
 exclude = ["tools/scrfd-import"]
