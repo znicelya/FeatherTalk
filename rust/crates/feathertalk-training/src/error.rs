@@ -6,6 +6,12 @@ pub enum TrainingError {
     InvalidInput(String),
     #[error("invalid training configuration: {0}")]
     InvalidConfig(String),
+    #[error("invalid data loader configuration: {0}")]
+    InvalidDataLoaderConfig(String),
+    #[error("invalid data loader state: {0}")]
+    InvalidDataLoaderState(String),
+    #[error("data loader arithmetic overflow while {operation}")]
+    DataLoaderOverflow { operation: &'static str },
     #[error("invalid VGG19 package: {0}")]
     InvalidPackage(String),
     #[error("VGG19 package hash mismatch for {file}: expected {expected}, got {actual}")]

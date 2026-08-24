@@ -1,4 +1,5 @@
 mod artifact;
+mod data;
 mod error;
 mod losses;
 mod perceptual;
@@ -8,6 +9,10 @@ pub use artifact::{
     VGG19_ARCHITECTURE_VERSION, VGG19_MODEL_KIND, VGG19_PACKAGE_SCHEMA_VERSION, VGG19_SOURCE_URL,
     Vgg19FileManifest, Vgg19InputManifest, Vgg19LicenseBundle, Vgg19LicenseEntry,
     Vgg19PackageManifest, Vgg19SourceManifest, load_vgg19_package, read_vgg19_manifest,
+};
+pub use data::{
+    DATA_LOADER_STATE_SCHEMA_VERSION, DataLoaderConfig, DataLoaderState, RandomAlgorithm,
+    SamplingConfig, SamplingKind, TrainingSample,
 };
 pub use error::TrainingError;
 pub use losses::{
