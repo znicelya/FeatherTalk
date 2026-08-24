@@ -15,10 +15,7 @@ fn rejects_empty_constant_and_non_finite_waveforms() {
         normalize_waveform(&[]),
         Err(AudioError::EmptyWaveform)
     ));
-    assert!(matches!(
-        normalize_waveform(&[1.0, 1.0]),
-        Err(AudioError::ConstantWaveform)
-    ));
+    assert_eq!(normalize_waveform(&[1.0, 1.0]).unwrap(), vec![0.0, 0.0]);
     assert!(matches!(
         normalize_waveform(&[0.0, f32::NAN]),
         Err(AudioError::NonFiniteWaveform { index: 1 })

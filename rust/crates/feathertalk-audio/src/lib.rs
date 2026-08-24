@@ -1,4 +1,5 @@
 mod chunk;
+mod commit;
 mod error;
 mod format;
 mod normalize;
@@ -8,6 +9,7 @@ pub use chunk::{
     ChunkPlan, ChunkRange, DEFAULT_CHUNK_SAMPLES, HUBERT_KERNEL, HUBERT_STRIDE,
     expected_hubert_frames, plan_chunks,
 };
+pub use commit::{FeatureCommitSpec, commit_feature_artifact};
 pub use error::AudioError;
 pub use format::{FeatureArtifact, MAX_FEATURE_FILE_BYTES, read_feature_file, write_feature_file};
 pub use normalize::normalize_waveform;

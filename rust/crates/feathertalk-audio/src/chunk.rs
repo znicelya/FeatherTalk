@@ -82,7 +82,12 @@ pub fn plan_chunks(samples: usize, chunk_samples: usize) -> Result<ChunkPlan, Au
         .checked_add(overlap)
         .ok_or(AudioError::ArithmeticOverflow)?;
     let complete_chunks = samples / chunk_samples;
-    let tail_needed = !samples.is_multiple_of(chunk_samples) || complete_chunks == 0;
+    let remainder = samples % chunk_samples;
+    let tail_needed = if complete_chunks == 0 {
+        samples >= HUBERT_KERNEL
+    } else {
+        remainder >= HUBERT_KERNEL
+    };
     let chunk_count = complete_chunks
         .checked_add(usize::from(tail_needed))
         .ok_or(AudioError::ArithmeticOverflow)?;
@@ -90,6 +95,14 @@ pub fn plan_chunks(samples: usize, chunk_samples: usize) -> Result<ChunkPlan, Au
         return Err(AudioError::TooManyChunks {
             actual: chunk_count,
             limit: MAX_CHUNKS,
+        });
+    }
+
+    if samples < HUBERT_KERNEL {
+        return Ok(ChunkPlan {
+            total_samples: samples,
+            target_tokens: 0,
+            ranges: Vec::new(),
         });
     }
 

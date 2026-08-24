@@ -2393,6 +2393,9 @@ dependencies = [
 name = "feathertalk-audio"
 version = "0.1.0"
 dependencies = [
+ "feathertalk-project",
+ "hex",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.20",
 ]
@@ -2436,6 +2439,7 @@ name = "feathertalk-models"
 version = "0.1.0"
 dependencies = [
  "burn",
+ "feathertalk-audio",
  "serde",
  "thiserror 2.0.20",
 ]

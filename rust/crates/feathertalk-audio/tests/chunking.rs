@@ -50,3 +50,22 @@ fn planner_rejects_zero_chunk_and_checked_overflow() {
         Err(AudioError::ArithmeticOverflow)
     ));
 }
+
+#[test]
+fn planner_does_not_schedule_encoder_for_shorter_than_kernel_input() {
+    let plan = plan_chunks(HUBERT_KERNEL - 1, DEFAULT_CHUNK_SAMPLES).unwrap();
+    assert_eq!(plan.target_tokens(), 0);
+    assert!(plan.ranges().is_empty());
+}
+
+#[test]
+fn planner_skips_a_tail_shorter_than_the_encoder_kernel() {
+    let total = DEFAULT_CHUNK_SAMPLES + HUBERT_KERNEL - 1;
+    let plan = plan_chunks(total, DEFAULT_CHUNK_SAMPLES).unwrap();
+    assert_eq!(plan.ranges().len(), 1);
+    assert_eq!(plan.ranges()[0].start(), 0);
+    assert_eq!(
+        plan.ranges()[0].end(),
+        DEFAULT_CHUNK_SAMPLES + HUBERT_KERNEL - HUBERT_STRIDE
+    );
+}

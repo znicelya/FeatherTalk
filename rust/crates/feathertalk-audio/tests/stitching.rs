@@ -113,3 +113,21 @@ fn rejects_encoder_dimension_length_and_non_finite_output() {
         })
     ));
 }
+
+#[test]
+fn returns_empty_feature_without_calling_encoder_for_short_input() {
+    struct PanicEncoder;
+    impl ChunkEncoder for PanicEncoder {
+        fn output_dim(&self) -> usize {
+            2
+        }
+
+        fn encode(&mut self, _: usize, _: &[f32]) -> Result<Vec<f32>, AudioError> {
+            panic!("encoder must not be called for a short waveform")
+        }
+    }
+
+    let mut encoder = PanicEncoder;
+    let matrix = extract_long_audio(&waveform(399), &mut encoder, DEFAULT_CHUNK_SAMPLES).unwrap();
+    assert_eq!(matrix, FeatureMatrix::new(0, 2, vec![]).unwrap());
+}

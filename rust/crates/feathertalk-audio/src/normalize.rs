@@ -18,7 +18,7 @@ pub fn normalize_waveform(samples: &[f32]) -> Result<Vec<f32>, AudioError> {
         })
         .sum::<f64>()
         / samples.len() as f64;
-    if variance == 0.0 || !variance.is_finite() {
+    if !variance.is_finite() {
         return Err(AudioError::ConstantWaveform);
     }
     let denominator = (variance + 1e-7_f64).sqrt();

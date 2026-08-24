@@ -71,6 +71,24 @@ fn feature_reader_rejects_unknown_version_short_payload_trailing_bytes_and_symli
 }
 
 #[test]
+fn feature_header_contains_pair_width_two() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("feature.f32");
+    write_feature_file(&path, &matrix()).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    assert_eq!(u64::from_le_bytes(bytes[20..28].try_into().unwrap()), 2);
+    assert_eq!(read_feature_file(&path).unwrap(), matrix());
+
+    let mut invalid = bytes;
+    invalid[20..28].copy_from_slice(&3_u64.to_le_bytes());
+    fs::write(&path, invalid).unwrap();
+    assert!(matches!(
+        read_feature_file(&path),
+        Err(AudioError::InvalidFeaturePairWidth { actual: 3 })
+    ));
+}
+
+#[test]
 fn feature_writer_rejects_existing_symlink_destination() {
     let root = tempfile::tempdir().unwrap();
     let target = root.path().join("target.f32");

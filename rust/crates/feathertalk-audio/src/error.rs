@@ -18,6 +18,14 @@ pub enum AudioError {
     InvalidFeatureDimension,
     #[error("feature output length {actual} is not divisible by dimension {dimension}")]
     FeatureLengthMismatch { actual: usize, dimension: usize },
+    #[error(
+        "feature shape does not match requested frame count {frame_count}: tokens={tokens}, dims={dims}"
+    )]
+    FeatureShapeMismatch {
+        frame_count: u64,
+        tokens: usize,
+        dims: usize,
+    },
     #[error("feature contains a non-finite value at index {index}")]
     NonFiniteFeature { index: usize },
     #[error("feature matrix size overflow")]
@@ -38,6 +46,8 @@ pub enum AudioError {
     FeatureTrailingBytes { actual: usize },
     #[error("feature file has an invalid payload size")]
     InvalidFeaturePayloadSize,
+    #[error("feature file pair width must be 2, got {actual}")]
+    InvalidFeaturePairWidth { actual: u64 },
     #[error("feature I/O error during {operation} at {path}: {source}")]
     FeatureIo {
         operation: &'static str,
@@ -45,4 +55,21 @@ pub enum AudioError {
         #[source]
         source: std::io::Error,
     },
+    #[error("locked asset manifest cannot be mutated: {path}")]
+    LockedAssetMutation { path: std::path::PathBuf },
+    #[error("feature artifact commit failed during {operation}: {message}")]
+    CommitFailed {
+        operation: &'static str,
+        message: String,
+    },
+    #[error(
+        "feature artifact rollback failed during {operation}: primary={primary}; rollback={rollback}"
+    )]
+    CommitRollbackFailed {
+        operation: &'static str,
+        primary: String,
+        rollback: String,
+    },
+    #[error("feature staging path already exists: {path}")]
+    StagingCollision { path: std::path::PathBuf },
 }

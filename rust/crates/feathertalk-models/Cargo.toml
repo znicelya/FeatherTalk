@@ -12,6 +12,7 @@ metal = ["burn/metal"]
 vulkan = ["burn/vulkan"]
 
 [dependencies]
+feathertalk-audio = { path = "../feathertalk-audio" }
 burn.workspace = true
 serde.workspace = true
 thiserror.workspace = true
