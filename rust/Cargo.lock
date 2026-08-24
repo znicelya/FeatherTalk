@@ -2547,6 +2547,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-vgg19-package"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "burn-store",
+ "clap",
+ "feathertalk-training",
+ "feathertalk-weights",
+ "hex",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zip 6.0.0",
+]
+
+[[package]]
 name = "feathertalk-weights"
 version = "0.1.0"
 dependencies = [
