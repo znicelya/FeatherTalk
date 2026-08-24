@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::{
     WeightImportError,
-    key_map::{LegacyModelKind, configure_store, is_known_ignored_key, map_key},
+    key_map::{LegacyModelKind, configure_store, is_known_ignored_key_for, map_key},
     source::{
         DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_TENSOR_COUNT, DEFAULT_MAX_TOTAL_ELEMENTS, SnapshotFile,
         tensor_elements,
@@ -63,7 +63,7 @@ where
     let mut store = build_strict_store(request)?;
     let mut candidate = module.clone();
     let result = candidate.load_from(&mut store)?;
-    validate_apply_result(&result)?;
+    validate_apply_result(request.kind, &result)?;
     let report = build_report(request, &mut store, result)?;
     *module = candidate;
     Ok(report)
@@ -126,7 +126,7 @@ fn build_strict_store(
     let keys = store.keys().map_err(store_error)?;
     let ignored: Vec<String> = keys
         .iter()
-        .filter(|key| is_known_ignored_key(key))
+        .filter(|key| is_known_ignored_key_for(request.kind, key))
         .cloned()
         .collect();
     let snapshots = store.get_all_snapshots().map_err(store_error)?;
@@ -225,7 +225,10 @@ fn inspected_size(
     Ok((count, total))
 }
 
-fn validate_apply_result(result: &ApplyResult) -> Result<(), WeightImportError> {
+fn validate_apply_result(
+    kind: LegacyModelKind,
+    result: &ApplyResult,
+) -> Result<(), WeightImportError> {
     if let Some((path, _)) = result.missing.first() {
         return Err(WeightImportError::MissingTensor(path.clone()));
     }
@@ -240,7 +243,11 @@ fn validate_apply_result(result: &ApplyResult) -> Result<(), WeightImportError> 
             other => WeightImportError::Store(other.to_string()),
         });
     }
-    if let Some(key) = result.unused.iter().find(|key| !is_known_ignored_key(key)) {
+    if let Some(key) = result
+        .unused
+        .iter()
+        .find(|key| !is_known_ignored_key_for(kind, key))
+    {
         return Err(WeightImportError::UnexpectedTensor(key.clone()));
     }
     Ok(())

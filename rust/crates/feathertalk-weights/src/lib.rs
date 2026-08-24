@@ -8,7 +8,7 @@ mod safe;
 mod source;
 
 pub use error::WeightImportError;
-pub use key_map::{LegacyModelKind, is_known_ignored_key};
+pub use key_map::{LegacyModelKind, is_known_ignored_key, is_known_ignored_key_for};
 pub use legacy::{ImportReport, LegacyImportRequest, import_into};
 pub use pfld::{
     PFLD_ARCHITECTURE_VERSION, PFLD_CHECKPOINT_EPOCH, PfldIgnoredTensors, PfldImportManifest,
