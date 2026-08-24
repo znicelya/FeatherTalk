@@ -116,6 +116,12 @@ pub struct FrameEvaluation {
 }
 
 impl FrameEvaluation {
+    pub fn from_parts(accepted: Vec<AcceptedFrame>, anomalies: Vec<FrameAnomaly>) -> Self {
+        Self {
+            accepted,
+            anomalies,
+        }
+    }
     pub fn accepted(&self) -> &[AcceptedFrame] {
         &self.accepted
     }

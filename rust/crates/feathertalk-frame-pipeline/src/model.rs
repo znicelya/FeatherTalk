@@ -341,7 +341,11 @@ impl QualityReport {
         if self.accepted_count != self.frames.len() as u64 {
             return Err(report_invalid("accepted_count", "must equal frames length"));
         }
-        if self.accepted_count + self.anomalies.len() as u64 > self.frame_count {
+        let total_classified = self
+            .accepted_count
+            .checked_add(self.anomalies.len() as u64)
+            .ok_or_else(|| report_invalid("frames", "accepted frames and anomalies overflow"))?;
+        if total_classified > self.frame_count {
             return Err(report_invalid(
                 "frames",
                 "accepted frames and anomalies exceed frame_count",

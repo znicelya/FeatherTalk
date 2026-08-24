@@ -53,6 +53,15 @@ impl FrameBatch {
     pub fn disarm(&mut self) {
         self.armed = false;
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_staging_dir_for_test(staging_dir: PathBuf) -> Self {
+        Self {
+            staging_dir,
+            frames: Vec::new(),
+            armed: true,
+        }
+    }
 }
 
 impl Drop for FrameBatch {

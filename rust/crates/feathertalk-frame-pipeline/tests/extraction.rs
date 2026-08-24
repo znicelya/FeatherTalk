@@ -182,6 +182,20 @@ fn symlink_output_is_rejected() {
     let (root, spec, extractor) = setup(1);
     let target = root.path().join("target.jpg");
     fs::write(&target, b"target").unwrap();
+    fs::create_dir_all(spec.output_root()).unwrap();
+    let link = spec
+        .output_root()
+        .join(format!(".feathertalk-symlink-probe-{}", std::process::id()));
+    match std::os::windows::fs::symlink_file(&target, &link) {
+        Ok(()) => {
+            let _ = fs::remove_file(&link);
+        }
+        Err(error) if error.raw_os_error() == Some(1314) => {
+            eprintln!("skipping symlink test: Windows symlink privilege unavailable");
+            return;
+        }
+        Err(error) => panic!("unable to create symlink fixture: {error}"),
+    }
     let runner = SymlinkRunner { target };
     assert!(matches!(
         extract_frames_with_runner(&spec, &extractor, &runner),

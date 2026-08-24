@@ -58,4 +58,25 @@ pub enum PipelineError {
         component: &'static str,
         message: String,
     },
+    #[error("quality evaluation rejected frame artifacts: {count} anomalies")]
+    QualityRejected { count: usize },
+    #[error("quality report JSON is invalid: {message}")]
+    ReportJson { message: String },
+    #[error("quality report is not a regular non-symlink file: {path}")]
+    ReportNotRegular { path: std::path::PathBuf },
+    #[error("quality report exceeds {limit} bytes: {actual}")]
+    ReportTooLarge { limit: usize, actual: usize },
+    #[error("atomic frame artifact commit failed during {operation}: {message}")]
+    PublishFailed {
+        operation: &'static str,
+        message: String,
+    },
+    #[error(
+        "atomic frame artifact rollback failed during {operation}: primary={primary}; rollback={rollback}"
+    )]
+    PublishRollbackFailed {
+        operation: &'static str,
+        primary: String,
+        rollback: String,
+    },
 }
