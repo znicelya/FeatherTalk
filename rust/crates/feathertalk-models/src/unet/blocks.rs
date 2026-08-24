@@ -152,34 +152,43 @@ impl<B: Backend> Up<B> {
     }
 
     pub fn forward(&self, input: Tensor<B, 4>, skip: Tensor<B, 4>) -> Tensor<B, 4> {
-        let input = if B::ad_enabled(&input.device()) {
-            bilinear_upsample_2x_align_corners(input)
-        } else {
-            self.up.forward(input)
-        };
-        let [_, _, input_h, input_w] = input.dims();
-        let [_, _, skip_h, skip_w] = skip.dims();
-        assert!(
-            skip_h >= input_h,
-            "skip height is smaller than upsampled input"
-        );
-        assert!(
-            skip_w >= input_w,
-            "skip width is smaller than upsampled input"
-        );
-        let diff_h = skip_h - input_h;
-        let diff_w = skip_w - input_w;
-        let input = input.pad(
-            [
-                (0, 0),
-                (0, 0),
-                (diff_h / 2, diff_h - diff_h / 2),
-                (diff_w / 2, diff_w - diff_w / 2),
-            ],
-            PadMode::Constant(0.0),
-        );
-        self.conv.forward(Tensor::cat(vec![input, skip], 1))
+        self.conv
+            .forward(upsample_and_concat(&self.up, input, skip))
     }
+}
+
+pub(crate) fn upsample_and_concat<B: Backend>(
+    up: &Interpolate2d,
+    input: Tensor<B, 4>,
+    skip: Tensor<B, 4>,
+) -> Tensor<B, 4> {
+    let input = if B::ad_enabled(&input.device()) {
+        bilinear_upsample_2x_align_corners(input)
+    } else {
+        up.forward(input)
+    };
+    let [_, _, input_h, input_w] = input.dims();
+    let [_, _, skip_h, skip_w] = skip.dims();
+    assert!(
+        skip_h >= input_h,
+        "skip height is smaller than upsampled input"
+    );
+    assert!(
+        skip_w >= input_w,
+        "skip width is smaller than upsampled input"
+    );
+    let diff_h = skip_h - input_h;
+    let diff_w = skip_w - input_w;
+    let input = input.pad(
+        [
+            (0, 0),
+            (0, 0),
+            (diff_h / 2, diff_h - diff_h / 2),
+            (diff_w / 2, diff_w - diff_w / 2),
+        ],
+        PadMode::Constant(0.0),
+    );
+    Tensor::cat(vec![input, skip], 1)
 }
 
 fn bilinear_upsample_2x_align_corners<B: Backend>(input: Tensor<B, 4>) -> Tensor<B, 4> {

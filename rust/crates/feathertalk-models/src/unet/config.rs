@@ -1,4 +1,7 @@
-use super::{AudioConvHubert, Down, InvertedResidual, OriginalUnet};
+use super::{
+    AudioConvHubert, Down, InvertedResidual, MobileOneAudioConvHubert, MobileOneDown, MobileOneUp,
+    OriginalUnet,
+};
 use burn::nn::{BatchNormConfig, PaddingConfig2d, conv::Conv2dConfig};
 use burn::tensor::backend::Backend;
 
@@ -86,6 +89,99 @@ impl OriginalUnetConfig {
 
     pub fn init<B: Backend>(&self, device: &B::Device) -> OriginalUnet<B> {
         OriginalUnet::new(self.channels, device)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MobileOneUnetConfig {
+    pub channels: [usize; 5],
+    pub num_conv_branches: usize,
+}
+
+impl MobileOneUnetConfig {
+    pub const fn production() -> Self {
+        Self {
+            channels: [32, 64, 128, 256, 512],
+            num_conv_branches: 2,
+        }
+    }
+
+    pub const fn parity_micro() -> Self {
+        Self {
+            channels: [2, 4, 8, 16, 32],
+            num_conv_branches: 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MobileOneDownConfig {
+    pub in_channels: usize,
+    pub out_channels: usize,
+    pub num_conv_branches: usize,
+}
+
+impl MobileOneDownConfig {
+    pub const fn new(in_channels: usize, out_channels: usize, num_conv_branches: usize) -> Self {
+        Self {
+            in_channels,
+            out_channels,
+            num_conv_branches,
+        }
+    }
+
+    pub fn init<B: Backend>(&self, device: &B::Device) -> MobileOneDown<B> {
+        MobileOneDown::new(
+            self.in_channels,
+            self.out_channels,
+            self.num_conv_branches,
+            device,
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MobileOneUpConfig {
+    pub in_channels: usize,
+    pub out_channels: usize,
+    pub num_conv_branches: usize,
+}
+
+impl MobileOneUpConfig {
+    pub const fn new(in_channels: usize, out_channels: usize, num_conv_branches: usize) -> Self {
+        Self {
+            in_channels,
+            out_channels,
+            num_conv_branches,
+        }
+    }
+
+    pub fn init<B: Backend>(&self, device: &B::Device) -> MobileOneUp<B> {
+        MobileOneUp::new(
+            self.in_channels,
+            self.out_channels,
+            self.num_conv_branches,
+            device,
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MobileOneAudioConvHubertConfig {
+    pub channels: [usize; 5],
+    pub num_conv_branches: usize,
+}
+
+impl MobileOneAudioConvHubertConfig {
+    pub const fn new(channels: [usize; 5], num_conv_branches: usize) -> Self {
+        Self {
+            channels,
+            num_conv_branches,
+        }
+    }
+
+    pub fn init<B: Backend>(&self, device: &B::Device) -> MobileOneAudioConvHubert<B> {
+        MobileOneAudioConvHubert::new(self.channels, self.num_conv_branches, device)
     }
 }
 
