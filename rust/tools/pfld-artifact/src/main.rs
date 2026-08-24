@@ -194,6 +194,11 @@ fn canonicalize_safetensors(bytes: &[u8]) -> Result<Vec<u8>, Box<dyn std::error:
     Ok(safetensors::serialize(tensors, None)?)
 }
 
+#[allow(dead_code)]
+fn _path_buf(path: &Path) -> PathBuf {
+    path.to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,10 +263,7 @@ mod tests {
             },
             |source: &Path, destination: &Path| {
                 if source.file_name().and_then(|name| name.to_str()) == Some("model.safetensors") {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "simulated model copy failure",
-                    ));
+                    return Err(io::Error::other("simulated model copy failure"));
                 }
                 fs::copy(source, destination)
             },
@@ -271,9 +273,4 @@ mod tests {
         assert!(!staged_path.exists());
         assert!(!destination.exists());
     }
-}
-
-#[allow(dead_code)]
-fn _path_buf(path: &Path) -> PathBuf {
-    path.to_owned()
 }
