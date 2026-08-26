@@ -6,7 +6,7 @@ mod plan;
 mod render;
 mod sequence;
 
-pub use burn::{UnetAudioInput, build_unet_audio_input};
+pub use burn::{UnetAudioInput, build_unet_audio_input, render_planned_frame, run_unet_prediction};
 pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
 pub use frame::{
