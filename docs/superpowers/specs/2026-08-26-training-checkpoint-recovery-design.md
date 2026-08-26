@@ -119,6 +119,13 @@ pub struct TrainingCheckpointManifest {
     pub burn_version: String,
     pub rust_version: String,
 }
+pub struct CheckpointDescriptor {
+    pub model_kind: String,
+    pub architecture_version: String,
+    pub model_config_sha256: String,
+    pub optimizer_kind: String,
+    pub optimizer_schema_version: u32,
+}
 pub struct RestoredTrainingState<M, O> {
     pub model: M,
     pub optimizer: O,
@@ -130,9 +137,9 @@ pub fn save_training_checkpoint<B, M, O>(
     destination: impl AsRef<Path>,
     model: &M,
     optimizer: &O,
-    manifest: TrainingCheckpointManifest,
+    descriptor: CheckpointDescriptor,
     state: TrainingCheckpointState,
-) -> Result<(), TrainingError>
+) -> Result<TrainingCheckpointManifest, TrainingError>
 where
     B: AutodiffBackend,
     M: AutodiffModule<B> + Clone,
@@ -158,7 +165,7 @@ where
 ## 5. 保存数据流和原子性
 
 1. 校验 destination 是目标父目录下的非符号链接路径，目标目录不存在。
-2. 校验 manifest/state 彼此一致：epoch、global step、seed、DataLoader seed、配置和 provenance 必须匹配。
+2. 校验 descriptor/state 彼此一致：epoch、global step、seed、DataLoader seed、配置和 provenance 必须匹配。
 3. 创建 staging 目录，并在其中写 `model.bin`、`optimizer.bin`、`training-state.json`。
 4. 每个文件写完后 flush、sync data、读取并计算 SHA-256；字节数和哈希写入内存中的 manifest。
 5. 对 staging 中的文件执行 `sync_all`；父目录同步使用平台适配实现（支持的平台调用 `sync_all`，不支持的平台完成文件同步后继续原子 rename）。
