@@ -17,7 +17,9 @@ use feathertalk_models::{
     train_step::{adam_train_step, l1_loss},
     unet::OriginalUnetConfig,
 };
-use feathertalk_weights::{LegacyImportRequest, LegacyModelKind, import_into};
+use feathertalk_weights::{
+    LegacyImportRequest, LegacyModelKind, import_into, load_feather_hubert_checkpoint,
+};
 
 use crate::{
     archive::{FixtureError, GoldenArchive},
@@ -290,17 +292,20 @@ pub fn run_cpu_forward(
     let temp = tempfile::tempdir().map_err(FixtureError::from)?;
     let extracted = temp.path().join("fixture");
     archive.extract_to(&extracted)?;
-    let request = LegacyImportRequest {
-        path: extracted.join(case.weights_entry()),
-        kind: case.weight_kind(),
-        ..Default::default()
-    };
+    let weights_path = extracted.join(case.weights_entry());
     let device = Default::default();
 
     let actual = match case {
         ForwardCase::FeatherMicro => {
-            let mut model = FeatherHubertConfig::parity_micro().init::<CpuBackend>(&device);
-            import_into::<CpuBackend, _>(&mut model, &request)?;
+            let (model, checkpoint) =
+                load_feather_hubert_checkpoint::<CpuBackend>(&weights_path, &device)?;
+            if checkpoint.config().output_dim != FEATHER_OUTPUT_SHAPE[2] {
+                return Err(config_mismatch(
+                    case,
+                    &FEATHER_OUTPUT_SHAPE[2],
+                    &checkpoint.config().output_dim,
+                ));
+            }
             let input = fixture
                 .inputs
                 .get("waveform")
@@ -309,6 +314,11 @@ pub fn run_cpu_forward(
             array_from_tensor(model.forward(input))?
         }
         ForwardCase::UnetProduction => {
+            let request = LegacyImportRequest {
+                path: weights_path,
+                kind: case.weight_kind(),
+                ..Default::default()
+            };
             let mut model = OriginalUnetConfig::production().init::<CpuBackend>(&device);
             import_into::<CpuBackend, _>(&mut model, &request)?;
             let image = fixture
