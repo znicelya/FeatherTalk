@@ -29,7 +29,10 @@ fn metrics_json_is_strict_and_round_trips() {
     value.validate().unwrap();
     let json = serde_json::to_string(&value).unwrap();
     assert!(json.contains("\"schema_version\":1"));
-    assert_eq!(serde_json::from_str::<TrainingMetrics>(&json).unwrap(), value);
+    assert_eq!(
+        serde_json::from_str::<TrainingMetrics>(&json).unwrap(),
+        value
+    );
 
     let mut unknown = serde_json::to_value(value).unwrap();
     unknown["unexpected"] = true.into();
@@ -89,10 +92,7 @@ fn preview_value_requires_three_fixed_arrays_and_strict_metadata() {
         vec![0.25; 76_800],
         vec![0.25; 76_800],
     );
-    assert!(matches!(
-        invalid,
-        Err(TrainingError::InvalidCheckpoint(_))
-    ));
+    assert!(matches!(invalid, Err(TrainingError::InvalidCheckpoint(_))));
 }
 
 #[test]

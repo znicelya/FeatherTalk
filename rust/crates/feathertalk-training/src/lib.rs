@@ -7,6 +7,7 @@ mod losses;
 mod perceptual;
 mod random;
 mod telemetry;
+mod telemetry_io;
 mod vgg19;
 
 pub use artifact::{
@@ -39,5 +40,8 @@ pub use telemetry::{
     PREVIEW_MOUTH_ROI_FILE_NAME, PREVIEW_PREDICTION_FILE_NAME, PREVIEW_TARGET_FILE_NAME,
     PREVIEW_TENSOR_ELEMENTS, PREVIEW_TENSOR_SHAPE, PreviewArtifact, PreviewArtifactManifest,
     PreviewFileManifest, TRAINING_METRICS_SCHEMA_VERSION, TrainingMetrics,
+};
+pub use telemetry_io::{
+    read_preview_artifact, read_training_metrics, write_preview_artifact, write_training_metrics,
 };
 pub use vgg19::Vgg19Conv3_3;

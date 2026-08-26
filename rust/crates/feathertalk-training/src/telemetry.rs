@@ -221,10 +221,7 @@ impl PreviewArtifact {
 
     pub fn validate(&self) -> Result<(), TrainingError> {
         validate_identifier("preview.model_kind", &self.model_kind, 128)?;
-        validate_sha256(
-            "preview.model_config_sha256",
-            &self.model_config_sha256,
-        )?;
+        validate_sha256("preview.model_config_sha256", &self.model_config_sha256)?;
         validate_worker_state(&self.worker_state)?;
         validate_tensor("preview.prediction", &self.prediction)?;
         validate_tensor("preview.target", &self.target)?;
@@ -298,16 +295,11 @@ impl PreviewArtifactManifest {
             ));
         }
         validate_identifier("preview.model_kind", &self.model_kind, 128)?;
-        validate_sha256(
-            "preview.model_config_sha256",
-            &self.model_config_sha256,
-        )?;
+        validate_sha256("preview.model_config_sha256", &self.model_config_sha256)?;
         validate_worker_state(&self.worker_state)?;
-        self.prediction
-            .validate(PREVIEW_PREDICTION_FILE_NAME)?;
+        self.prediction.validate(PREVIEW_PREDICTION_FILE_NAME)?;
         self.target.validate(PREVIEW_TARGET_FILE_NAME)?;
-        self.mouth_roi
-            .validate(PREVIEW_MOUTH_ROI_FILE_NAME)?;
+        self.mouth_roi.validate(PREVIEW_MOUTH_ROI_FILE_NAME)?;
         Ok(())
     }
 
@@ -365,9 +357,9 @@ fn validate_identifier(name: &str, value: &str, max_bytes: usize) -> Result<(), 
     if value.is_empty()
         || value.len() > max_bytes
         || value.trim() != value
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-        })
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     {
         return invalid_checkpoint(format!(
             "{name} must be 1-{max_bytes} trimmed ASCII identifier characters"
