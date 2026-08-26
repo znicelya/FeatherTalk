@@ -46,7 +46,7 @@ This prevents a UI or RPC consumer from displaying a misleading component set.
 
 ### 2.2 Preview artifacts use one fixed sample and three arrays
 
-`PreviewArtifact` represents one deterministic sample selected by the training executor. It stores the sample index, reference index, epoch, global step, model kind, model configuration hash, and three arrays:
+`PreviewArtifact` represents one deterministic sample selected by the training executor. It stores the sample index, reference index, epoch, global step, model kind, model configuration hash, worker state, and three arrays:
 
 - `prediction`: `[3, 160, 160]` float32;
 - `target`: `[3, 160, 160]` float32;
@@ -68,7 +68,7 @@ mouth-roi.f32
 Each `.f32` file has a 32-byte little-endian header:
 
 ```text
-bytes 0..8    magic `FTPV32\\0\\0\\0`
+bytes 0..8    magic `FTPV32\\0\\0` (8 bytes)
 bytes 8..12   format version u32 = 1
 bytes 12..16  rank u32 = 3
 bytes 16..20  dimension 0 u32 = 3
@@ -167,4 +167,3 @@ The following remain future slices:
 - GPU adapter memory sampling and platform-specific telemetry providers.
 - GPUI training and preview screens.
 - Video preview rendering and final FFmpeg composition.
-
