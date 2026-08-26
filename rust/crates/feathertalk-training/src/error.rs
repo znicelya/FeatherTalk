@@ -36,4 +36,10 @@ pub enum TrainingError {
     },
     #[error("Burn store error: {0}")]
     Store(String),
+    #[error("invalid training checkpoint: {0}")]
+    InvalidCheckpoint(String),
+    #[error("training checkpoint compatibility error: {0}")]
+    CheckpointCompatibility(String),
+    #[error("training checkpoint directory error: {0}")]
+    CheckpointDirectory(String),
 }
