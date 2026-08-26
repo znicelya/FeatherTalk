@@ -1,6 +1,18 @@
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
-use feathertalk_inference::{InferenceError, OfflineRenderRequest};
+use burn::tensor::{Tensor, TensorData};
+use feathertalk_audio::{FeatureMatrix, write_feature_file};
+use feathertalk_inference::{
+    BgrFrame, FrameReader, InferenceError, OfflineRenderRequest, RawVideoSink, RawVideoSinkFactory,
+    execute_offline_render,
+};
+use feathertalk_models::{backend::CpuBackend, unet::TalkingHeadModel};
+
+#[path = "support/mod.rs"]
+mod support;
 
 fn request(root: &std::path::Path) -> OfflineRenderRequest {
     OfflineRenderRequest::new(
@@ -127,4 +139,459 @@ fn request_reuses_output_and_task_id_validation() {
         ),
         Err(InferenceError::InvalidTaskId { .. })
     ));
+}
+
+struct OutputModel {
+    value: f32,
+}
+
+impl TalkingHeadModel<CpuBackend> for OutputModel {
+    fn forward_talking_head(
+        &self,
+        image: Tensor<CpuBackend, 4>,
+        _audio: Tensor<CpuBackend, 4>,
+    ) -> Tensor<CpuBackend, 4> {
+        let device = image.device();
+        Tensor::from_data(
+            TensorData::new(vec![self.value; 3 * 160 * 160], [1, 3, 160, 160]),
+            &device,
+        )
+    }
+}
+
+#[derive(Clone)]
+struct RecordingReader {
+    frames: Arc<Mutex<Vec<usize>>>,
+    fail_at: Option<usize>,
+    alternate_dimensions_at: Option<usize>,
+}
+
+impl FrameReader for RecordingReader {
+    fn read(&self, index: usize, path: &Path) -> Result<BgrFrame, InferenceError> {
+        self.frames.lock().unwrap().push(index);
+        if self.fail_at == Some(index) {
+            return Err(InferenceError::FrameReader {
+                index,
+                path: path.to_owned(),
+                message: "injected reader failure".into(),
+            });
+        }
+        let (width, height) = if self.alternate_dimensions_at == Some(index) {
+            (160, 168)
+        } else {
+            (168, 168)
+        };
+        BgrFrame::new(
+            width,
+            height,
+            vec![(index as u8) + 1; (width * height * 3) as usize],
+        )
+    }
+}
+
+#[derive(Clone, Default)]
+struct RecordingSinkState {
+    frames: Vec<Vec<u8>>,
+    staging: Option<PathBuf>,
+    fail_write: bool,
+    fail_finish: bool,
+}
+
+struct RecordingSink {
+    state: Arc<Mutex<RecordingSinkState>>,
+}
+
+impl RawVideoSink for RecordingSink {
+    fn write_frame(&mut self, frame: &BgrFrame) -> Result<(), InferenceError> {
+        let mut state = self.state.lock().unwrap();
+        if state.fail_write {
+            return Err(InferenceError::SinkWrite {
+                message: "injected sink write failure".into(),
+            });
+        }
+        state.frames.push(frame.as_bytes().to_vec());
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>) -> Result<(), InferenceError> {
+        let state = self.state.lock().unwrap();
+        if state.fail_finish {
+            return Err(InferenceError::SinkFinish {
+                message: "injected sink finish failure".into(),
+            });
+        }
+        std::fs::write(state.staging.as_ref().unwrap(), b"rendered-video").unwrap();
+        Ok(())
+    }
+}
+
+struct RecordingSinkFactory {
+    state: Arc<Mutex<RecordingSinkState>>,
+}
+
+impl RawVideoSinkFactory for RecordingSinkFactory {
+    fn start(
+        &self,
+        command: &feathertalk_inference::CommandSpec,
+    ) -> Result<Box<dyn RawVideoSink>, InferenceError> {
+        self.state.lock().unwrap().staging = Some(
+            command
+                .arguments()
+                .last()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+                .into(),
+        );
+        Ok(Box::new(RecordingSink {
+            state: Arc::clone(&self.state),
+        }))
+    }
+}
+
+fn artifact_tree(
+    frame_count: usize,
+    feature_frame_count: usize,
+    output_count: Option<usize>,
+) -> (tempfile::TempDir, OfflineRenderRequest) {
+    let root = tempfile::tempdir().unwrap();
+    let frames = root.path().join("frames");
+    let landmarks = root.path().join("landmarks");
+    std::fs::create_dir(&frames).unwrap();
+    std::fs::create_dir(&landmarks).unwrap();
+    for index in 0..frame_count {
+        std::fs::write(frames.join(format!("{index:06}.jpg")), b"fixture").unwrap();
+        let mut lms = String::new();
+        for point in 0..110 {
+            let x = if point == 31 { 168 } else { 0 };
+            let y = 0;
+            lms.push_str(&format!("{x} {y}\n"));
+        }
+        std::fs::write(landmarks.join(format!("{index:06}.lms")), lms).unwrap();
+    }
+    let feature_tokens = feature_frame_count * 2;
+    let features =
+        FeatureMatrix::new(feature_tokens, 1024, vec![0.0; feature_tokens * 1024]).unwrap();
+    let feature_path = root.path().join("features.f32");
+    write_feature_file(&feature_path, &features).unwrap();
+    let audio_path = root.path().join("audio.wav");
+    std::fs::write(&audio_path, b"audio").unwrap();
+    let request = OfflineRenderRequest::new(
+        frames,
+        landmarks,
+        feature_path,
+        audio_path,
+        std::env::current_exe().unwrap(),
+        root.path().join("result.mp4"),
+        "task-executor",
+        frame_count,
+        output_count,
+    )
+    .unwrap();
+    (root, request)
+}
+
+#[test]
+fn executor_reads_artifacts_renders_plan_and_publishes_result() {
+    let (_root, request) = artifact_tree(3, 5, Some(5));
+    let reader_calls = Arc::new(Mutex::new(Vec::new()));
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let reader = RecordingReader {
+        frames: Arc::clone(&reader_calls),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    let result = execute_offline_render::<CpuBackend, _, _, _>(
+        &OutputModel { value: 1.0 },
+        &device,
+        &request,
+        &reader,
+        &sink_factory,
+    )
+    .unwrap();
+
+    assert_eq!(result.frame_count(), 5);
+    assert_eq!(result.output_path(), request.output_path());
+    assert_eq!(*reader_calls.lock().unwrap(), vec![0, 1, 2, 1, 0]);
+    assert_eq!(sink_state.lock().unwrap().frames.len(), 5);
+    assert!(request.output_path().is_file());
+    assert_eq!(
+        std::fs::read(request.output_path()).unwrap(),
+        b"rendered-video"
+    );
+}
+
+#[test]
+fn executor_cleans_staging_and_preserves_existing_destination_on_failure() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    std::fs::write(request.output_path(), b"sentinel").unwrap();
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::OutputExists { .. })
+    ));
+    assert_eq!(std::fs::read(request.output_path()).unwrap(), b"sentinel");
+}
+
+#[test]
+fn executor_propagates_reader_failure_without_publishing() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    let reader_calls = Arc::new(Mutex::new(Vec::new()));
+    let reader = RecordingReader {
+        frames: Arc::clone(&reader_calls),
+        fail_at: Some(1),
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::FrameReader { index: 1, .. })
+    ));
+    assert!(!request.output_path().exists());
+    assert_eq!(*reader_calls.lock().unwrap(), vec![0, 1]);
+}
+
+#[test]
+fn executor_rejects_model_output_before_writing_the_failed_frame() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: f32::NAN },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::NonFiniteModelOutput { .. })
+    ));
+    assert!(sink_state.lock().unwrap().frames.is_empty());
+    assert!(!request.output_path().exists());
+    let staging = sink_state.lock().unwrap().staging.clone().unwrap();
+    assert!(!staging.exists());
+}
+
+#[test]
+fn executor_cleans_staging_after_sink_write_or_finish_failure() {
+    for (fail_write, fail_finish) in [(true, false), (false, true)] {
+        let (_root, request) = artifact_tree(2, 2, None);
+        let reader = RecordingReader {
+            frames: Arc::new(Mutex::new(Vec::new())),
+            fail_at: None,
+            alternate_dimensions_at: None,
+        };
+        let sink_state = Arc::new(Mutex::new(RecordingSinkState {
+            fail_write,
+            fail_finish,
+            ..RecordingSinkState::default()
+        }));
+        let sink_factory = RecordingSinkFactory {
+            state: Arc::clone(&sink_state),
+        };
+        let device = Default::default();
+        let error = execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            InferenceError::SinkWrite { .. } | InferenceError::SinkFinish { .. }
+        ));
+        assert!(!request.output_path().exists());
+        let staging = sink_state.lock().unwrap().staging.clone().unwrap();
+        assert!(!staging.exists());
+    }
+}
+
+#[test]
+fn executor_rejects_missing_input_artifacts_before_starting_sink() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    std::fs::remove_file(request.feature_path()).unwrap();
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::InvalidInputArtifact {
+            field: "feature_path",
+            ..
+        })
+    ));
+    assert!(sink_state.lock().unwrap().staging.is_none());
+}
+
+#[test]
+fn executor_rejects_frame_dimension_changes_without_publishing() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: Some(1),
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::FrameDimensionsMismatch { index: 1, .. })
+    ));
+    assert!(!request.output_path().exists());
+    let staging = sink_state.lock().unwrap().staging.clone().unwrap();
+    assert!(!staging.exists());
+}
+
+#[test]
+fn executor_rejects_landmark_symlinks_without_following_them() {
+    let (_root, request) = artifact_tree(2, 2, None);
+    let landmark = request.landmark_dir().join("000000.lms");
+    let target = request.landmark_dir().join("landmark-target.lms");
+    std::fs::rename(&landmark, &target).unwrap();
+    #[cfg(windows)]
+    let link_result = std::os::windows::fs::symlink_file(&target, &landmark);
+    #[cfg(unix)]
+    let link_result = std::os::unix::fs::symlink(&target, &landmark);
+    if link_result.is_err() {
+        return;
+    }
+
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::InvalidInputArtifact {
+            field: "landmark_path",
+            ..
+        })
+    ));
+    assert!(!request.output_path().exists());
+    assert!(sink_state.lock().unwrap().staging.is_none());
+}
+
+#[test]
+fn executor_rejects_symlinked_input_path_components_before_starting_sink() {
+    let (root, request) = artifact_tree(2, 2, None);
+    let real_parent = root.path().join("real-parent");
+    let real_frames = real_parent.join("frames");
+    std::fs::create_dir(&real_parent).unwrap();
+    std::fs::rename(request.frame_dir(), &real_frames).unwrap();
+    let linked_parent = root.path().join("linked-parent");
+    if support::create_dir_symlink(&real_parent, &linked_parent).is_err() {
+        return;
+    }
+    let linked_request = OfflineRenderRequest::new(
+        linked_parent.join("frames"),
+        request.landmark_dir().to_owned(),
+        request.feature_path().to_owned(),
+        request.audio_path().to_owned(),
+        request.ffmpeg_path().to_owned(),
+        request.output_path().to_owned(),
+        "task-symlink-component",
+        request.source_frame_count(),
+        request.max_output_frames(),
+    )
+    .unwrap();
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = RecordingSinkFactory {
+        state: Arc::clone(&sink_state),
+    };
+    let device = Default::default();
+
+    assert!(matches!(
+        execute_offline_render::<CpuBackend, _, _, _>(
+            &OutputModel { value: 1.0 },
+            &device,
+            &linked_request,
+            &reader,
+            &sink_factory,
+        ),
+        Err(InferenceError::InvalidInputDirectory {
+            field: "frame_dir",
+            ..
+        })
+    ));
+    assert!(sink_state.lock().unwrap().staging.is_none());
+    assert!(!linked_request.output_path().exists());
 }

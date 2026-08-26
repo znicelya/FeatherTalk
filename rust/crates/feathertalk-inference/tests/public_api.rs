@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
+use burn::tensor::{Tensor, TensorData};
 use feathertalk_inference::{
-    CommandSpec, InferenceError, InferenceFramePlan, PingPongFrames, RawFrameRenderSpec,
-    RenderGeometry, RenderPlan, raw_video_command, staging_output_path,
-    validate_output_destination,
+    BgrFrame, CommandSpec, FrameReader, InferenceError, InferenceFramePlan, JpegFrameReader,
+    OfflineRenderRequest, OfflineRenderResult, PingPongFrames, RawFrameRenderSpec, RawVideoSink,
+    RawVideoSinkFactory, RenderGeometry, RenderPlan, SystemRawVideoSinkFactory,
+    execute_offline_render, raw_video_command, staging_output_path, validate_output_destination,
 };
 
 #[test]
@@ -37,4 +39,66 @@ fn crate_root_exposes_read_only_inference_contract() {
     let _ = validate_output_destination;
     let _ = staging_output_path;
     let _ = InferenceError::EmptyFeatures;
+
+    let _reader = JpegFrameReader::default();
+    let _factory = SystemRawVideoSinkFactory::new();
+    type RequestConstructor = fn(
+        PathBuf,
+        PathBuf,
+        PathBuf,
+        PathBuf,
+        PathBuf,
+        PathBuf,
+        String,
+        usize,
+        Option<usize>,
+    ) -> Result<OfflineRenderRequest, InferenceError>;
+    let _request_new: RequestConstructor = OfflineRenderRequest::new;
+    let _execute = execute_offline_render::<
+        feathertalk_models::backend::CpuBackend,
+        DummyModel,
+        JpegFrameReader,
+        SystemRawVideoSinkFactory,
+    >;
+    let _result_accessors: fn(&OfflineRenderResult) -> (&Path, usize, u32, u32) = |result| {
+        (
+            result.output_path(),
+            result.frame_count(),
+            result.width(),
+            result.height(),
+        )
+    };
+    fn assert_traits<R: FrameReader, S: RawVideoSink, F: RawVideoSinkFactory>() {}
+    let _ = assert_traits::<JpegFrameReader, DummySink, SystemRawVideoSinkFactory>;
+    let _frame = BgrFrame::new(1, 1, vec![0, 0, 0]).unwrap();
+}
+
+struct DummySink;
+
+struct DummyModel;
+
+impl feathertalk_models::unet::TalkingHeadModel<feathertalk_models::backend::CpuBackend>
+    for DummyModel
+{
+    fn forward_talking_head(
+        &self,
+        image: Tensor<feathertalk_models::backend::CpuBackend, 4>,
+        _audio: Tensor<feathertalk_models::backend::CpuBackend, 4>,
+    ) -> Tensor<feathertalk_models::backend::CpuBackend, 4> {
+        let device = image.device();
+        Tensor::from_data(
+            TensorData::new(vec![0.0; 3 * 160 * 160], [1, 3, 160, 160]),
+            &device,
+        )
+    }
+}
+
+impl RawVideoSink for DummySink {
+    fn write_frame(&mut self, _frame: &BgrFrame) -> Result<(), InferenceError> {
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>) -> Result<(), InferenceError> {
+        Ok(())
+    }
 }

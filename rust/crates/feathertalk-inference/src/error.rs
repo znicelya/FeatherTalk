@@ -4,8 +4,12 @@ use std::path::PathBuf;
 pub enum InferenceError {
     #[error("invalid input directory for {field}: {path}")]
     InvalidInputDirectory { field: &'static str, path: PathBuf },
-    #[error("invalid input artifact for {field}: {path}")]
-    InvalidInputArtifact { field: &'static str, path: PathBuf },
+    #[error("invalid input artifact for {field} at {path}: {message}")]
+    InvalidInputArtifact {
+        field: &'static str,
+        path: PathBuf,
+        message: String,
+    },
     #[error("frame index {index} is outside source frame count {count}")]
     FrameIndexOutOfRange { index: usize, count: usize },
     #[error(

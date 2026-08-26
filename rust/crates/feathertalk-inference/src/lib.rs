@@ -5,6 +5,7 @@ mod executor;
 mod frame;
 mod frame_reader;
 mod plan;
+mod publish;
 mod raw_sink;
 mod render;
 mod sequence;
@@ -12,7 +13,7 @@ mod sequence;
 pub use burn::{UnetAudioInput, build_unet_audio_input, render_planned_frame, run_unet_prediction};
 pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
-pub use executor::{OfflineRenderRequest, OfflineRenderResult};
+pub use executor::{OfflineRenderRequest, OfflineRenderResult, execute_offline_render};
 pub use frame::{
     BgrFrame, UnetImageInput, apply_unet_prediction, build_unet_image_input, crop_bgr, paste_bgr,
     render_frame, resize_bilinear,
