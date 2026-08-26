@@ -13,6 +13,7 @@ members = [
   "crates/feathertalk-frame-pipeline",
   "crates/feathertalk-audio",
   "crates/feathertalk-training",
+  "crates/feathertalk-inference",
   "tools/pfld-artifact",
   "tools/vgg19-package",
 ]

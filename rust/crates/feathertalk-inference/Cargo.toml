@@ -1,0 +1,14 @@
+[package]
+name = "feathertalk-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+feathertalk-media = { path = "../feathertalk-media" }
+feathertalk-preprocess = { path = "../feathertalk-preprocess" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

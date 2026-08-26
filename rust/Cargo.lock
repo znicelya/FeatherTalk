@@ -2423,6 +2423,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-inference"
+version = "0.1.0"
+dependencies = [
+ "feathertalk-media",
+ "feathertalk-preprocess",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "feathertalk-media"
 version = "0.1.0"
 dependencies = [
