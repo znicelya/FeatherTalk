@@ -122,7 +122,7 @@ fn plan_maps_ping_pong_source_and_current_frame_reference() {
     assert_eq!(frames.iter().map(|f| f.source_frame_index).collect::<Vec<_>>(), vec![0, 1, 2, 1, 0, 1]);
     assert!(frames.iter().all(|f| f.source_frame_index == f.reference_frame_index));
     assert_eq!(frames[0].audio_window, [None, None, None, None, Some(0), Some(1), Some(2), Some(3)]);
-    assert_eq!(frames[3].audio_window, [Some(3), Some(4), Some(5), None, None, None, None, None]);
+    assert_eq!(frames[3].audio_window, [None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None]);
 }
 
 #[test]
