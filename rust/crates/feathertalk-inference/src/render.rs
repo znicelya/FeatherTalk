@@ -7,9 +7,6 @@ use std::{
 use crate::InferenceError;
 
 const OUTPUT_FPS: u32 = 25;
-const FACE_CROP_SIZE: u32 = 168;
-const FACE_INNER_SIZE: u32 = 160;
-const FACE_BORDER: u32 = 4;
 const MAX_TASK_ID_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,10 +18,11 @@ pub struct RenderGeometry {
 
 impl RenderGeometry {
     pub fn standard() -> Self {
+        let crop = feathertalk_preprocess::default_crop_spec();
         let geometry = Self {
-            crop_size: FACE_CROP_SIZE,
-            inner_size: FACE_INNER_SIZE,
-            border: FACE_BORDER,
+            crop_size: crop.crop_size,
+            inner_size: crop.inner_size,
+            border: crop.border,
         };
         debug_assert_eq!(
             geometry.crop_size,

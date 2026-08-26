@@ -52,7 +52,11 @@ impl BgrFrame {
             });
         }
         let offset = pixel_offset(self.width, x, y)?;
-        Ok([self.bgr[offset], self.bgr[offset + 1], self.bgr[offset + 2]])
+        let pixel = self
+            .bgr
+            .get(offset..offset + 3)
+            .ok_or(InferenceError::ArithmeticOverflow)?;
+        Ok([pixel[0], pixel[1], pixel[2]])
     }
 
     fn zeroed(width: u32, height: u32) -> Result<Self, InferenceError> {
@@ -98,7 +102,10 @@ pub fn crop_bgr(frame: &BgrFrame, bbox: &FaceBoundingBox) -> Result<BgrFrame, In
     let source_y = u32::try_from(bbox.ymin).map_err(|_| InferenceError::ArithmeticOverflow)?;
     let row_bytes = checked_byte_len(width, 1)?;
     for y in 0..height {
-        let source_offset = frame.pixel_offset_checked(source_x, source_y + y)?;
+        let source_row = source_y
+            .checked_add(y)
+            .ok_or(InferenceError::ArithmeticOverflow)?;
+        let source_offset = frame.pixel_offset_checked(source_x, source_row)?;
         let destination_offset = crop.pixel_offset_checked(0, y)?;
         crop.bgr[destination_offset..destination_offset + row_bytes]
             .copy_from_slice(&frame.bgr[source_offset..source_offset + row_bytes]);
@@ -318,7 +325,10 @@ pub fn paste_bgr(
     let row_bytes = checked_byte_len(source.width, 1)?;
     for row in 0..source.height {
         let source_offset = source.pixel_offset_checked(0, row)?;
-        let destination_offset = destination.pixel_offset_checked(x, y + row)?;
+        let destination_y = y
+            .checked_add(row)
+            .ok_or(InferenceError::ArithmeticOverflow)?;
+        let destination_offset = destination.pixel_offset_checked(x, destination_y)?;
         destination.bgr[destination_offset..destination_offset + row_bytes]
             .copy_from_slice(&source.bgr[source_offset..source_offset + row_bytes]);
     }
