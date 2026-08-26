@@ -7,7 +7,10 @@ mod sequence;
 
 pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
-pub use frame::{BgrFrame, crop_bgr, resize_bilinear};
+pub use frame::{
+    BgrFrame, UnetImageInput, apply_unet_prediction, build_unet_image_input, crop_bgr,
+    resize_bilinear,
+};
 pub use plan::{InferenceFramePlan, RenderPlan};
 pub use render::{
     RawFrameRenderSpec, RenderGeometry, staging_output_path, validate_output_destination,

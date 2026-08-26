@@ -1,6 +1,9 @@
 use crate::InferenceError;
 use feathertalk_preprocess::FaceBoundingBox;
 
+const UNET_INPUT_CHANNELS: usize = 6;
+const UNET_OUTPUT_CHANNELS: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BgrFrame {
     width: u32,
@@ -161,4 +164,186 @@ fn pixel_offset(width: u32, x: u32, y: u32) -> Result<usize, InferenceError> {
         .and_then(|row| row.checked_add(x))
         .and_then(|pixel| pixel.checked_mul(3))
         .ok_or(InferenceError::ArithmeticOverflow)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnetImageInput {
+    values: Vec<f32>,
+}
+
+impl UnetImageInput {
+    pub fn shape(&self) -> [usize; 4] {
+        [1, UNET_INPUT_CHANNELS, 160, 160]
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        &self.values
+    }
+}
+
+pub fn build_unet_image_input(
+    face_crop: &BgrFrame,
+    geometry: &crate::RenderGeometry,
+) -> Result<UnetImageInput, InferenceError> {
+    let (crop_size, inner_size, border) = validate_geometry_and_crop(face_crop, geometry)?;
+    let crop_spec = feathertalk_preprocess::default_crop_spec();
+    let mask_right = crop_spec
+        .mouth_mask
+        .x
+        .checked_add(crop_spec.mouth_mask.width)
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    let mask_bottom = crop_spec
+        .mouth_mask
+        .y
+        .checked_add(crop_spec.mouth_mask.height)
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    if mask_right > inner_size || mask_bottom > inner_size {
+        return Err(InferenceError::InvalidField {
+            field: "mouth_mask",
+            message: "mask rectangle exceeds the inner crop".into(),
+        });
+    }
+    let plane = checked_elements(inner_size, inner_size)?;
+    let elements = plane
+        .checked_mul(UNET_INPUT_CHANNELS)
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    let mut values = allocate_f32(elements)?;
+    for y in 0..inner_size {
+        for x in 0..inner_size {
+            let source_x = x
+                .checked_add(border)
+                .ok_or(InferenceError::ArithmeticOverflow)?;
+            let source_y = y
+                .checked_add(border)
+                .ok_or(InferenceError::ArithmeticOverflow)?;
+            let source_offset = face_crop.pixel_offset_checked(source_x, source_y)?;
+            let offset = linear_offset(inner_size, x, y)?;
+            let masked = x >= crop_spec.mouth_mask.x
+                && x < mask_right
+                && y >= crop_spec.mouth_mask.y
+                && y < mask_bottom;
+            for channel in 0..3 {
+                let normalized = f32::from(face_crop.bgr[source_offset + channel]) / 255.0;
+                values[channel * plane + offset] = normalized;
+                values[(channel + 3) * plane + offset] = if masked { 0.0 } else { normalized };
+            }
+        }
+    }
+    debug_assert_eq!(crop_size, inner_size + 2 * border);
+    Ok(UnetImageInput { values })
+}
+
+pub fn apply_unet_prediction(
+    face_crop: &mut BgrFrame,
+    prediction: &[f32],
+    geometry: &crate::RenderGeometry,
+) -> Result<(), InferenceError> {
+    let (_crop_size, inner_size, border) = validate_geometry_and_crop(face_crop, geometry)?;
+    let plane = checked_elements(inner_size, inner_size)?;
+    let expected = UNET_OUTPUT_CHANNELS
+        .checked_mul(plane)
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    if prediction.len() != expected {
+        return Err(InferenceError::TensorShapeMismatch {
+            context: "unet_prediction",
+            expected: vec![
+                1,
+                UNET_OUTPUT_CHANNELS,
+                inner_size as usize,
+                inner_size as usize,
+            ],
+            actual: vec![prediction.len()],
+        });
+    }
+    if let Some((index, _)) = prediction
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(InferenceError::NonFinitePrediction { index });
+    }
+    for y in 0..inner_size {
+        for x in 0..inner_size {
+            let crop_x = x
+                .checked_add(border)
+                .ok_or(InferenceError::ArithmeticOverflow)?;
+            let crop_y = y
+                .checked_add(border)
+                .ok_or(InferenceError::ArithmeticOverflow)?;
+            let destination_offset = face_crop.pixel_offset_checked(crop_x, crop_y)?;
+            let offset = linear_offset(inner_size, x, y)?;
+            for channel in 0..3 {
+                let value = (prediction[channel * plane + offset] * 255.0)
+                    .clamp(0.0, 255.0)
+                    .round();
+                face_crop.bgr[destination_offset + channel] = value as u8;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_geometry_and_crop(
+    face_crop: &BgrFrame,
+    geometry: &crate::RenderGeometry,
+) -> Result<(u32, u32, u32), InferenceError> {
+    let standard = crate::RenderGeometry::standard();
+    let expected_geometry = vec![
+        standard.crop_size() as usize,
+        standard.inner_size() as usize,
+        standard.border() as usize,
+    ];
+    let actual_geometry = vec![
+        geometry.crop_size() as usize,
+        geometry.inner_size() as usize,
+        geometry.border() as usize,
+    ];
+    if geometry != &standard {
+        return Err(InferenceError::TensorShapeMismatch {
+            context: "render_geometry",
+            expected: expected_geometry,
+            actual: actual_geometry,
+        });
+    }
+    if face_crop.width() != geometry.crop_size() || face_crop.height() != geometry.crop_size() {
+        return Err(InferenceError::TensorShapeMismatch {
+            context: "face_crop",
+            expected: vec![
+                1,
+                geometry.crop_size() as usize,
+                geometry.crop_size() as usize,
+            ],
+            actual: vec![1, face_crop.height() as usize, face_crop.width() as usize],
+        });
+    }
+    Ok((
+        geometry.crop_size(),
+        geometry.inner_size(),
+        geometry.border(),
+    ))
+}
+
+fn checked_elements(width: u32, height: u32) -> Result<usize, InferenceError> {
+    usize::try_from(width)
+        .map_err(|_| InferenceError::ArithmeticOverflow)?
+        .checked_mul(usize::try_from(height).map_err(|_| InferenceError::ArithmeticOverflow)?)
+        .ok_or(InferenceError::ArithmeticOverflow)
+}
+
+fn linear_offset(width: u32, x: u32, y: u32) -> Result<usize, InferenceError> {
+    let row = checked_elements(width, y)?;
+    row.checked_add(usize::try_from(x).map_err(|_| InferenceError::ArithmeticOverflow)?)
+        .ok_or(InferenceError::ArithmeticOverflow)
+}
+
+fn allocate_f32(elements: usize) -> Result<Vec<f32>, InferenceError> {
+    let bytes = elements
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(elements)
+        .map_err(|_| InferenceError::AllocationFailure { bytes })?;
+    values.resize(elements, 0.0);
+    Ok(values)
 }
