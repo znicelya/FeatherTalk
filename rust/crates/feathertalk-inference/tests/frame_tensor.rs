@@ -57,3 +57,16 @@ fn prediction_rejects_wrong_length_and_non_finite_values_before_mutation() {
     ));
     assert_eq!(crop.pixel(4, 4).unwrap(), [9, 9, 9]);
 }
+
+#[test]
+fn tensor_bridges_reject_wrong_crop_dimensions() {
+    let crop = BgrFrame::new(10, 10, vec![0; 300]).unwrap();
+    let geometry = RenderGeometry::standard();
+    assert!(matches!(
+        build_unet_image_input(&crop, &geometry),
+        Err(InferenceError::TensorShapeMismatch {
+            context: "face_crop",
+            ..
+        })
+    ));
+}

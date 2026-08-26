@@ -283,6 +283,67 @@ pub fn apply_unet_prediction(
     Ok(())
 }
 
+pub fn paste_bgr(
+    destination: &mut BgrFrame,
+    source: &BgrFrame,
+    x: i32,
+    y: i32,
+) -> Result<(), InferenceError> {
+    if x < 0 || y < 0 {
+        return Err(InferenceError::PasteOutOfBounds {
+            x,
+            y,
+            source_width: source.width,
+            source_height: source.height,
+            destination_width: destination.width,
+            destination_height: destination.height,
+        });
+    }
+    let x = u32::try_from(x).map_err(|_| InferenceError::ArithmeticOverflow)?;
+    let y = u32::try_from(y).map_err(|_| InferenceError::ArithmeticOverflow)?;
+    if x > destination.width
+        || y > destination.height
+        || source.width > destination.width.saturating_sub(x)
+        || source.height > destination.height.saturating_sub(y)
+    {
+        return Err(InferenceError::PasteOutOfBounds {
+            x: i32::try_from(x).unwrap_or(i32::MAX),
+            y: i32::try_from(y).unwrap_or(i32::MAX),
+            source_width: source.width,
+            source_height: source.height,
+            destination_width: destination.width,
+            destination_height: destination.height,
+        });
+    }
+    let row_bytes = checked_byte_len(source.width, 1)?;
+    for row in 0..source.height {
+        let source_offset = source.pixel_offset_checked(0, row)?;
+        let destination_offset = destination.pixel_offset_checked(x, y + row)?;
+        destination.bgr[destination_offset..destination_offset + row_bytes]
+            .copy_from_slice(&source.bgr[source_offset..source_offset + row_bytes]);
+    }
+    Ok(())
+}
+
+pub fn render_frame(
+    frame: &BgrFrame,
+    bbox: &FaceBoundingBox,
+    prediction: &[f32],
+    geometry: &crate::RenderGeometry,
+) -> Result<BgrFrame, InferenceError> {
+    let source_crop = crop_bgr(frame, bbox)?;
+    let mut face_crop = resize_bilinear(&source_crop, geometry.crop_size(), geometry.crop_size())?;
+    apply_unet_prediction(&mut face_crop, prediction, geometry)?;
+    let bbox_width =
+        u32::try_from(bbox.xmax - bbox.xmin).map_err(|_| InferenceError::ArithmeticOverflow)?;
+    let bbox_height =
+        u32::try_from(bbox.ymax - bbox.ymin).map_err(|_| InferenceError::ArithmeticOverflow)?;
+    let resized = resize_bilinear(&face_crop, bbox_width, bbox_height)?;
+    let mut rendered = frame.clone();
+    paste_bgr(&mut rendered, &resized, bbox.xmin, bbox.ymin)?;
+    Ok(rendered)
+}
+
 fn validate_geometry_and_crop(
     face_crop: &BgrFrame,
     geometry: &crate::RenderGeometry,
