@@ -250,8 +250,8 @@ impl ModelDescription {
                 format!("expected {}", self.configuration.architecture_version()),
             );
         }
-        validate_tensor_specs("inputs", &self.inputs, true)?;
-        validate_tensor_specs("outputs", &self.outputs, true)?;
+        validate_io_tensor_specs("inputs", &self.inputs)?;
+        validate_io_tensor_specs("outputs", &self.outputs)?;
         let expected = Self::from_configuration(self.configuration.clone());
         if self.inputs != expected.inputs || self.outputs != expected.outputs {
             return invalid(
@@ -459,6 +459,20 @@ fn validate_tensor_specs(
             return invalid(field, "tensor names must be sorted and unique");
         }
         previous = Some(&entry.name);
+    }
+    Ok(())
+}
+
+fn validate_io_tensor_specs(field: &str, entries: &[TensorSpec]) -> Result<(), PackageError> {
+    if entries.is_empty() {
+        return invalid(field, "must contain at least one tensor");
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for (index, entry) in entries.iter().enumerate() {
+        entry.validate(&format!("{field}[{index}]"), true)?;
+        if !names.insert(entry.name.as_str()) {
+            return invalid(field, "tensor names must be unique");
+        }
     }
     Ok(())
 }

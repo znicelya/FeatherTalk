@@ -144,6 +144,22 @@ fn strict_validation_rejects_invalid_dimensions_weights_and_unpaired_training_fi
 }
 
 #[test]
+fn unet_io_contract_preserves_semantic_input_order() {
+    let value = ModelDescription::from_configuration(ModelConfiguration::OriginalUnet {
+        channels: [2, 4, 8, 16, 32],
+    });
+    assert_eq!(
+        value
+            .inputs
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        ["input", "audio"]
+    );
+    value.validate().unwrap();
+}
+
+#[test]
 fn provenance_shape_is_stable_for_future_consumers() {
     let _ = BTreeMap::<String, String>::new();
 }
