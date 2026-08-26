@@ -44,6 +44,19 @@ fn cpu_adapter_accepts_tensor_data_shape_contract() {
 }
 
 #[test]
+fn cpu_adapter_can_take_ownership_of_an_imported_model() {
+    let device = Default::default();
+    let model = FeatherHubertConfig::parity_micro().init::<CpuBackend>(&device);
+    let mut encoder = BurnFeatherHubertEncoder::from_model(model, &device);
+
+    assert_eq!(encoder.output_dim(), 64);
+    assert_eq!(encoder.model().config.output_dim, 64);
+    let rows = encoder.encode(0, &[0.0; 1360]).unwrap();
+    assert_eq!(rows.len(), 4 * 64);
+    assert!(rows.iter().all(|value| value.is_finite()));
+}
+
+#[test]
 #[ignore = "requires a certified WGPU adapter"]
 fn wgpu_adapter_runs_without_cpu_fallback() {
     use burn::backend::Wgpu;

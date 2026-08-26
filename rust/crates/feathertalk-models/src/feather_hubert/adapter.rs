@@ -13,9 +13,13 @@ pub struct BurnFeatherHubertEncoder<B: Backend> {
 
 impl<B: Backend> BurnFeatherHubertEncoder<B> {
     pub fn from_config(config: FeatherHubertConfig, device: &B::Device) -> Self {
-        let output_dim = config.output_dim;
+        Self::from_model(config.init(device), device)
+    }
+
+    pub fn from_model(model: FeatherHubertEncoder<B>, device: &B::Device) -> Self {
+        let output_dim = model.config.output_dim;
         Self {
-            model: config.init(device),
+            model,
             device: device.clone(),
             output_dim,
         }
