@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use feathertalk_inference::{
-    InferenceFramePlan, InferenceError, PingPongFrames, RawFrameRenderSpec, RenderGeometry,
-    RenderPlan, staging_output_path, validate_output_destination,
+    CommandSpec, InferenceError, InferenceFramePlan, PingPongFrames, RawFrameRenderSpec,
+    RenderGeometry, RenderPlan, raw_video_command, staging_output_path,
+    validate_output_destination,
 };
 
 #[test]
@@ -22,6 +23,15 @@ fn crate_root_exposes_read_only_inference_contract() {
     let _: &Path = spec.audio_path();
     let _: &Path = spec.output_path();
     assert_eq!(spec.fps(), 25);
+
+    let command: CommandSpec = raw_video_command(Path::new("C:/ffmpeg.exe"), &spec).unwrap();
+    assert!(
+        command
+            .arguments()
+            .windows(2)
+            .any(|pair| { pair[0] == "-framerate" && pair[1] == "25" })
+    );
+    assert!(command.arguments().iter().any(|arg| arg == "-shortest"));
 
     let _ = PathBuf::from(spec.output_path());
     let _ = validate_output_destination;
