@@ -142,7 +142,7 @@ fn build_strict_store(
     })
 }
 
-fn select_top_level_key(
+pub(crate) fn select_top_level_key(
     path: &Path,
     request: &LegacyImportRequest,
 ) -> Result<Option<String>, WeightImportError> {
