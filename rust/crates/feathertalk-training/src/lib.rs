@@ -6,6 +6,7 @@ mod error;
 mod losses;
 mod perceptual;
 mod random;
+mod telemetry;
 mod vgg19;
 
 pub use artifact::{
@@ -33,4 +34,10 @@ pub use losses::{
     mouth_l1_loss, mouth_roi_loss, temporal_loss,
 };
 pub use perceptual::{PerceptualFeatureExtractor, perceptual_mse};
+pub use telemetry::{
+    PREVIEW_ARTIFACT_FORMAT, PREVIEW_ARTIFACT_SCHEMA_VERSION, PREVIEW_MANIFEST_FILE_NAME,
+    PREVIEW_MOUTH_ROI_FILE_NAME, PREVIEW_PREDICTION_FILE_NAME, PREVIEW_TARGET_FILE_NAME,
+    PREVIEW_TENSOR_ELEMENTS, PREVIEW_TENSOR_SHAPE, PreviewArtifact, PreviewArtifactManifest,
+    PreviewFileManifest, TRAINING_METRICS_SCHEMA_VERSION, TrainingMetrics,
+};
 pub use vgg19::Vgg19Conv3_3;
