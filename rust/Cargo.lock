@@ -2426,11 +2426,13 @@ dependencies = [
 name = "feathertalk-inference"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "burn",
  "feathertalk-audio",
  "feathertalk-media",
  "feathertalk-models",
  "feathertalk-preprocess",
+ "jpeg-decoder",
  "tempfile",
  "thiserror 2.0.20",
 ]
@@ -3512,6 +3514,15 @@ checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
+]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]

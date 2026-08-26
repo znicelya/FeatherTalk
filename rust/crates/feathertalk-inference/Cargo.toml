@@ -11,7 +11,9 @@ feathertalk-audio = { path = "../feathertalk-audio" }
 feathertalk-media = { path = "../feathertalk-media" }
 feathertalk-models = { path = "../feathertalk-models", default-features = false }
 feathertalk-preprocess = { path = "../feathertalk-preprocess" }
+jpeg-decoder.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 tempfile.workspace = true
