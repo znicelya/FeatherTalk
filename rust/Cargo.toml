@@ -14,6 +14,7 @@ members = [
   "crates/feathertalk-audio",
   "crates/feathertalk-training",
   "crates/feathertalk-inference",
+  "crates/feathertalk-export",
   "tools/pfld-artifact",
   "tools/vgg19-package",
 ]
@@ -41,4 +42,5 @@ safetensors = "=0.7.0"
 sha2 = "0.11.0"
 tempfile = "3.20"
 thiserror = "2.0"
+time = { version = "0.3.55", features = ["parsing", "formatting", "macros"] }
 zip = { version = "6", default-features = false, features = ["deflate"] }

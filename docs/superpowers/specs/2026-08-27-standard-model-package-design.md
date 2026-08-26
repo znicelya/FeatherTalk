@@ -110,8 +110,10 @@ output: hidden   [1,-1,1024] f32
 任何一步失败都只删除当前进程创建的 staging；不会覆盖既有 destination，也不会修改 source。
 
 加载器先验证目录精确条目、普通文件、manifest JSON、license JSON、声明的字节数和哈希，
-再比较调用方提供的模型描述和 tensor audit，最后才调用 Burn `SafetensorsStore`。加载到
-调用方 template 的 clone 中，成功后返回新 module；任何失败都不会修改 template。运行时
+再比较调用方提供的模型描述和 tensor audit，最后才调用 Burn `SafetensorsStore`。调用方
+提供一个按 manifest 配置创建全新空模型的 factory，加载器只修改这个新实例，成功后才返回；
+任何失败都不会触碰调用方已有模型。这里不使用 Burn module 的普通 `Clone`，因为包含
+BatchNorm `RunningState` 的模型可能共享内部状态。运行时
 不下载、不搜索 cache、不接受 `.pth`，也不静默随机初始化或 CPU fallback。
 
 ## 5. 错误与限制
