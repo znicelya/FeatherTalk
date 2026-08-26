@@ -13,6 +13,18 @@ pub struct CommandSpec {
 }
 
 impl CommandSpec {
+    pub(crate) fn new(
+        executable: PathBuf,
+        arguments: Vec<OsString>,
+        operation: &'static str,
+    ) -> Self {
+        Self {
+            executable,
+            arguments,
+            operation,
+        }
+    }
+
     pub fn executable(&self) -> &Path {
         &self.executable
     }
@@ -73,11 +85,11 @@ pub fn raw_video_command(
     );
     arguments.push(spec.output_path().as_os_str().to_owned());
 
-    Ok(CommandSpec {
-        executable: ffmpeg.to_owned(),
+    Ok(CommandSpec::new(
+        ffmpeg.to_owned(),
         arguments,
-        operation: "render_raw_video",
-    })
+        "render_raw_video",
+    ))
 }
 
 fn push_args<const N: usize>(arguments: &mut Vec<OsString>, values: [&str; N]) {
