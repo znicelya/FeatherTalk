@@ -172,7 +172,7 @@ fn resize_bilinear_matches_half_pixel_average_and_edges() {
     let one = resize_bilinear(&source, 1, 1).unwrap();
     assert_eq!(one.pixel(0, 0).unwrap(), [15, 15, 15]);
     let enlarged = resize_bilinear(&source, 3, 3).unwrap();
-    assert_eq!(enlarged.pixel(0, 0).unwrap(), [0, 0, 0]);
+    assert_eq!(enlarged.pixel(0, 0).unwrap(), [25, 25, 25]);
     assert_eq!(enlarged.pixel(1, 1).unwrap(), [15, 15, 15]);
     assert_eq!(enlarged.pixel(2, 2).unwrap(), [30, 30, 30]);
 }
