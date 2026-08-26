@@ -1,10 +1,7 @@
 use std::{collections::BTreeMap, path::Path};
 
-use burn::{
-    module::AutodiffModule,
-    optim::Optimizer,
-    tensor::backend::AutodiffBackend,
-};
+use burn::{module::AutodiffModule, optim::Optimizer, tensor::backend::AutodiffBackend};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{DataLoaderState, TrainingError};
@@ -20,7 +17,11 @@ pub const CHECKPOINT_MODEL_FILE_NAME: &str = "model.bin";
 pub const CHECKPOINT_OPTIMIZER_FILE_NAME: &str = "optimizer.bin";
 pub const CHECKPOINT_STATE_FILE_NAME: &str = "training-state.json";
 
-pub type Provenance = BTreeMap<String, String>;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Provenance {
+    pub entries: BTreeMap<String, String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -59,10 +60,7 @@ impl TrainingConfig {
             "training_config.temporal_mouth_weight",
             self.temporal_mouth_weight,
         )?;
-        validate_finite_non_negative(
-            "training_config.perceptual_weight",
-            self.perceptual_weight,
-        )?;
+        validate_finite_non_negative("training_config.perceptual_weight", self.perceptual_weight)?;
 
         match self.mode {
             TrainingMode::Baseline | TrainingMode::MouthRoi if self.temporal_stride != 0 => {
@@ -112,8 +110,7 @@ impl TrainingCheckpointState {
                 "training_config.batch_size must equal data_loader.config.batch_size",
             );
         }
-        if self.training_config.temporal_stride
-            != self.data_loader.config.sampling.temporal_stride
+        if self.training_config.temporal_stride != self.data_loader.config.sampling.temporal_stride
         {
             return invalid_checkpoint(
                 "training_config.temporal_stride must equal data_loader sampling stride",
@@ -276,8 +273,12 @@ impl CheckpointCompatibility {
             descriptor,
             training_config,
             frame_count,
-            asset_provenance: BTreeMap::new(),
-            model_provenance: BTreeMap::new(),
+            asset_provenance: Provenance {
+                entries: BTreeMap::new(),
+            },
+            model_provenance: Provenance {
+                entries: BTreeMap::new(),
+            },
         }
     }
 
@@ -339,41 +340,185 @@ pub struct RestoredTrainingState<M, O> {
 }
 
 pub fn save_training_checkpoint<B, M, O>(
-    _destination: impl AsRef<Path>,
-    _model: &M,
-    _optimizer: &O,
-    _descriptor: CheckpointDescriptor,
-    _state: TrainingCheckpointState,
+    destination: impl AsRef<Path>,
+    model: &M,
+    optimizer: &O,
+    descriptor: CheckpointDescriptor,
+    state: TrainingCheckpointState,
 ) -> Result<TrainingCheckpointManifest, TrainingError>
 where
     B: AutodiffBackend,
     M: AutodiffModule<B> + Clone,
     O: Optimizer<M, B> + Clone,
 {
-    Err(TrainingError::CheckpointDirectory(
-        "checkpoint saving is not implemented yet".to_owned(),
-    ))
+    descriptor.validate()?;
+    state.validate()?;
+
+    let destination = destination.as_ref();
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    crate::checkpoint_io::reject_symlink_components(parent)?;
+    std::fs::create_dir_all(parent)?;
+
+    match std::fs::symlink_metadata(destination) {
+        Ok(_) => {
+            return Err(TrainingError::CheckpointDirectory(format!(
+                "checkpoint destination already exists: {}",
+                destination.display()
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+
+    let mut staging = crate::checkpoint_io::create_staging_directory(parent)?;
+    let staging_path = staging.path().to_path_buf();
+
+    let model_path =
+        crate::checkpoint_io::write_model_record::<B, M>(model, &staging_path.join("model"))?;
+    crate::checkpoint_io::sync_file(&model_path)?;
+    let optimizer_path = crate::checkpoint_io::write_optimizer_record::<B, M, O>(
+        optimizer,
+        &staging_path.join("optimizer"),
+    )?;
+    crate::checkpoint_io::sync_file(&optimizer_path)?;
+
+    let state_bytes = serde_json::to_vec(&state)
+        .map_err(|error| TrainingError::Store(format!("serialize training state: {error}")))?;
+    if u64::try_from(state_bytes.len()).unwrap_or(u64::MAX) > crate::checkpoint_io::STATE_MAX_BYTES
+    {
+        return Err(TrainingError::InvalidCheckpoint(format!(
+            "training state exceeds maximum size of {} bytes",
+            crate::checkpoint_io::STATE_MAX_BYTES
+        )));
+    }
+    let state_path = staging_path.join(CHECKPOINT_STATE_FILE_NAME);
+    crate::checkpoint_io::write_synced_bytes(&state_path, &state_bytes)?;
+
+    let model_manifest = file_manifest(&model_path, CHECKPOINT_MODEL_FILE_NAME)?;
+    let optimizer_manifest = file_manifest(&optimizer_path, CHECKPOINT_OPTIMIZER_FILE_NAME)?;
+    let state_manifest = file_manifest(&state_path, CHECKPOINT_STATE_FILE_NAME)?;
+    let manifest = TrainingCheckpointManifest {
+        schema_version: TRAINING_CHECKPOINT_MANIFEST_SCHEMA_VERSION,
+        record_format: TRAINING_CHECKPOINT_RECORD_FORMAT.to_owned(),
+        model_kind: descriptor.model_kind.clone(),
+        architecture_version: descriptor.architecture_version.clone(),
+        model_config_sha256: descriptor.model_config_sha256.clone(),
+        optimizer_kind: descriptor.optimizer_kind.clone(),
+        optimizer_schema_version: descriptor.optimizer_schema_version,
+        model: model_manifest,
+        optimizer: optimizer_manifest,
+        training_state_sha256: state_manifest.sha256.clone(),
+        training_state: state_manifest,
+        // Burn 0.21 is pinned by the workspace dependency.  Keep this
+        // identifier explicit so a checkpoint cannot silently change format
+        // when the training crate's own package version changes.
+        burn_version: "0.21.0".to_owned(),
+        rust_version: "1.92.0".to_owned(),
+    };
+    manifest.validate()?;
+
+    let manifest_bytes = serde_json::to_vec(&manifest)
+        .map_err(|error| TrainingError::Store(format!("serialize checkpoint manifest: {error}")))?;
+    if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX)
+        > crate::checkpoint_io::MANIFEST_MAX_BYTES
+    {
+        return Err(TrainingError::InvalidCheckpoint(format!(
+            "checkpoint manifest exceeds maximum size of {} bytes",
+            crate::checkpoint_io::MANIFEST_MAX_BYTES
+        )));
+    }
+    let manifest_path = staging_path.join(CHECKPOINT_MANIFEST_FILE_NAME);
+    crate::checkpoint_io::write_synced_bytes(&manifest_path, &manifest_bytes)?;
+
+    crate::checkpoint_io::sync_directory(&staging_path)?;
+    std::fs::rename(&staging_path, destination)?;
+    staging.disarm();
+    crate::checkpoint_io::sync_directory(parent)?;
+
+    Ok(manifest)
 }
 
 pub fn load_training_checkpoint<B, M, O>(
-    _directory: impl AsRef<Path>,
-    _model_template: &M,
-    _optimizer_template: &O,
-    _device: &B::Device,
-    _expected: &CheckpointCompatibility,
+    directory: impl AsRef<Path>,
+    model_template: &M,
+    optimizer_template: &O,
+    device: &B::Device,
+    expected: &CheckpointCompatibility,
 ) -> Result<RestoredTrainingState<M, O>, TrainingError>
 where
     B: AutodiffBackend,
     M: AutodiffModule<B> + Clone,
     O: Optimizer<M, B> + Clone,
 {
-    Err(TrainingError::CheckpointDirectory(
-        "checkpoint loading is not implemented yet".to_owned(),
-    ))
+    let directory = directory.as_ref();
+
+    // No Burn record is touched before this complete filesystem and JSON
+    // preflight has succeeded.
+    crate::checkpoint_io::reject_symlink_components(directory)?;
+    crate::checkpoint_io::validate_checkpoint_directory(directory)?;
+    let manifest: TrainingCheckpointManifest = read_checkpoint_json(
+        &directory.join(CHECKPOINT_MANIFEST_FILE_NAME),
+        crate::checkpoint_io::MANIFEST_MAX_BYTES,
+        "checkpoint manifest",
+    )?;
+    manifest.validate()?;
+    let state: TrainingCheckpointState = read_checkpoint_json(
+        &directory.join(CHECKPOINT_STATE_FILE_NAME),
+        crate::checkpoint_io::STATE_MAX_BYTES,
+        "training checkpoint state",
+    )?;
+    state.validate()?;
+    expected.validate_manifest_state(&manifest, &state)?;
+
+    crate::checkpoint_io::validate_declared_file(
+        &directory.join(CHECKPOINT_MODEL_FILE_NAME),
+        &manifest.model,
+    )?;
+    crate::checkpoint_io::validate_declared_file(
+        &directory.join(CHECKPOINT_OPTIMIZER_FILE_NAME),
+        &manifest.optimizer,
+    )?;
+    crate::checkpoint_io::validate_declared_file(
+        &directory.join(CHECKPOINT_STATE_FILE_NAME),
+        &manifest.training_state,
+    )?;
+
+    // Restore into clones only.  If either record fails, the caller's
+    // templates remain untouched and no partially restored value is exposed.
+    let model = crate::checkpoint_io::load_model_record::<B, M>(
+        model_template.clone(),
+        &directory.join(CHECKPOINT_MODEL_FILE_NAME),
+        device,
+    )?;
+    let optimizer = crate::checkpoint_io::load_optimizer_record::<B, M, O>(
+        optimizer_template.clone(),
+        &directory.join(CHECKPOINT_OPTIMIZER_FILE_NAME),
+        device,
+    )?;
+
+    Ok(RestoredTrainingState {
+        model,
+        optimizer,
+        state,
+        manifest,
+    })
+}
+
+fn read_checkpoint_json<T>(path: &Path, max_bytes: u64, label: &str) -> Result<T, TrainingError>
+where
+    T: DeserializeOwned,
+{
+    let bytes = crate::checkpoint_io::read_bounded(path, max_bytes)?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        TrainingError::InvalidCheckpoint(format!("{label} JSON is invalid: {error}"))
+    })
 }
 
 fn validate_provenance(name: &str, values: &Provenance) -> Result<(), TrainingError> {
-    for (key, value) in values {
+    for (key, value) in &values.entries {
         validate_non_empty(&format!("{name} key"), key)?;
         validate_sha256(&format!("{name}.{key}"), value)?;
     }
@@ -407,6 +552,20 @@ fn validate_finite_non_negative(name: &str, value: f64) -> Result<(), TrainingEr
         ));
     }
     Ok(())
+}
+
+fn file_manifest(
+    path: &Path,
+    expected_name: &str,
+) -> Result<CheckpointFileManifest, TrainingError> {
+    let (bytes, sha256) = crate::checkpoint_io::sha256_file(path)?;
+    let manifest = CheckpointFileManifest {
+        file_name: expected_name.to_owned(),
+        bytes,
+        sha256,
+    };
+    manifest.validate(expected_name)?;
+    Ok(manifest)
 }
 
 fn invalid_checkpoint<T>(message: impl Into<String>) -> Result<T, TrainingError> {

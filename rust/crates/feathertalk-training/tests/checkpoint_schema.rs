@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use feathertalk_training::{
-    CheckpointCompatibility, CheckpointDescriptor, DataLoaderConfig, DataLoaderState,
-    RandomAlgorithm, SamplingConfig, SamplingKind, TrainingCheckpointState, TrainingConfig,
-    TrainingError, TrainingMode, DATA_LOADER_STATE_SCHEMA_VERSION, TRAINING_STATE_SCHEMA_VERSION,
+    CheckpointCompatibility, CheckpointDescriptor, DATA_LOADER_STATE_SCHEMA_VERSION,
+    DataLoaderConfig, DataLoaderState, Provenance, RandomAlgorithm, SamplingConfig, SamplingKind,
+    TRAINING_STATE_SCHEMA_VERSION, TrainingCheckpointState, TrainingConfig, TrainingError,
+    TrainingMode,
 };
 
 fn loader_state() -> DataLoaderState {
@@ -46,8 +47,12 @@ fn state() -> TrainingCheckpointState {
         random_seed: 17,
         data_loader: loader_state(),
         training_config: training_config(),
-        asset_provenance: BTreeMap::from([("assets".into(), "a".repeat(64))]),
-        model_provenance: BTreeMap::from([("vgg19".into(), "b".repeat(64))]),
+        asset_provenance: Provenance {
+            entries: BTreeMap::from([("assets".into(), "a".repeat(64))]),
+        },
+        model_provenance: Provenance {
+            entries: BTreeMap::from([("vgg19".into(), "b".repeat(64))]),
+        },
     }
 }
 
@@ -59,7 +64,10 @@ fn state_json_is_schema_one_and_round_trips_exactly() {
     assert!(json.contains("\"schema_version\":1"));
     assert!(json.contains("\"global_step\":14"));
     assert!(!json.contains("permutation"));
-    assert_eq!(serde_json::from_str::<TrainingCheckpointState>(&json).unwrap(), value);
+    assert_eq!(
+        serde_json::from_str::<TrainingCheckpointState>(&json).unwrap(),
+        value
+    );
 }
 
 #[test]
@@ -79,21 +87,24 @@ fn unknown_fields_and_inconsistent_progress_are_rejected() {
     let mut bad_hash = state();
     bad_hash
         .asset_provenance
+        .entries
         .insert("bad".into(), "ABC".into());
     assert!(matches!(
         bad_hash.validate(),
         Err(TrainingError::InvalidCheckpoint(_))
     ));
+
+    let mut provenance_json = serde_json::to_value(state()).unwrap();
+    provenance_json["asset_provenance"]["unexpected"] = true.into();
+    assert!(serde_json::from_value::<TrainingCheckpointState>(provenance_json).is_err());
 }
 
 #[test]
 fn manifest_descriptor_and_compatibility_use_fixed_identifiers() {
-    let descriptor =
-        CheckpointDescriptor::new("original-unet", "original-unet-v1", "c".repeat(64));
+    let descriptor = CheckpointDescriptor::new("original-unet", "original-unet-v1", "c".repeat(64));
     descriptor.validate().unwrap();
     assert_eq!(descriptor.optimizer_kind, "adam");
     assert_eq!(descriptor.optimizer_schema_version, 1);
-    let compatibility =
-        CheckpointCompatibility::new(descriptor.clone(), training_config(), 5);
+    let compatibility = CheckpointCompatibility::new(descriptor.clone(), training_config(), 5);
     compatibility.validate().unwrap();
 }

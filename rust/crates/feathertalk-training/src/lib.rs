@@ -14,13 +14,13 @@ pub use artifact::{
     Vgg19PackageManifest, Vgg19SourceManifest, load_vgg19_package, read_vgg19_manifest,
 };
 pub use checkpoint::{
-    load_training_checkpoint, save_training_checkpoint, CheckpointCompatibility,
-    CheckpointDescriptor, CheckpointFileManifest, Provenance, RestoredTrainingState,
-    TrainingCheckpointManifest, TrainingCheckpointState, TrainingConfig, TrainingMode,
     CHECKPOINT_MANIFEST_FILE_NAME, CHECKPOINT_MODEL_FILE_NAME, CHECKPOINT_OPTIMIZER_FILE_NAME,
-    CHECKPOINT_STATE_FILE_NAME, TRAINING_CHECKPOINT_MANIFEST_SCHEMA_VERSION,
-    TRAINING_CHECKPOINT_OPTIMIZER_KIND, TRAINING_CHECKPOINT_OPTIMIZER_SCHEMA_VERSION,
-    TRAINING_CHECKPOINT_RECORD_FORMAT, TRAINING_STATE_SCHEMA_VERSION,
+    CHECKPOINT_STATE_FILE_NAME, CheckpointCompatibility, CheckpointDescriptor,
+    CheckpointFileManifest, Provenance, RestoredTrainingState,
+    TRAINING_CHECKPOINT_MANIFEST_SCHEMA_VERSION, TRAINING_CHECKPOINT_OPTIMIZER_KIND,
+    TRAINING_CHECKPOINT_OPTIMIZER_SCHEMA_VERSION, TRAINING_CHECKPOINT_RECORD_FORMAT,
+    TRAINING_STATE_SCHEMA_VERSION, TrainingCheckpointManifest, TrainingCheckpointState,
+    TrainingConfig, TrainingMode, load_training_checkpoint, save_training_checkpoint,
 };
 pub use data::{
     DATA_LOADER_STATE_SCHEMA_VERSION, DataLoaderConfig, DataLoaderState, PreparedBatch,

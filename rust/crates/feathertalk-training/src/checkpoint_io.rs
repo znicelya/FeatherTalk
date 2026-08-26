@@ -2,6 +2,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Take, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use burn::{
@@ -13,8 +14,8 @@ use burn::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CheckpointFileManifest, CHECKPOINT_MANIFEST_FILE_NAME, CHECKPOINT_MODEL_FILE_NAME,
-    CHECKPOINT_OPTIMIZER_FILE_NAME, CHECKPOINT_STATE_FILE_NAME, TrainingError,
+    CHECKPOINT_MANIFEST_FILE_NAME, CHECKPOINT_MODEL_FILE_NAME, CHECKPOINT_OPTIMIZER_FILE_NAME,
+    CHECKPOINT_STATE_FILE_NAME, CheckpointFileManifest, TrainingError,
 };
 
 pub(crate) const MANIFEST_MAX_BYTES: u64 = 64 * 1024;
@@ -22,10 +23,75 @@ pub(crate) const STATE_MAX_BYTES: u64 = 256 * 1024;
 
 pub(crate) type FullRecorder = BinFileRecorder<FullPrecisionSettings>;
 
-pub(crate) fn write_model_record<B, M>(
-    model: &M,
-    stem: &Path,
-) -> Result<PathBuf, TrainingError>
+static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A staging directory that is removed unless ownership is explicitly
+/// transferred to the published checkpoint directory.
+pub(crate) struct StagingDirectory {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl StagingDirectory {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StagingDirectory {
+    fn drop(&mut self) {
+        if self.armed {
+            // The path is created by us and is never an existing checkpoint.
+            // Ignore cleanup errors so the original operation's error remains
+            // the one reported to the caller.
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+pub(crate) fn create_staging_directory(parent: &Path) -> Result<StagingDirectory, TrainingError> {
+    let process_id = std::process::id();
+    for _ in 0..1024 {
+        let id = NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed);
+        let path = parent.join(format!(".checkpoint-{process_id}-{id}.staging"));
+        match fs::create_dir(&path) {
+            Ok(()) => {
+                return Ok(StagingDirectory { path, armed: true });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(TrainingError::CheckpointDirectory(
+        "unable to allocate a unique checkpoint staging directory".to_owned(),
+    ))
+}
+
+pub(crate) fn reject_symlink_components(path: &Path) -> Result<(), TrainingError> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(TrainingError::CheckpointDirectory(format!(
+                    "checkpoint path component must not be a symbolic link: {}",
+                    current.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn write_model_record<B, M>(model: &M, stem: &Path) -> Result<PathBuf, TrainingError>
 where
     B: AutodiffBackend,
     M: AutodiffModule<B> + Clone,
@@ -69,12 +135,9 @@ where
     M: AutodiffModule<B> + Clone,
 {
     let recorder = FullRecorder::default();
-    let record = <FullRecorder as Recorder<B>>::load::<M::Record>(
-        &recorder,
-        path.to_path_buf(),
-        device,
-    )
-    .map_err(|error| TrainingError::Store(format!("load model record: {error}")))?;
+    let record =
+        <FullRecorder as Recorder<B>>::load::<M::Record>(&recorder, path.to_path_buf(), device)
+            .map_err(|error| TrainingError::Store(format!("load model record: {error}")))?;
     Ok(model.load_record(record))
 }
 
@@ -89,21 +152,16 @@ where
     O: Optimizer<M, B> + Clone,
 {
     let recorder = FullRecorder::default();
-    let record = <FullRecorder as Recorder<B>>::load::<O::Record>(
-        &recorder,
-        path.to_path_buf(),
-        device,
-    )
-    .map_err(|error| TrainingError::Store(format!("load optimizer record: {error}")))?;
+    let record =
+        <FullRecorder as Recorder<B>>::load::<O::Record>(&recorder, path.to_path_buf(), device)
+            .map_err(|error| TrainingError::Store(format!("load optimizer record: {error}")))?;
     Ok(optimizer.load_record(record))
 }
 
 pub(crate) fn write_synced_bytes(path: &Path, bytes: &[u8]) -> Result<(), TrainingError> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(bytes)?;
+    file.flush()?;
     file.sync_all()?;
     Ok(())
 }
@@ -140,7 +198,9 @@ pub(crate) fn sha256_file(path: &Path) -> Result<(u64, String), TrainingError> {
             .checked_add(u64::try_from(count).map_err(|_| {
                 TrainingError::InvalidCheckpoint("file byte count overflow".to_owned())
             })?)
-            .ok_or_else(|| TrainingError::InvalidCheckpoint("file byte count overflow".to_owned()))?;
+            .ok_or_else(|| {
+                TrainingError::InvalidCheckpoint("file byte count overflow".to_owned())
+            })?;
         digest.update(&buffer[..count]);
     }
     Ok((bytes_read, hex::encode(digest.finalize())))
