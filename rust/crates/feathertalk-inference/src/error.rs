@@ -2,6 +2,46 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InferenceError {
+    #[error("invalid input directory for {field}: {path}")]
+    InvalidInputDirectory { field: &'static str, path: PathBuf },
+    #[error("invalid input artifact for {field}: {path}")]
+    InvalidInputArtifact { field: &'static str, path: PathBuf },
+    #[error("frame index {index} is outside source frame count {count}")]
+    FrameIndexOutOfRange { index: usize, count: usize },
+    #[error(
+        "frame {index} dimensions differ from expected {expected_width}x{expected_height}: got {actual_width}x{actual_height}"
+    )]
+    FrameDimensionsMismatch {
+        index: usize,
+        expected_width: u32,
+        expected_height: u32,
+        actual_width: u32,
+        actual_height: u32,
+    },
+    #[error("frame reader failed for frame {index} at {path}: {message}")]
+    FrameReader {
+        index: usize,
+        path: PathBuf,
+        message: String,
+    },
+    #[error("failed to start raw video sink: {message}")]
+    SinkStart { message: String },
+    #[error("raw video sink write failed: {message}")]
+    SinkWrite { message: String },
+    #[error("raw video sink finish failed: {message}")]
+    SinkFinish { message: String },
+    #[error("staging output collision: {path}")]
+    StagingCollision { path: PathBuf },
+    #[error("staging output is invalid: {path}: {message}")]
+    StagingOutputInvalid { path: PathBuf, message: String },
+    #[error("atomic publish failed for {path}: {message}")]
+    AtomicPublishFailed { path: PathBuf, message: String },
+    #[error("tool failed during {operation}: exit_code={exit_code:?}; stderr={stderr}")]
+    ToolFailed {
+        operation: &'static str,
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     #[error("source frame count {actual} is too small; expected at least {minimum}")]
     FrameCountTooSmall { actual: usize, minimum: usize },
     #[error("feature frame count must be greater than zero")]
