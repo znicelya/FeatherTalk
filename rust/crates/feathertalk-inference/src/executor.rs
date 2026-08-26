@@ -101,7 +101,6 @@ impl OfflineRenderRequest {
     pub fn max_output_frames(&self) -> Option<usize> {
         self.max_output_frames
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
