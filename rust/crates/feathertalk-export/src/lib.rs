@@ -1,11 +1,15 @@
 //! Strict, auditable FeatherTalk model packages.
 
 mod error;
+mod feather_hubert;
 mod io;
 mod manifest;
 mod package;
 
 pub use error::PackageError;
+pub use feather_hubert::{
+    FeatherHubertPackageReport, FeatherHubertPackageRequest, build_feather_hubert_package,
+};
 pub use manifest::{
     FEATHER_HUBERT_ARCHITECTURE_VERSION, FileManifest, LICENSE_FILE_NAME, LicenseBundle,
     LicenseEntry, MANIFEST_FILE_NAME, MAX_LICENSE_BYTES, MAX_MANIFEST_BYTES, MAX_MODEL_BYTES,

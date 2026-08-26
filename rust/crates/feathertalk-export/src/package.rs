@@ -41,6 +41,22 @@ where
     M: ModuleSnapshot<B>,
     F: Fn(&B::Device) -> M,
 {
+    write_model_package_with_validation_hook(request, model, device, factory, || Ok(()))
+}
+
+pub(crate) fn write_model_package_with_validation_hook<B, M, F, H>(
+    request: &PackageBuildRequest,
+    model: &M,
+    device: &B::Device,
+    factory: F,
+    validation_hook: H,
+) -> Result<PackageBuildReport, PackageError>
+where
+    B: Backend,
+    M: ModuleSnapshot<B>,
+    F: Fn(&B::Device) -> M,
+    H: FnOnce() -> Result<(), PackageError>,
+{
     request.description.validate()?;
     validate_source_snapshot(&request.source_path, &request.source)?;
     let license_bytes =
@@ -97,6 +113,7 @@ where
     )?;
     validate_staged_round_trip::<B, M, F>(&staging_path, &manifest, model, device, factory)?;
     validate_source_snapshot(&request.source_path, &request.source)?;
+    validation_hook()?;
     io::sync_directory(&staging_path)?;
     io::publish_no_clobber(staging, &request.destination)?;
     Ok(PackageBuildReport { manifest })

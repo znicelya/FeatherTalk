@@ -29,6 +29,22 @@ FeatherHuBERT checkpoints are regular PyTorch `.pth` files. They are not include
 tree and are ignored by git by default. You can use the checkpoint from the demo training asset
 pack or place your own externally trained checkpoint wherever you prefer.
 
+To convert an explicitly supplied FeatherHuBERT checkpoint into the standard auditable package,
+provide a separately reviewed `LICENSES.json`, an RFC 3339 creation time, and a new destination:
+
+```powershell
+cargo run -p feathertalk-model-package -- feather-hubert `
+  --source <path-to-feather_hubert.pth> `
+  --licenses <path-to-reviewed-LICENSES.json> `
+  --destination <new-feather-hubert-package-directory> `
+  --created-at 2026-08-27T00:00:00Z `
+  --minimum-app-version 0.1.0
+```
+
+The converter snapshots and audits the source before importing it, writes only the standard
+three-file package, and never accepts a license-free shortcut. A demo checkpoint may be used as
+the source, but a local synthetic test license is not permission to redistribute model weights.
+
 ## VGG19 perceptual weights
 
 The training perceptual extractor uses the torchvision VGG19 `features.14` convolution output

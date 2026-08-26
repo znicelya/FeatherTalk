@@ -17,6 +17,7 @@ members = [
   "crates/feathertalk-export",
   "tools/pfld-artifact",
   "tools/vgg19-package",
+  "tools/model-package",
 ]
 exclude = ["tools/scrfd-import"]
 

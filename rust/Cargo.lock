@@ -2472,6 +2472,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-model-package"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "feathertalk-export",
+]
+
+[[package]]
 name = "feathertalk-models"
 version = "0.1.0"
 dependencies = [

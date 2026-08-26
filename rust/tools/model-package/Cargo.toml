@@ -1,0 +1,11 @@
+[package]
+name = "feathertalk-model-package"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+feathertalk-export = { path = "../../crates/feathertalk-export" }
+
