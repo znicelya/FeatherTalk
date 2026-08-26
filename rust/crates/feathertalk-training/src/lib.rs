@@ -1,5 +1,6 @@
 mod artifact;
 mod checkpoint;
+mod checkpoint_io;
 mod data;
 mod error;
 mod losses;
