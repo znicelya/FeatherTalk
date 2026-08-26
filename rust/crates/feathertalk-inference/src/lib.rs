@@ -1,3 +1,4 @@
+mod burn;
 mod command;
 mod error;
 mod frame;
@@ -5,6 +6,7 @@ mod plan;
 mod render;
 mod sequence;
 
+pub use burn::{UnetAudioInput, build_unet_audio_input};
 pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
 pub use frame::{

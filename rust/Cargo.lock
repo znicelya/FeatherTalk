@@ -2426,7 +2426,10 @@ dependencies = [
 name = "feathertalk-inference"
 version = "0.1.0"
 dependencies = [
+ "burn",
+ "feathertalk-audio",
  "feathertalk-media",
+ "feathertalk-models",
  "feathertalk-preprocess",
  "tempfile",
  "thiserror 2.0.20",

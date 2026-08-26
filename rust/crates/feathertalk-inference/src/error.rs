@@ -59,6 +59,27 @@ pub enum InferenceError {
         expected: Vec<usize>,
         actual: Vec<usize>,
     },
+    #[error("invalid feature shape: tokens={tokens}, dims={dims}")]
+    InvalidFeatureShape { tokens: usize, dims: usize },
+    #[error(
+        "audio window slot {slot} references frame {index}, but feature frame count is {frame_count}"
+    )]
+    InvalidAudioWindowIndex {
+        slot: usize,
+        index: usize,
+        frame_count: usize,
+    },
+    #[error("model input value at {context}[{index}] is not finite")]
+    NonFiniteModelInput { context: &'static str, index: usize },
+    #[error("failed to read model tensor data for {context}: {message}")]
+    ModelTensorData {
+        context: &'static str,
+        message: String,
+    },
+    #[error("model output value at index {index} is not finite")]
+    NonFiniteModelOutput { index: usize },
+    #[error("model output value at index {index} is outside [0,1]: {value}")]
+    ModelOutputOutOfRange { index: usize, value: f32 },
     #[error("prediction value at index {index} is not finite")]
     NonFinitePrediction { index: usize },
     #[error(

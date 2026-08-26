@@ -6,7 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+burn.workspace = true
+feathertalk-audio = { path = "../feathertalk-audio" }
 feathertalk-media = { path = "../feathertalk-media" }
+feathertalk-models = { path = "../feathertalk-models", default-features = false }
 feathertalk-preprocess = { path = "../feathertalk-preprocess" }
 thiserror.workspace = true
 
