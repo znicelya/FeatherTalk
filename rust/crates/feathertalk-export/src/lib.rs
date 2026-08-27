@@ -6,6 +6,7 @@ mod io;
 mod manifest;
 pub mod onnx;
 mod onnx_feather_hubert;
+mod onnx_unet;
 mod package;
 
 pub use error::PackageError;
@@ -22,6 +23,7 @@ pub use manifest::{
     TensorSpec, TrainingManifest, TrainingMode,
 };
 pub use onnx_feather_hubert::export_feather_hubert_onnx;
+pub use onnx_unet::{export_mobileone_unet_onnx, export_original_unet_onnx};
 pub use package::{
     PackageBuildReport, PackageBuildRequest, load_model_package, write_model_package,
 };

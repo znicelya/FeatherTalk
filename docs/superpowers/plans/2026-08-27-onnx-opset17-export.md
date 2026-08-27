@@ -55,7 +55,7 @@
 - [x] Run focused tests and verify the expected failures.
 - [x] Implement snapshot conversion without lossy casts or partial tensors.
 - [x] Re-run focused tests and inspect a decoded initializer round trip.
-- [ ] Commit `feat: encode Burn weights as ONNX initializers`.
+- [x] Commit `feat: encode Burn weights as ONNX initializers`.
 
 ### Task 3: Emit the FeatherHuBERT opset 17 graph
 
@@ -72,7 +72,7 @@
 - [x] Run it to observe missing emitter failure.
 - [x] Implement graph naming and node construction; encode GroupNorm as reshape/InstanceNormalization/reshape with affine tensors where necessary, keeping the graph portable.
 - [x] Validate the emitted model with the Rust structural checker and a small zero-input shape smoke test when an ONNX backend is available.
-- [ ] Commit `feat: export FeatherHuBERT to ONNX opset 17`.
+- [x] Commit `feat: export FeatherHuBERT to ONNX opset 17`.
 
 ### Task 4: Emit Original UNet and reparameterized MobileOne graphs
 
@@ -86,10 +86,10 @@
 - Original UNet emits depthwise inverted-residual blocks, BatchNorm/Relu, audio bottleneck, align-corners bilinear resize, skip concat, and final Sigmoid.
 - MobileOne accepts `MobileOneUnetInference` only and emits fused Conv2D(+bias), optional Relu, residual Add, resize, concat, and Sigmoid; no branch BatchNorm tensors remain in the emitted graph.
 
-- [ ] Write tests for exact I/O, spatial shapes, depthwise group attributes, resize attributes, final sigmoid, and MobileOne absence of train-time branch names.
-- [ ] Run tests to observe missing emitters.
-- [ ] Implement shared ONNX Conv/BN/Relu/resize/concat helpers and model traversal.
-- [ ] Add graph checks that every initializer is consumed and every node input is defined.
+- [x] Write tests for exact I/O, spatial shapes, depthwise group attributes, resize attributes, final sigmoid, and MobileOne absence of train-time branch names.
+- [x] Run tests to observe missing emitters.
+- [x] Implement shared ONNX Conv/BN/Relu/resize/concat helpers and model traversal.
+- [x] Add graph checks that every initializer is consumed and every node input is defined.
 - [ ] Commit `feat: export Original and MobileOne UNet graphs`.
 
 ### Task 5: Add export and structural-validation CLI

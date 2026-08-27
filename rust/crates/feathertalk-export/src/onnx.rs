@@ -7,6 +7,7 @@ use burn_store::TensorSnapshot;
 use prost::Message;
 
 pub use crate::onnx_feather_hubert::export_feather_hubert_onnx;
+pub use crate::onnx_unet::{export_mobileone_unet_onnx, export_original_unet_onnx};
 
 pub const ONNX_IR_VERSION: i64 = 8;
 pub const ONNX_OPSET_VERSION: i64 = 17;
