@@ -90,7 +90,7 @@
 - [x] Run tests to observe missing emitters.
 - [x] Implement shared ONNX Conv/BN/Relu/resize/concat helpers and model traversal.
 - [x] Add graph checks that every initializer is consumed and every node input is defined.
-- [ ] Commit `feat: export Original and MobileOne UNet graphs`.
+- [x] Commit `feat: export Original and MobileOne UNet graphs`.
 
 ### Task 5: Add export and structural-validation CLI
 
@@ -106,12 +106,12 @@
   - `feathertalk-model-package onnx validate --source MODEL.onnx --kind feather-hubert|original-unet|mobileone-unet`
 - CLI writes atomically, refuses an existing destination, prints JSON with model kind, opset, byte length, and SHA-256, and never touches protected paths.
 
-- [ ] Write command/help and destination no-clobber tests first.
-- [ ] Run them to observe missing subcommands.
-- [ ] Implement checkpoint/package loading through existing strict import APIs and route to the exporters.
-- [ ] Implement atomic output and JSON report.
-- [ ] Run CLI tests and a synthetic model export.
-- [ ] Commit `feat: add ONNX export CLI`.
+- [x] Write command/help and destination no-clobber tests first.
+- [x] Run them to observe missing subcommands.
+- [x] Implement checkpoint/package loading through existing strict import APIs and route to the exporters.
+- [x] Implement atomic output and JSON report.
+- [x] Run CLI tests and a synthetic model export.
+- [x] Commit `feat: add ONNX export CLI`.
 
 ### Task 6: Add an opt-in Rust `ort` compatibility validator
 

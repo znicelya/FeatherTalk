@@ -72,7 +72,7 @@ impl OnnxModelKind {
         }
     }
 
-    fn public_contract(self) -> OnnxModelContract {
+    pub fn public_contract(self) -> OnnxModelContract {
         match self {
             Self::FeatherHubert => OnnxModelContract::new(
                 self,
