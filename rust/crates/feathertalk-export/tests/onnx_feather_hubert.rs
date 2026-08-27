@@ -55,9 +55,9 @@ fn feather_hubert_export_contains_inference_graph_and_all_weights() {
             .count()
             >= 9
     );
-    assert!(op_types.iter().any(|op| *op == "Erf"));
-    assert!(op_types.iter().any(|op| *op == "Add"));
-    assert!(!op_types.iter().any(|op| *op == "Dropout"));
+    assert!(op_types.contains(&"Erf"));
+    assert!(op_types.contains(&"Add"));
+    assert!(!op_types.contains(&"Dropout"));
 
     let initializer_names = graph
         .initializer

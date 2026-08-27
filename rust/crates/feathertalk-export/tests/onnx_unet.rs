@@ -43,11 +43,11 @@ fn original_unet_export_contains_bn_relu_resize_concat_and_sigmoid() {
         .iter()
         .map(|node| node.op_type.as_str())
         .collect::<Vec<_>>();
-    assert!(op_types.iter().any(|op| *op == "BatchNormalization"));
-    assert!(op_types.iter().any(|op| *op == "Relu"));
-    assert!(op_types.iter().any(|op| *op == "Resize"));
-    assert!(op_types.iter().any(|op| *op == "Concat"));
-    assert!(op_types.iter().any(|op| *op == "Sigmoid"));
+    assert!(op_types.contains(&"BatchNormalization"));
+    assert!(op_types.contains(&"Relu"));
+    assert!(op_types.contains(&"Resize"));
+    assert!(op_types.contains(&"Concat"));
+    assert!(op_types.contains(&"Sigmoid"));
     assert!(
         graph
             .node

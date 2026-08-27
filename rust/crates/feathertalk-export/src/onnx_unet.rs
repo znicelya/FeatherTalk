@@ -267,6 +267,7 @@ impl Builder {
         self.original_inverted(&format!("{prefix}.second"), &first, oup, oup, 2, 1, 1)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn original_inverted(
         &mut self,
         prefix: &str,
@@ -367,6 +368,7 @@ impl Builder {
         Ok(output)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn original_conv_bn_relu(
         &mut self,
         prefix: &str,
@@ -513,6 +515,7 @@ impl Builder {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn mobile_block(
         &mut self,
         prefix: &str,
@@ -838,7 +841,7 @@ fn finish(kind: OnnxModelKind, builder: Builder) -> Result<Vec<u8>, OnnxExportEr
 }
 
 fn validate_channels(channels: &[usize; 5]) -> Result<(), OnnxExportError> {
-    if channels.iter().any(|channel| *channel == 0)
+    if channels.contains(&0)
         || !channels[1].is_multiple_of(2)
         || !channels[2].is_multiple_of(2)
         || !channels[3].is_multiple_of(2)
@@ -850,6 +853,7 @@ fn validate_channels(channels: &[usize; 5]) -> Result<(), OnnxExportError> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn conv_node(
     name: &str,
     input: &str,
@@ -874,6 +878,7 @@ fn conv_node(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn conv_node_2d(
     name: &str,
     input: &str,
@@ -1014,7 +1019,7 @@ fn add_f32_initializer(
 }
 
 fn add_i64_initializer(initializers: &mut InitializerSet, name: &str, values: &[i64]) {
-    let mut raw_data = Vec::with_capacity(values.len() * std::mem::size_of::<i64>());
+    let mut raw_data = Vec::with_capacity(std::mem::size_of_val(values));
     for value in values {
         raw_data.extend_from_slice(&value.to_le_bytes());
     }

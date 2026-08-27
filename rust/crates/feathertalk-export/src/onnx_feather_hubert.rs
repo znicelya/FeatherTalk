@@ -263,6 +263,7 @@ fn group_count(channels: usize) -> usize {
     1
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_group_norm(
     nodes: &mut Vec<OnnxNodeProto>,
     initializers: &mut InitializerSet,
@@ -372,12 +373,7 @@ fn emit_gelu(
     let sqrt_two = format!("{prefix}.sqrt_two_inverse");
     let one = format!("{prefix}.one");
     let half = format!("{prefix}.half");
-    add_f32_initializer(
-        initializers,
-        &sqrt_two,
-        vec![0.7071067811865475],
-        Vec::new(),
-    );
+    add_f32_initializer(initializers, &sqrt_two, vec![0.707_106_77], Vec::new());
     add_f32_initializer(initializers, &one, vec![1.0], Vec::new());
     add_f32_initializer(initializers, &half, vec![0.5], Vec::new());
     let scaled = format!("{prefix}.scaled");
@@ -421,6 +417,7 @@ fn emit_gelu(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn conv_node(
     name: &str,
     input: &str,
@@ -530,7 +527,7 @@ fn add_f32_initializer(
 }
 
 fn add_i64_initializer(initializers: &mut InitializerSet, name: &str, values: &[i64]) {
-    let mut raw_data = Vec::with_capacity(values.len() * std::mem::size_of::<i64>());
+    let mut raw_data = Vec::with_capacity(std::mem::size_of_val(values));
     for value in values {
         raw_data.extend_from_slice(&value.to_le_bytes());
     }
