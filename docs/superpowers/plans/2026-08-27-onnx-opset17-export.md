@@ -34,12 +34,12 @@
 - Produces `ONNX_OPSET_VERSION`, `OnnxModelKind`, `OnnxTensorContract`, `OnnxExportError`, `serialize_model`, and `validate_model_contract`.
 - `validate_model_contract(bytes, expected)` decodes protobuf and checks IR version, one default-domain opset 17 import, graph presence, exact public input/output names, f32 element types, and allowed dynamic dimensions.
 
-- [ ] Write tests for valid FeatherHuBERT and UNet contracts, wrong opset, wrong names, wrong dtype, missing graph, and symbolic dimensions in forbidden positions.
-- [ ] Run `cargo test -p feathertalk-export --test onnx_contract`; confirm failure because the ONNX module and dependency are absent.
-- [ ] Add the dependency and reviewed ONNX protobuf message subset using `prost::Message`.
-- [ ] Implement deterministic model serialization and strict structural validation.
-- [ ] Run the focused tests and `cargo fmt --all`.
-- [ ] Commit `feat: add Rust ONNX protobuf contracts`.
+- [x] Write tests for valid FeatherHuBERT and UNet contracts, wrong opset, wrong names, wrong dtype, missing graph, and symbolic dimensions in forbidden positions.
+- [x] Run `cargo test -p feathertalk-export --test onnx_contract`; confirm failure because the ONNX module and dependency are absent.
+- [x] Add the dependency and reviewed ONNX protobuf message subset using `prost::Message`.
+- [x] Implement deterministic model serialization and strict structural validation.
+- [x] Run the focused tests and `cargo fmt --all`.
+- [x] Commit `feat: add Rust ONNX protobuf contracts`.
 
 ### Task 2: Encode Burn snapshots as deterministic ONNX initializers
 
@@ -51,10 +51,10 @@
 - Produces `InitializerSet`, `initializer_from_snapshot`, `add_snapshot_initializers`, and helpers for ONNX `TensorProto` f32 raw little-endian data.
 - Initializer names are sorted, unique, shape-preserving, and use `data_type = FLOAT`; `raw_data` is the only emitted payload field.
 
-- [ ] Write tests proving f32 byte encoding, shape/count checks, sorted names, duplicate rejection, and rejection of non-f32 snapshots.
-- [ ] Run focused tests and verify the expected failures.
-- [ ] Implement snapshot conversion without lossy casts or partial tensors.
-- [ ] Re-run focused tests and inspect a decoded initializer round trip.
+- [x] Write tests proving f32 byte encoding, shape/count checks, sorted names, duplicate rejection, and rejection of non-f32 snapshots.
+- [x] Run focused tests and verify the expected failures.
+- [x] Implement snapshot conversion without lossy casts or partial tensors.
+- [x] Re-run focused tests and inspect a decoded initializer round trip.
 - [ ] Commit `feat: encode Burn weights as ONNX initializers`.
 
 ### Task 3: Emit the FeatherHuBERT opset 17 graph

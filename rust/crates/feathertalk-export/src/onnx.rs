@@ -1,10 +1,43 @@
 //! Reviewed ONNX protobuf subset and strict public-interface validation.
 
+use std::{borrow::Borrow, collections::BTreeMap};
+
+use burn::tensor::DType;
+use burn_store::TensorSnapshot;
 use prost::Message;
 
 pub const ONNX_IR_VERSION: i64 = 8;
 pub const ONNX_OPSET_VERSION: i64 = 17;
 pub const ONNX_FLOAT_DATA_TYPE: i32 = 1;
+
+pub use proto::TensorProto as OnnxTensorProto;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InitializerSet {
+    tensors: BTreeMap<String, OnnxTensorProto>,
+}
+
+impl InitializerSet {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tensors.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tensors.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &OnnxTensorProto> {
+        self.tensors.values()
+    }
+
+    pub fn into_tensors(self) -> Vec<OnnxTensorProto> {
+        self.tensors.into_values().collect()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnnxModelKind {
@@ -129,6 +162,125 @@ impl OnnxModel {
 pub enum OnnxExportError {
     #[error("ONNX protobuf encode error: {0}")]
     Encode(#[from] prost::EncodeError),
+    #[error("initializer name is empty")]
+    EmptyInitializerName,
+    #[error("initializer {name} must use f32, got {dtype:?}")]
+    NonF32Initializer { name: String, dtype: DType },
+    #[error("failed to materialize initializer {name}: {message}")]
+    SnapshotData { name: String, message: String },
+    #[error("initializer {name} shape mismatch: snapshot {expected:?}, data {actual:?}")]
+    SnapshotShapeMismatch {
+        name: String,
+        expected: Vec<i64>,
+        actual: Vec<i64>,
+    },
+    #[error("initializer {name} element count mismatch: expected {expected}, got {actual}")]
+    ElementCountMismatch {
+        name: String,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("duplicate ONNX initializer {name}")]
+    DuplicateInitializer { name: String },
+    #[error("initializer {name} shape dimension exceeds i64")]
+    InitializerDimensionOverflow { name: String },
+}
+
+pub fn initializer_from_snapshot(
+    snapshot: &TensorSnapshot,
+) -> Result<OnnxTensorProto, OnnxExportError> {
+    let name = snapshot.full_path();
+    if name.is_empty() {
+        return Err(OnnxExportError::EmptyInitializerName);
+    }
+    if snapshot.dtype != DType::F32 {
+        return Err(OnnxExportError::NonF32Initializer {
+            name,
+            dtype: snapshot.dtype,
+        });
+    }
+
+    let expected_shape = snapshot
+        .shape
+        .iter()
+        .map(|dimension| {
+            i64::try_from(*dimension)
+                .map_err(|_| OnnxExportError::InitializerDimensionOverflow { name: name.clone() })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let data = snapshot
+        .to_data()
+        .map_err(|error| OnnxExportError::SnapshotData {
+            name: name.clone(),
+            message: error.to_string(),
+        })?;
+    let actual_shape = data
+        .shape
+        .iter()
+        .map(|dimension| i64::try_from(*dimension).unwrap_or(i64::MAX))
+        .collect::<Vec<_>>();
+    if actual_shape != expected_shape {
+        return Err(OnnxExportError::SnapshotShapeMismatch {
+            name,
+            expected: expected_shape,
+            actual: actual_shape,
+        });
+    }
+    let values = data
+        .as_slice::<f32>()
+        .map_err(|error| OnnxExportError::SnapshotData {
+            name: name.clone(),
+            message: error.to_string(),
+        })?;
+    let expected_elements = expected_shape.iter().try_fold(1usize, |total, dimension| {
+        usize::try_from(*dimension)
+            .ok()
+            .and_then(|dimension| total.checked_mul(dimension))
+    });
+    let expected_elements =
+        expected_elements.ok_or_else(|| OnnxExportError::ElementCountMismatch {
+            name: name.clone(),
+            expected: 0,
+            actual: values.len(),
+        })?;
+    if values.len() != expected_elements {
+        return Err(OnnxExportError::ElementCountMismatch {
+            name,
+            expected: expected_elements,
+            actual: values.len(),
+        });
+    }
+    let mut raw_data = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());
+    for value in values {
+        raw_data.extend_from_slice(&value.to_le_bytes());
+    }
+    Ok(OnnxTensorProto {
+        dims: expected_shape,
+        data_type: ONNX_FLOAT_DATA_TYPE,
+        name,
+        raw_data,
+        doc_string: String::new(),
+    })
+}
+
+pub fn add_snapshot_initializers<I, S>(
+    set: &mut InitializerSet,
+    snapshots: I,
+) -> Result<(), OnnxExportError>
+where
+    I: IntoIterator<Item = S>,
+    S: Borrow<TensorSnapshot>,
+{
+    let mut pending = BTreeMap::new();
+    for snapshot in snapshots {
+        let initializer = initializer_from_snapshot(snapshot.borrow())?;
+        let name = initializer.name.clone();
+        if pending.insert(name.clone(), initializer).is_some() || set.tensors.contains_key(&name) {
+            return Err(OnnxExportError::DuplicateInitializer { name });
+        }
+    }
+    set.tensors.extend(pending);
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -142,10 +294,7 @@ pub enum OnnxValidationError {
     #[error("ONNX graph is missing")]
     MissingGraph,
     #[error("expected graph kind {expected}, got {actual}")]
-    ModelKind {
-        expected: String,
-        actual: String,
-    },
+    ModelKind { expected: String, actual: String },
     #[error("expected {expected} {role} tensors, got {actual}")]
     TensorCount {
         role: &'static str,
@@ -309,12 +458,14 @@ fn validate_values(
                 actual: actual.name.clone(),
             });
         }
-        let tensor = actual.r#type.as_ref().and_then(|value| value.tensor_type.as_ref()).ok_or_else(
-            || OnnxValidationError::MissingTensorType {
+        let tensor = actual
+            .r#type
+            .as_ref()
+            .and_then(|value| value.tensor_type.as_ref())
+            .ok_or_else(|| OnnxValidationError::MissingTensorType {
                 role,
                 name: actual.name.clone(),
-            },
-        )?;
+            })?;
         if tensor.elem_type != ONNX_FLOAT_DATA_TYPE {
             return Err(OnnxValidationError::DType {
                 role,
