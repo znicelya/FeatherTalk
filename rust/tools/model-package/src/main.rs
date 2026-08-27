@@ -27,6 +27,10 @@ use sha2::{Digest, Sha256};
 
 type CliResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+mod migrate;
+
+use migrate::{ModelMigrationKind, ModelMigrationRequest, migrate_features, migrate_model};
+
 #[derive(Debug, Parser)]
 #[command(
     name = "feathertalk-model-package",
@@ -54,6 +58,47 @@ enum Command {
     },
     #[command(subcommand)]
     Onnx(OnnxCommand),
+    #[command(subcommand)]
+    Migrate(MigrateCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrateCommand {
+    Model {
+        #[arg(long, value_enum)]
+        kind: MigratableModelKind,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        licenses: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long)]
+        created_at: String,
+        #[arg(long)]
+        minimum_app_version: String,
+    },
+    Features {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum MigratableModelKind {
+    FeatherHubert,
+    OriginalUnet,
+}
+
+impl From<MigratableModelKind> for ModelMigrationKind {
+    fn from(value: MigratableModelKind) -> Self {
+        match value {
+            MigratableModelKind::FeatherHubert => Self::FeatherHubert,
+            MigratableModelKind::OriginalUnet => Self::OriginalUnet,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -127,6 +172,65 @@ fn main() -> CliResult<()> {
             minimum_app_version,
         ),
         Command::Onnx(command) => run_onnx(command),
+        Command::Migrate(command) => run_migrate(command),
+    }
+}
+
+fn run_migrate(command: MigrateCommand) -> CliResult<()> {
+    match command {
+        MigrateCommand::Model {
+            kind,
+            source,
+            licenses,
+            destination,
+            created_at,
+            minimum_app_version,
+        } => {
+            ensure_destination_absent(&destination)?;
+            reject_protected_source(&source)?;
+            let manifest = migrate_model(&ModelMigrationRequest {
+                kind: kind.into(),
+                source,
+                licenses,
+                destination: destination.clone(),
+                created_at,
+                minimum_app_version,
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "kind": "model",
+                    "model_kind": manifest.model_type,
+                    "destination": destination,
+                    "source_sha256": manifest.source.sha256,
+                    "model_sha256": manifest.model.sha256,
+                    "tensor_count": manifest.tensors.tensor_count,
+                    "total_elements": manifest.tensors.total_elements,
+                }))?
+            );
+            Ok(())
+        }
+        MigrateCommand::Features {
+            source,
+            destination,
+        } => {
+            ensure_destination_absent(&destination)?;
+            reject_protected_source(&source)?;
+            let report = migrate_features(&source, &destination)?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "kind": "features",
+                    "source_shape": report.source_shape,
+                    "destination": destination,
+                    "tokens": report.artifact.tokens(),
+                    "dims": report.artifact.dims(),
+                    "bytes": report.artifact.bytes(),
+                    "sha256": report.artifact.sha256(),
+                }))?
+            );
+            Ok(())
+        }
     }
 }
 

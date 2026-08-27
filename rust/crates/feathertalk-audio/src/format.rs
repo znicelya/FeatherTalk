@@ -68,6 +68,49 @@ pub fn write_feature_file(
             path: path.to_owned(),
         });
     }
+    let parent = path.parent().ok_or_else(|| AudioError::FeatureIo {
+        operation: "parent",
+        path: path.to_owned(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing parent"),
+    })?;
+    fs::create_dir_all(parent).map_err(|source| io("create_parent", parent, source))?;
+    let bytes = feature_bytes(matrix)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|source| io("create", path, source))?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|source| io("write", path, source))?;
+    artifact_from_path(path, matrix)
+}
+
+pub fn write_feature_file_no_clobber(
+    path: &Path,
+    matrix: &FeatureMatrix,
+) -> Result<FeatureArtifact, AudioError> {
+    let parent = path.parent().ok_or_else(|| AudioError::FeatureIo {
+        operation: "parent",
+        path: path.to_owned(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing parent"),
+    })?;
+    fs::create_dir_all(parent).map_err(|source| io("create_parent", parent, source))?;
+    let bytes = feature_bytes(matrix)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|source| io("create_temporary", parent, source))?;
+    temporary
+        .write_all(&bytes)
+        .and_then(|_| temporary.as_file_mut().sync_all())
+        .map_err(|source| io("write_temporary", path, source))?;
+    temporary
+        .persist_noclobber(path)
+        .map_err(|error| io("publish", path, error.error))?;
+    artifact_from_path(path, matrix)
+}
+
+fn feature_bytes(matrix: &FeatureMatrix) -> Result<Vec<u8>, AudioError> {
     let payload_bytes = matrix
         .values()
         .len()
@@ -82,12 +125,6 @@ pub fn write_feature_file(
             actual: total_bytes as u64,
         });
     }
-    let parent = path.parent().ok_or_else(|| AudioError::FeatureIo {
-        operation: "parent",
-        path: path.to_owned(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing parent"),
-    })?;
-    fs::create_dir_all(parent).map_err(|source| io("create_parent", parent, source))?;
     let mut bytes = Vec::with_capacity(total_bytes);
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&VERSION.to_le_bytes());
@@ -98,15 +135,10 @@ pub fn write_feature_file(
     for value in matrix.values() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|source| io("create", path, source))?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|source| io("write", path, source))?;
+    Ok(bytes)
+}
+
+fn artifact_from_path(path: &Path, matrix: &FeatureMatrix) -> Result<FeatureArtifact, AudioError> {
     let (actual_bytes, sha256) = hash_file(path)?;
     Ok(FeatureArtifact {
         path: path.to_owned(),

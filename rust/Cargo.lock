@@ -2477,15 +2477,19 @@ name = "feathertalk-model-package"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "feathertalk-audio",
  "feathertalk-export",
  "feathertalk-models",
  "feathertalk-weights",
  "hex",
+ "ndarray 0.17.2",
+ "ndarray-npy",
  "prost",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "zip 6.0.0",
 ]
 
 [[package]]

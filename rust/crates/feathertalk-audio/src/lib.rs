@@ -11,7 +11,10 @@ pub use chunk::{
 };
 pub use commit::{FeatureCommitSpec, commit_feature_artifact};
 pub use error::AudioError;
-pub use format::{FeatureArtifact, MAX_FEATURE_FILE_BYTES, read_feature_file, write_feature_file};
+pub use format::{
+    FeatureArtifact, MAX_FEATURE_FILE_BYTES, read_feature_file, write_feature_file,
+    write_feature_file_no_clobber,
+};
 pub use normalize::normalize_waveform;
 pub use stitch::{ChunkEncoder, drop_odd_token, extract_long_audio};
 

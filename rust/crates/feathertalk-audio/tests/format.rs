@@ -1,6 +1,8 @@
 use std::fs;
 
-use feathertalk_audio::{AudioError, FeatureMatrix, read_feature_file, write_feature_file};
+use feathertalk_audio::{
+    AudioError, FeatureMatrix, read_feature_file, write_feature_file, write_feature_file_no_clobber,
+};
 
 fn matrix() -> FeatureMatrix {
     FeatureMatrix::new(2, 4, vec![0.25; 8]).unwrap()
@@ -111,4 +113,14 @@ fn feature_writer_rejects_existing_symlink_destination() {
         Err(AudioError::FeatureNotRegular { .. })
     ));
     assert_eq!(fs::read(&target).unwrap(), b"sentinel");
+}
+
+#[test]
+fn no_clobber_writer_preserves_existing_destination() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("feature.f32");
+    fs::write(&path, b"sentinel").unwrap();
+
+    assert!(write_feature_file_no_clobber(&path, &matrix()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"sentinel");
 }

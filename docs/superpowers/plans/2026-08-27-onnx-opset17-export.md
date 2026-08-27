@@ -144,11 +144,11 @@
 - Adds `migrate model` for supported `.pth/.pth.tar` kinds and `migrate features --source AUD_HU.NPY --destination FEATURES.F32`.
 - Feature files use the existing versioned little-endian f32 format; `.npy` is accepted only at the migration boundary and is never used by runtime code.
 
-- [ ] Write tests for valid `.npy` conversion, wrong dtype/rank, truncated input, and no-clobber output.
-- [ ] Run focused tests to observe missing migration command/API.
-- [ ] Implement bounded `ndarray-npy` reading, shape/dtype validation, versioned feature output, and strict model-package routing.
-- [ ] Run migration tests and verify the produced header/hash.
-- [ ] Commit `feat: add legacy model and feature migration CLI`.
+- [x] Write tests for valid `.npy` conversion, wrong dtype/rank, truncated input, and no-clobber output.
+- [x] Run focused tests to observe missing migration command/API.
+- [x] Implement bounded `ndarray-npy` reading, shape/dtype validation, versioned feature output, and strict model-package routing.
+- [x] Run migration tests and verify the produced header/hash.
+- [x] Commit `feat: add legacy model and feature migration CLI`.
 
 ### Task 8: Milestone-wide verification and evidence
 

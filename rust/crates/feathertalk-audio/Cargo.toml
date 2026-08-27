@@ -8,8 +8,6 @@ license.workspace = true
 [dependencies]
 hex.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 feathertalk-project = { path = "../feathertalk-project" }
-
-[dev-dependencies]
-tempfile.workspace = true
