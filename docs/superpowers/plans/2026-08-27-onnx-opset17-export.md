@@ -156,9 +156,9 @@
 - Create: `docs/migration/onnx-export-report.md`
 - Modify: `docs/WEIGHTS.md` if model/export commands need documenting
 
-- [ ] Run focused exporter, CLI, and migration tests.
-- [ ] Run `cargo test --workspace --all-targets`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`.
-- [ ] Export the supplied `demo/kanghui_training_video_featherhubert_188_latest/feather_hubert_188_latest_99.pth` to a temporary ONNX file, validate its SHA/structure, and record exact evidence without reading the `.MOV`.
-- [ ] Run `ort` compatibility checks where the local runtime is available; otherwise record the explicit structural-only limitation.
-- [ ] Write the report with exact interfaces, opset, tensor counts, hashes, commands, and any failed threshold; do not claim `GO` unless all required checks pass.
-- [ ] Commit `docs: record ONNX export milestone evidence`.
+- [x] Run focused exporter, CLI, and migration tests.
+- [x] Run `cargo test --workspace --all-targets`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`.
+- [x] Export the supplied `demo/kanghui_training_video_featherhubert_188_latest/feather_hubert_188_latest_99.pth` to a temporary ONNX file, validate its SHA/structure, and record exact evidence without reading the `.MOV`.
+- [x] Run `ort` compatibility checks where the local runtime is available; otherwise record the explicit structural-only limitation.
+- [x] Write the report with exact interfaces, opset, tensor counts, hashes, commands, and any failed threshold; do not claim `GO` unless all required checks pass.
+- [x] Commit `docs: record ONNX export milestone evidence`.

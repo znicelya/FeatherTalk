@@ -195,6 +195,12 @@ fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     }
 }
 
+fn symlink_creation_unavailable(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+        || error.kind() == std::io::ErrorKind::Unsupported
+        || (cfg!(windows) && error.raw_os_error() == Some(1314))
+}
+
 fn staging_entries(parent: &Path) -> Vec<PathBuf> {
     let mut entries = fs::read_dir(parent)
         .unwrap()
@@ -460,10 +466,7 @@ fn symlinked_model_file_is_rejected_when_the_platform_allows_symlinks() {
     let target = saved.root.path().join("outside-model.bin");
     fs::rename(&model_path, &target).unwrap();
     if let Err(error) = create_file_symlink(&target, &model_path) {
-        if matches!(
-            error.kind(),
-            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
-        ) {
+        if symlink_creation_unavailable(&error) {
             eprintln!("skipping symlink assertion: {error}");
             return;
         }
@@ -481,10 +484,7 @@ fn symlinked_destination_parent_is_rejected_without_writing_through_it() {
     fs::create_dir(&real_parent).unwrap();
     let linked_parent = root.path().join("linked-parent");
     if let Err(error) = create_directory_symlink(&real_parent, &linked_parent) {
-        if matches!(
-            error.kind(),
-            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
-        ) {
+        if symlink_creation_unavailable(&error) {
             eprintln!("skipping symlink parent assertion: {error}");
             return;
         }

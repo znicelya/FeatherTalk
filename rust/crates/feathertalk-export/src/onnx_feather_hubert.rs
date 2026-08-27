@@ -55,6 +55,7 @@ pub fn export_feather_hubert_onnx<B: Backend>(
             stride,
             1,
             1,
+            0,
         ));
         let norm_output = format!("{prefix}.norm_out");
         emit_group_norm(
@@ -110,6 +111,7 @@ pub fn export_feather_hubert_onnx<B: Backend>(
             1,
             1,
             1,
+            0,
         ));
         let depthwise = format!("{prefix}.dw_conv_out");
         let dilation = [1, 2, 4, 8][index % 4];
@@ -123,6 +125,7 @@ pub fn export_feather_hubert_onnx<B: Backend>(
             1,
             dilation,
             hidden_channels,
+            2 * dilation,
         ));
         let gelu_output = format!("{prefix}.gelu_out");
         emit_gelu(
@@ -143,6 +146,7 @@ pub fn export_feather_hubert_onnx<B: Backend>(
             1,
             1,
             1,
+            0,
         ));
         let residual = format!("{prefix}.residual_add");
         nodes.push(node(
@@ -185,6 +189,7 @@ pub fn export_feather_hubert_onnx<B: Backend>(
         1,
         1,
         1,
+        0,
     ));
     nodes.push(node(
         "output.transpose",
@@ -275,30 +280,25 @@ fn emit_group_norm(
     weight: &str,
     bias: &str,
 ) -> Result<(), OnnxExportError> {
-    let channels_per_group = channels / groups;
     let reshape_in_shape = format!("{prefix}.shape.in");
     let reshape_out_shape = format!("{prefix}.shape.out");
     let affine_shape = format!("{prefix}.shape.affine");
-    add_i64_initializer(
-        initializers,
-        &reshape_in_shape,
-        &[-1, channels_per_group as i64, 0],
-    );
-    add_i64_initializer(initializers, &reshape_out_shape, &[-1, channels as i64, 0]);
+    add_i64_initializer(initializers, &reshape_in_shape, &[0, groups as i64, -1]);
+    add_i64_initializer(initializers, &reshape_out_shape, &[0, channels as i64, -1]);
     add_i64_initializer(initializers, &affine_shape, &[1, channels as i64, 1]);
     let instance_scale = format!("{prefix}.instance_scale");
     let instance_bias = format!("{prefix}.instance_bias");
     add_f32_initializer(
         initializers,
         &instance_scale,
-        vec![1.0; channels_per_group],
-        vec![channels_per_group as i64],
+        vec![1.0; groups],
+        vec![groups as i64],
     );
     add_f32_initializer(
         initializers,
         &instance_bias,
-        vec![0.0; channels_per_group],
-        vec![channels_per_group as i64],
+        vec![0.0; groups],
+        vec![groups as i64],
     );
 
     let reshaped = format!("{prefix}.reshape");
@@ -428,6 +428,7 @@ fn conv_node(
     stride: usize,
     dilation: usize,
     groups: usize,
+    padding: usize,
 ) -> OnnxNodeProto {
     let mut inputs = vec![input.to_owned(), weight.to_owned()];
     if let Some(bias) = bias {
@@ -442,7 +443,7 @@ fn conv_node(
             attribute_ints("kernel_shape", &[kernel as i64]),
             attribute_ints("strides", &[stride as i64]),
             attribute_ints("dilations", &[dilation as i64]),
-            attribute_ints("pads", &[0, 0]),
+            attribute_ints("pads", &[padding as i64, padding as i64]),
             attribute_int("group", groups as i64),
         ],
     )

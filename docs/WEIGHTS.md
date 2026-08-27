@@ -78,6 +78,26 @@ weights, searches a cache, parses a `.pth` file, or falls back to random paramet
 contract remains BGR float32 values in `[0,1]` with no ImageNet normalization, matching the
 existing training semantics.
 
+## ONNX compatibility export
+
+The model-package tool can emit an ONNX opset 17 compatibility file from an explicitly supplied
+FeatherHuBERT checkpoint. The destination must be new; the command validates the graph and prints
+its byte length and SHA-256:
+
+```powershell
+cargo run -p feathertalk-model-package -- onnx feather-hubert `
+  --source <path-to-feather_hubert.pth> `
+  --destination <new-model.onnx>
+cargo run -p feathertalk-model-package -- onnx validate `
+  --source <new-model.onnx> --kind feather-hubert
+```
+
+ONNX Runtime is an opt-in compatibility check and is not a product runtime dependency. When a
+local runtime DLL is available, `feathertalk-onnx-validate` accepts a `.npy` input and Burn
+reference output; otherwise use `--structural-only` for protobuf/interface validation. The exact
+real-checkpoint evidence for this migration is recorded in
+`docs/migration/onnx-export-report.md`.
+
 `rust/tests/fixtures/vgg19/LICENSES.local-parity.json` is an honest local numerical-parity record
 only; it is not approval to redistribute the pretrained weights. A release package must provide
 an independently reviewed `LICENSES.json` and record the source, model, and license hashes in its
