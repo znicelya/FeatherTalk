@@ -4,6 +4,7 @@ mod error;
 mod feather_hubert;
 mod io;
 mod manifest;
+pub mod onnx;
 mod package;
 
 pub use error::PackageError;

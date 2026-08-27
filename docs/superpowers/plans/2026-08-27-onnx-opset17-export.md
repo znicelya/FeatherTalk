@@ -6,7 +6,7 @@
 
 **Architecture:** `feathertalk-export` owns a small ONNX protobuf builder, deterministic initializer encoding, graph-contract validation, and model-specific graph emitters. Model snapshots supply f32 weights; the exporter emits a self-contained protobuf model with fixed public names and dynamic only where the contract permits. A separate opt-in validation tool loads the generated file with ONNX Runtime and compares a reference input/output; no runtime crate depends on ONNX.
 
-**Tech Stack:** Rust 1.92, Burn 0.21, `onnx-protobuf` 0.2.3, Safetensors/Burn snapshots, optional `ort` 2.0.0-rc.13 validation tool, clap CLI.
+**Tech Stack:** Rust 1.92, Burn 0.21, `prost` 0.14.4 with a reviewed ONNX protobuf subset, Safetensors/Burn snapshots, optional `ort` 2.0.0-rc.13 validation tool, clap CLI.
 
 ## Global Constraints
 
@@ -36,7 +36,7 @@
 
 - [ ] Write tests for valid FeatherHuBERT and UNet contracts, wrong opset, wrong names, wrong dtype, missing graph, and symbolic dimensions in forbidden positions.
 - [ ] Run `cargo test -p feathertalk-export --test onnx_contract`; confirm failure because the ONNX module and dependency are absent.
-- [ ] Add the dependency and minimal protobuf helpers using `onnx-protobuf::Message`.
+- [ ] Add the dependency and reviewed ONNX protobuf message subset using `prost::Message`.
 - [ ] Implement deterministic model serialization and strict structural validation.
 - [ ] Run the focused tests and `cargo fmt --all`.
 - [ ] Commit `feat: add Rust ONNX protobuf contracts`.
