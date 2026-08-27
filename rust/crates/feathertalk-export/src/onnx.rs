@@ -6,11 +6,16 @@ use burn::tensor::DType;
 use burn_store::TensorSnapshot;
 use prost::Message;
 
+pub use crate::onnx_feather_hubert::export_feather_hubert_onnx;
+
 pub const ONNX_IR_VERSION: i64 = 8;
 pub const ONNX_OPSET_VERSION: i64 = 17;
 pub const ONNX_FLOAT_DATA_TYPE: i32 = 1;
 
-pub use proto::TensorProto as OnnxTensorProto;
+pub use proto::{
+    AttributeProto as OnnxAttributeProto, GraphProto as OnnxGraphProto,
+    ModelProto as OnnxModelProto, NodeProto as OnnxNodeProto, TensorProto as OnnxTensorProto,
+};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InitializerSet {
@@ -36,6 +41,17 @@ impl InitializerSet {
 
     pub fn into_tensors(self) -> Vec<OnnxTensorProto> {
         self.tensors.into_values().collect()
+    }
+
+    pub(crate) fn insert_generated(
+        &mut self,
+        tensor: OnnxTensorProto,
+    ) -> Result<(), OnnxExportError> {
+        let name = tensor.name.clone();
+        if self.tensors.insert(name.clone(), tensor).is_some() {
+            return Err(OnnxExportError::DuplicateInitializer { name });
+        }
+        Ok(())
     }
 }
 
@@ -127,14 +143,16 @@ impl From<OnnxTensorContract> for OnnxValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OnnxGraph {
     pub name: String,
     pub inputs: Vec<OnnxValue>,
     pub outputs: Vec<OnnxValue>,
+    pub nodes: Vec<OnnxNodeProto>,
+    pub initializers: InitializerSet,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OnnxModel {
     pub ir_version: i64,
     pub opset_version: i64,
@@ -153,6 +171,8 @@ impl OnnxModel {
                 name: kind.graph_name().to_owned(),
                 inputs: contract.inputs.into_iter().map(Into::into).collect(),
                 outputs: contract.outputs.into_iter().map(Into::into).collect(),
+                nodes: Vec::new(),
+                initializers: InitializerSet::new(),
             },
         }
     }
@@ -184,6 +204,16 @@ pub enum OnnxExportError {
     DuplicateInitializer { name: String },
     #[error("initializer {name} shape dimension exceeds i64")]
     InitializerDimensionOverflow { name: String },
+    #[error("unsupported ONNX export configuration: {0}")]
+    UnsupportedConfiguration(String),
+    #[error("ONNX graph initializer {name} is never consumed")]
+    UnusedInitializer { name: String },
+    #[error("ONNX graph node input {name} is not defined before use")]
+    UndefinedNodeInput { name: String },
+    #[error("ONNX graph value {name} is defined more than once")]
+    DuplicateGraphValue { name: String },
+    #[error("invalid ONNX graph: {0}")]
+    InvalidGraph(String),
 }
 
 pub fn initializer_from_snapshot(
@@ -334,6 +364,12 @@ pub enum OnnxValidationError {
         expected: String,
         actual: String,
     },
+    #[error("ONNX graph initializer {name} is never consumed")]
+    UnusedInitializer { name: String },
+    #[error("ONNX graph node input {name} is not defined before use")]
+    UndefinedNodeInput { name: String },
+    #[error("ONNX graph value {name} is defined more than once")]
+    DuplicateGraphValue { name: String },
 }
 
 pub fn serialize_model(model: &OnnxModel) -> Result<Vec<u8>, OnnxExportError> {
@@ -394,14 +430,85 @@ pub fn validate_model_contract(
     }
     validate_values("input", &graph.input, &expected.inputs)?;
     validate_values("output", &graph.output, &expected.outputs)?;
+    if !graph.node.is_empty() || !graph.initializer.is_empty() {
+        validate_graph_proto_integrity(&graph)?;
+    }
+    Ok(())
+}
+
+pub fn validate_graph_integrity(model: &OnnxModel) -> Result<(), OnnxValidationError> {
+    let graph = model
+        .graph_present
+        .then(|| graph_proto(&model.graph))
+        .ok_or(OnnxValidationError::MissingGraph)?;
+    validate_graph_proto_integrity(&graph)
+}
+
+fn validate_graph_proto_integrity(graph: &proto::GraphProto) -> Result<(), OnnxValidationError> {
+    let mut defined = graph
+        .input
+        .iter()
+        .map(|value| value.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut initializer_names = std::collections::BTreeSet::new();
+    for initializer in &graph.initializer {
+        if !initializer_names.insert(initializer.name.clone()) {
+            return Err(OnnxValidationError::DuplicateGraphValue {
+                name: initializer.name.clone(),
+            });
+        }
+        if !defined.insert(initializer.name.clone()) {
+            return Err(OnnxValidationError::DuplicateGraphValue {
+                name: initializer.name.clone(),
+            });
+        }
+    }
+    let mut consumed = std::collections::BTreeSet::new();
+    for node in &graph.node {
+        for input in &node.input {
+            if input.is_empty() {
+                continue;
+            }
+            if !defined.contains(input) {
+                return Err(OnnxValidationError::UndefinedNodeInput {
+                    name: input.clone(),
+                });
+            }
+            if initializer_names.contains(input) {
+                consumed.insert(input.clone());
+            }
+        }
+        for output in &node.output {
+            if output.is_empty() {
+                continue;
+            }
+            if !defined.insert(output.clone()) {
+                return Err(OnnxValidationError::DuplicateGraphValue {
+                    name: output.clone(),
+                });
+            }
+        }
+    }
+    for output in &graph.output {
+        if !defined.contains(&output.name) {
+            return Err(OnnxValidationError::UndefinedNodeInput {
+                name: output.name.clone(),
+            });
+        }
+    }
+    for initializer in initializer_names {
+        if !consumed.contains(&initializer) {
+            return Err(OnnxValidationError::UnusedInitializer { name: initializer });
+        }
+    }
     Ok(())
 }
 
 fn graph_proto(graph: &OnnxGraph) -> proto::GraphProto {
     proto::GraphProto {
-        node: Vec::new(),
+        node: graph.nodes.clone(),
         name: graph.name.clone(),
-        initializer: Vec::new(),
+        initializer: graph.initializers.iter().cloned().collect(),
         doc_string: String::new(),
         input: graph.inputs.iter().map(value_info_proto).collect(),
         output: graph.outputs.iter().map(value_info_proto).collect(),

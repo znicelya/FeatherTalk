@@ -68,10 +68,10 @@
 - Produces `export_feather_hubert_onnx(model, config) -> Result<Vec<u8>, OnnxExportError>`.
 - Graph contains the seven strided Conv1D + GroupNorm + GELU frontend layers, TCN residual blocks, final GroupNorm/GELU/projection, transpose to `[B,T,C]`, and explicit dynamic sample/token shape metadata.
 
-- [ ] Write a graph test that checks public I/O, opset, initializer coverage, Conv/GroupNorm/GELU/residual node presence, and no training-only Dropout nodes.
-- [ ] Run it to observe missing emitter failure.
-- [ ] Implement graph naming and node construction; encode GroupNorm as reshape/InstanceNormalization/reshape with affine tensors where necessary, keeping the graph portable.
-- [ ] Validate the emitted model with the Rust structural checker and a small zero-input shape smoke test when an ONNX backend is available.
+- [x] Write a graph test that checks public I/O, opset, initializer coverage, Conv/GroupNorm/GELU/residual node presence, and no training-only Dropout nodes.
+- [x] Run it to observe missing emitter failure.
+- [x] Implement graph naming and node construction; encode GroupNorm as reshape/InstanceNormalization/reshape with affine tensors where necessary, keeping the graph portable.
+- [x] Validate the emitted model with the Rust structural checker and a small zero-input shape smoke test when an ONNX backend is available.
 - [ ] Commit `feat: export FeatherHuBERT to ONNX opset 17`.
 
 ### Task 4: Emit Original UNet and reparameterized MobileOne graphs

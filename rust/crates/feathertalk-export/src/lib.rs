@@ -5,6 +5,7 @@ mod feather_hubert;
 mod io;
 mod manifest;
 pub mod onnx;
+mod onnx_feather_hubert;
 mod package;
 
 pub use error::PackageError;
@@ -20,6 +21,7 @@ pub use manifest::{
     ORIGINAL_UNET_ARCHITECTURE_VERSION, SourceManifest, TRAINING_STATE_FILE_NAME, TensorContract,
     TensorSpec, TrainingManifest, TrainingMode,
 };
+pub use onnx_feather_hubert::export_feather_hubert_onnx;
 pub use package::{
     PackageBuildReport, PackageBuildRequest, load_model_package, write_model_package,
 };
