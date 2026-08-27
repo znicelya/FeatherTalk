@@ -125,11 +125,11 @@
 - Separate tool binary `feathertalk-onnx-validate` with `--model`, `--input`, `--expected-output`, and `--kind`.
 - Uses `ort` only in this tool; emits one JSON result containing provider, input/output metadata, max absolute error, mean absolute error, and pass/fail threshold.
 
-- [ ] Write CLI contract tests that do not require a provider and verify malformed model/input errors are nonzero.
-- [ ] Run tests to observe missing tool failure.
-- [ ] Implement optional `ort` session setup and ndarray f32 input/output comparison; keep download/network features disabled where possible.
-- [ ] Add a structural-only mode for CI environments without ONNX Runtime binaries.
-- [ ] Commit `feat: add opt-in ONNX Runtime compatibility validator`.
+- [x] Write CLI contract tests that do not require a provider and verify malformed model/input errors are nonzero.
+- [x] Run tests to observe missing tool failure.
+- [x] Implement optional `ort` session setup and ndarray f32 input/output comparison; keep download/network features disabled where possible.
+- [x] Add a structural-only mode for CI environments without ONNX Runtime binaries.
+- [x] Commit `feat: add opt-in ONNX Runtime compatibility validator`.
 
 ### Task 7: Integrate legacy model and `.npy` migration commands
 
