@@ -107,18 +107,18 @@ rust/
   Cargo.toml
   rust-toolchain.toml
   crates/
-    app/          GPUI 桌面端
-    worker/       后台任务进程和 RPC 服务
-    domain/       项目、任务、模型、错误、进度类型
-    media/        FFmpeg、WAV、视频帧和图像读写
-    preprocess/   抽帧、人脸检测、关键点和素材包验证
-    audio/        FeatherHuBERT、波形处理和特征窗口
-    models/       Burn 模型定义
-    training/     数据集、损失、优化器和 checkpoint
-    inference/    UNet 推理、图像贴回和视频合成
-    weights/      PyTorch 权重导入和 safetensors
-    export/       部署包和 ONNX opset 17 导出
-    cli/          与 worker 能力一致的命令行入口
+    feathertalk-app/          GPUI 桌面端
+    feathertalk-worker/       后台任务进程和 RPC 服务
+    feathertalk-domain/       项目、任务、模型、错误、进度类型
+    feathertalk-media/        FFmpeg、WAV、视频帧和图像读写
+    feathertalk-preprocess/   抽帧、人脸检测、关键点和素材包验证
+    feathertalk-audio/        FeatherHuBERT、波形处理和特征窗口
+    feathertalk-models/       Burn 模型定义
+    feathertalk-training/     数据集、损失、优化器和 checkpoint
+    feathertalk-inference/    UNet 推理、图像贴回和视频合成
+    feathertalk-weights/      PyTorch 权重导入和 safetensors
+    feathertalk-export/       部署包和 ONNX opset 17 导出
+    feathertalk-cli/          与 worker 能力一致的命令行入口
   tools/          Rust 迁移和兼容性工具
   tests/          Rust golden 数据与端到端测试资源
   docs/           Rust 迁移验收报告
@@ -485,6 +485,7 @@ ExtractingFrames
 DetectingFaces
 ExtractingFeatures
 Training { epoch, step, loss }
+Importing
 Exporting
 Rendering { frame, total }
 Completed
