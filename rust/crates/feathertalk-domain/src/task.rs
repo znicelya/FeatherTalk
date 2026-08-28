@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
 
 use crate::DomainError;
 
@@ -6,7 +6,7 @@ pub const TASK_ID_MILLIS_DIGITS: usize = 13;
 pub const TASK_ID_SUFFIX_DIGITS: usize = 8;
 pub const TASK_ID_LEN: usize = TASK_ID_MILLIS_DIGITS + 1 + TASK_ID_SUFFIX_DIGITS;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct TaskId(String);
 
@@ -18,16 +18,21 @@ impl TaskId {
         if value.len() != TASK_ID_LEN {
             return Err(invalid("must be exactly 22 characters"));
         }
-        let (millis, suffix) = value.split_at(TASK_ID_MILLIS_DIGITS);
-        let Some(suffix) = suffix.strip_prefix('-') else {
-            return Err(invalid("must separate millis and suffix with '-'"));
-        };
-        if !millis.bytes().all(|byte| byte.is_ascii_digit()) {
+        let bytes = value.as_bytes();
+        if !bytes[..TASK_ID_MILLIS_DIGITS]
+            .iter()
+            .all(u8::is_ascii_digit)
+        {
             return Err(invalid("millis must be 13 decimal digits"));
         }
-        if !suffix
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase() && byte <= b'f')
+        if bytes[TASK_ID_MILLIS_DIGITS] != b'-' {
+            return Err(invalid("must separate millis and suffix with '-'"));
+        }
+        if !bytes[TASK_ID_MILLIS_DIGITS + 1..]
+            .iter()
+            .all(|byte| {
+                byte.is_ascii_digit() || byte.is_ascii_lowercase() && *byte <= b'f'
+            })
         {
             return Err(invalid("suffix must be 8 lowercase hex digits"));
         }
@@ -36,6 +41,16 @@ impl TaskId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(D::Error::custom)
     }
 }
 

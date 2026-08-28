@@ -33,6 +33,22 @@ fn task_id_rejects_every_off_contract_shape() {
 }
 
 #[test]
+fn task_id_rejects_non_ascii_without_panicking() {
+    let result = std::panic::catch_unwind(|| TaskId::parse("123456789012é12345678"));
+    assert!(result.is_ok(), "task id validation must not panic");
+    assert!(matches!(
+        result.unwrap(),
+        Err(DomainError::InvalidTaskId { .. })
+    ));
+}
+
+#[test]
+fn task_id_deserialization_rejects_malformed_wire_values() {
+    let result = serde_json::from_str::<TaskId>(r#"\"not-a-task-id\""#);
+    assert!(result.is_err(), "wire TaskId values must go through validation");
+}
+
+#[test]
 fn task_kind_slugs_match_their_serde_form_and_are_all_distinct() {
     let mut seen = std::collections::BTreeSet::new();
     for kind in TaskKind::ALL {
