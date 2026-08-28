@@ -1,5 +1,6 @@
 mod error;
 mod lifecycle;
+mod request;
 mod stage;
 mod task;
 mod task_error;
@@ -8,6 +9,12 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use error::DomainError;
 pub use lifecycle::TaskLifecycle;
+pub use request::{
+    ExportModelPackageParams, ExportOnnxParams, ExtractFeaturesParams, ExtractFramesParams,
+    ImportLegacyModelParams, InspectModelParams, LegacyModelKind, MigrateLegacyFeaturesParams,
+    NormalizeMediaParams, OnnxExportKind, ProbeMediaParams, ProjectDirParams, RenderParams,
+    Request, TrainParams, TrainingMode, UnetVariant,
+};
 pub use stage::TaskStage;
 pub use task::{
     TASK_ID_LEN, TASK_ID_MILLIS_DIGITS, TASK_ID_SUFFIX_DIGITS, TaskId, TaskKind, TaskStatus,
