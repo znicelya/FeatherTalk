@@ -71,17 +71,24 @@ impl Event {
                 reason: "completed must not exceed total".into(),
             });
         }
-        let is_failed = matches!(self.stage, TaskStage::Failed { .. });
-        match (&self.error, is_failed) {
-            (Some(error), true) => error.validate()?,
-            (None, false) => {}
-            (None, true) => {
+        match (&self.error, &self.stage) {
+            (Some(error), TaskStage::Failed { code, .. }) => {
+                if error.code != *code {
+                    return Err(DomainError::InvalidField {
+                        field: "error",
+                        reason: "error code must match the failed stage code".into(),
+                    });
+                }
+                error.validate()?
+            }
+            (None, TaskStage::Failed { .. }) => {
                 return Err(DomainError::InvalidField {
                     field: "error",
                     reason: "a failed stage must carry the error payload".into(),
                 });
             }
-            (Some(_), false) => {
+            (None, _) => {}
+            (Some(_), _) => {
                 return Err(DomainError::InvalidField {
                     field: "error",
                     reason: "only a failed stage may carry an error payload".into(),

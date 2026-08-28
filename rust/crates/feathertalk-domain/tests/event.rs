@@ -44,6 +44,29 @@ fn a_failed_stage_requires_the_error_payload() {
 }
 
 #[test]
+fn a_failed_stage_and_error_payload_must_use_the_same_code() {
+    let mut event = Event::new(
+        task_id(),
+        NOW,
+        TaskStage::Failed {
+            code: ErrorCode::DiskSpaceLow,
+            message: "纾佺洏绌洪棿涓嶈冻".to_owned(),
+        },
+    );
+    event.error = Some(TaskError::new(
+        ErrorCode::GpuDeviceLost,
+        "鏄惧崱杩炴帴涓柇",
+        "device lost",
+        TaskStage::Exporting,
+    ));
+
+    assert!(matches!(
+        event.validate(),
+        Err(DomainError::InvalidField { field: "error", .. })
+    ));
+}
+
+#[test]
 fn a_non_failed_stage_must_not_carry_an_error_payload() {
     let mut event = Event::new(task_id(), NOW, TaskStage::Exporting);
     event.error = Some(TaskError::new(
