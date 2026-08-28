@@ -1,5 +1,6 @@
 mod error;
 mod event;
+mod frame;
 mod lifecycle;
 mod request;
 mod stage;
@@ -10,6 +11,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use error::DomainError;
 pub use event::{Event, Metrics, Progress};
+pub use frame::{
+    AdapterInfo, AdapterKind, Backend, CancelFrame, Capabilities, ClientFrame, ReadyFrame,
+    RejectedFrame, ServerFrame, ShutdownFrame, StartFrame,
+};
 pub use lifecycle::TaskLifecycle;
 pub use request::{
     ExportModelPackageParams, ExportOnnxParams, ExtractFeaturesParams, ExtractFramesParams,
