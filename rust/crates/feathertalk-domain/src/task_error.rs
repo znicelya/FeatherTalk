@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::DomainError;
+use crate::{DomainError, TaskStage};
 
 pub const MAX_SUMMARY_CHARS: usize = 200;
 pub const MAX_DETAIL_CHARS: usize = 4_000;
@@ -84,21 +84,23 @@ pub enum Recovery {
     NotRecoverable,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskError {
     pub code: ErrorCode,
     pub summary: String,
     pub detail: String,
+    pub stage: TaskStage,
     pub recovery: Recovery,
 }
 
 impl TaskError {
-    pub fn new(code: ErrorCode, summary: &str, detail: &str) -> Self {
+    pub fn new(code: ErrorCode, summary: &str, detail: &str, stage: TaskStage) -> Self {
         Self {
             code,
             summary: summary.to_owned(),
             detail: detail.to_owned(),
+            stage,
             recovery: code.default_recovery(),
         }
     }
@@ -115,6 +117,12 @@ impl TaskError {
             return Err(DomainError::InvalidField {
                 field: "detail",
                 reason: format!("must be at most {MAX_DETAIL_CHARS} characters"),
+            });
+        }
+        if self.stage.is_terminal() {
+            return Err(DomainError::InvalidField {
+                field: "stage",
+                reason: "must be the stage the failure occurred in, not a terminal stage".into(),
             });
         }
         Ok(())

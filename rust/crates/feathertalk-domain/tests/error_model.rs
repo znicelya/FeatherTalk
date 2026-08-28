@@ -1,4 +1,4 @@
-use feathertalk_domain::{DomainError, ErrorCode, Recovery, TaskError};
+use feathertalk_domain::{DomainError, ErrorCode, Recovery, TaskError, TaskStage};
 
 #[test]
 fn every_error_code_has_the_wire_form_from_the_design() {
@@ -35,10 +35,20 @@ fn every_error_code_maps_to_an_actionable_recovery() {
 
 #[test]
 fn validate_rejects_an_empty_summary_and_oversized_fields() {
-    let ok = TaskError::new(ErrorCode::MediaInvalid, "无法读取视频", "ffprobe exit 1");
+    let ok = TaskError::new(
+        ErrorCode::MediaInvalid,
+        "无法读取视频",
+        "ffprobe exit 1",
+        TaskStage::Preparing,
+    );
     ok.validate().unwrap();
 
-    let empty = TaskError::new(ErrorCode::MediaInvalid, "  ", "detail");
+    let empty = TaskError::new(
+        ErrorCode::MediaInvalid,
+        "  ",
+        "detail",
+        TaskStage::Preparing,
+    );
     assert!(matches!(
         empty.validate(),
         Err(DomainError::InvalidField {
@@ -48,7 +58,12 @@ fn validate_rejects_an_empty_summary_and_oversized_fields() {
     ));
 
     let long_summary = "字".repeat(feathertalk_domain::MAX_SUMMARY_CHARS + 1);
-    let too_long = TaskError::new(ErrorCode::MediaInvalid, &long_summary, "detail");
+    let too_long = TaskError::new(
+        ErrorCode::MediaInvalid,
+        &long_summary,
+        "detail",
+        TaskStage::Preparing,
+    );
     assert!(matches!(
         too_long.validate(),
         Err(DomainError::InvalidField {
@@ -58,7 +73,12 @@ fn validate_rejects_an_empty_summary_and_oversized_fields() {
     ));
 
     let long_detail = "x".repeat(feathertalk_domain::MAX_DETAIL_CHARS + 1);
-    let too_long = TaskError::new(ErrorCode::MediaInvalid, "摘要", &long_detail);
+    let too_long = TaskError::new(
+        ErrorCode::MediaInvalid,
+        "摘要",
+        &long_detail,
+        TaskStage::Preparing,
+    );
     assert!(matches!(
         too_long.validate(),
         Err(DomainError::InvalidField {
@@ -70,8 +90,13 @@ fn validate_rejects_an_empty_summary_and_oversized_fields() {
 
 #[test]
 fn task_error_round_trips_and_rejects_unknown_fields() {
-    let error = TaskError::new(ErrorCode::GpuDeviceLost, "显卡连接中断", "device lost");
+    let error = TaskError::new(
+        ErrorCode::GpuDeviceLost,
+        "显卡连接中断",
+        "device lost",
+        TaskStage::Preparing,
+    );
     let json = serde_json::to_string(&error).unwrap();
     assert_eq!(serde_json::from_str::<TaskError>(&json).unwrap(), error);
-    assert!(serde_json::from_str::<TaskError>(r#"{"code":"GPU_DEVICE_LOST","summary":"a","detail":"b","recovery":"resume_from_checkpoint","extra":1}"#).is_err());
+    assert!(serde_json::from_str::<TaskError>(r#"{"code":"GPU_DEVICE_LOST","summary":"a","detail":"b","stage":{"stage":"preparing"},"recovery":"resume_from_checkpoint","extra":1}"#).is_err());
 }
