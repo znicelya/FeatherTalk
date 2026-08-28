@@ -103,3 +103,9 @@ fn frames_use_adjacent_tagging_and_round_trip() {
     assert!(json.starts_with(r#"{"frame":"ready","data":{"#), "{json}");
     assert_eq!(serde_json::from_str::<ServerFrame>(&json).unwrap(), frame);
 }
+
+#[test]
+fn ready_frame_rejects_unknown_outer_fields() {
+    let json = r#"{"frame":"ready","data":{"protocol_version":1,"worker_version":"0.1.0","backends":["cpu"],"adapters":[],"capabilities":{"training":false,"wgpu_training":false,"onnx_validation":false,"ffmpeg":true}},"extra":1}"#;
+    assert!(serde_json::from_str::<ServerFrame>(json).is_err());
+}

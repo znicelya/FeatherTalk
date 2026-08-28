@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainError, Event, Request, TaskId};
+use crate::{DomainError, Event, Request, TaskId, check_protocol_version};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +56,7 @@ pub struct ReadyFrame {
 
 impl ReadyFrame {
     pub fn validate(&self) -> Result<(), DomainError> {
+        check_protocol_version(self.protocol_version)?;
         if self.backends.is_empty() {
             return Err(DomainError::InvalidField {
                 field: "backends",
@@ -89,6 +90,12 @@ pub struct StartFrame {
     pub request: Request,
 }
 
+impl StartFrame {
+    pub fn validate(&self) -> Result<(), DomainError> {
+        check_protocol_version(self.protocol_version)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CancelFrame {
@@ -96,10 +103,22 @@ pub struct CancelFrame {
     pub task_id: TaskId,
 }
 
+impl CancelFrame {
+    pub fn validate(&self) -> Result<(), DomainError> {
+        check_protocol_version(self.protocol_version)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShutdownFrame {
     pub protocol_version: u32,
+}
+
+impl ShutdownFrame {
+    pub fn validate(&self) -> Result<(), DomainError> {
+        check_protocol_version(self.protocol_version)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,8 +128,19 @@ pub struct RejectedFrame {
     pub reason: String,
 }
 
+impl RejectedFrame {
+    pub fn validate(&self) -> Result<(), DomainError> {
+        check_protocol_version(self.protocol_version)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "frame", content = "data", rename_all = "snake_case")]
+#[serde(
+    tag = "frame",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ClientFrame {
     Start(StartFrame),
     Cancel(CancelFrame),
@@ -125,10 +155,23 @@ impl ClientFrame {
             Self::Shutdown(frame) => frame.protocol_version,
         }
     }
+
+    pub fn validate(&self) -> Result<(), DomainError> {
+        match self {
+            Self::Start(frame) => frame.validate(),
+            Self::Cancel(frame) => frame.validate(),
+            Self::Shutdown(frame) => frame.validate(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "frame", content = "data", rename_all = "snake_case")]
+#[serde(
+    tag = "frame",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ServerFrame {
     Ready(ReadyFrame),
     Event(Event),
@@ -141,6 +184,14 @@ impl ServerFrame {
             Self::Ready(frame) => frame.protocol_version,
             Self::Event(event) => event.protocol_version,
             Self::Rejected(frame) => frame.protocol_version,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), DomainError> {
+        match self {
+            Self::Ready(frame) => frame.validate(),
+            Self::Event(event) => event.validate(),
+            Self::Rejected(frame) => frame.validate(),
         }
     }
 }

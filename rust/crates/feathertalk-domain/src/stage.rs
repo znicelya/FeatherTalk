@@ -3,7 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::{ErrorCode, TaskStatus};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "stage", content = "data", rename_all = "snake_case")]
+#[serde(
+    tag = "stage",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum TaskStage {
     Queued,
     Preparing,

@@ -48,6 +48,12 @@ fn params_reject_unknown_fields() {
 }
 
 #[test]
+fn request_rejects_unknown_outer_fields() {
+    let bad = r#"{"command":"probe_media","params":{"input":"a.mov"},"extra":1}"#;
+    assert!(serde_json::from_str::<Request>(bad).is_err());
+}
+
+#[test]
 fn render_treats_preview_as_a_frame_cap_not_a_separate_command() {
     let json = r#"{"command":"render","params":{"project_dir":"p","checkpoint":"c","audio":"a.wav","output":"o.mp4","max_output_frames":120}}"#;
     let request: Request = serde_json::from_str(json).unwrap();

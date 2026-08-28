@@ -54,6 +54,15 @@ fn data_carrying_stages_use_adjacent_tagging_on_the_wire() {
 }
 
 #[test]
+fn task_stage_rejects_unknown_outer_and_payload_fields() {
+    let outer = r#"{"stage":"preparing","extra":1}"#;
+    assert!(serde_json::from_str::<TaskStage>(outer).is_err());
+
+    let payload = r#"{"stage":"training","data":{"epoch":1,"step":2,"loss":0.1,"extra":3}}"#;
+    assert!(serde_json::from_str::<TaskStage>(payload).is_err());
+}
+
+#[test]
 fn task_error_stage_must_not_be_terminal() {
     use feathertalk_domain::{DomainError, TaskError};
 
