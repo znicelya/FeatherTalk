@@ -1,4 +1,5 @@
 mod error;
+mod event;
 mod lifecycle;
 mod request;
 mod stage;
@@ -8,6 +9,7 @@ mod task_error;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use error::DomainError;
+pub use event::{Event, Metrics, Progress};
 pub use lifecycle::TaskLifecycle;
 pub use request::{
     ExportModelPackageParams, ExportOnnxParams, ExtractFeaturesParams, ExtractFramesParams,
