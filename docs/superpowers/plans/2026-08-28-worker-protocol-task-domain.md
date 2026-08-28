@@ -18,7 +18,7 @@
 - `feathertalk-project` source files must not be modified by any task in this plan.
 - `PROTOCOL_VERSION: u32 = 1`. Version comparison is exact equality; no range negotiation.
 - `MAX_FRAME_BYTES: usize = 1_048_576`.
-- Every enum that crosses the wire is closed, uses `#[serde(rename_all = "snake_case")]`, and every payload struct carries `#[serde(deny_unknown_fields)]`.
+- Every enum that crosses the wire is closed, uses `#[serde(rename_all = "snake_case")]` (except `ErrorCode`, whose explicit Serde names are uppercase by contract), and every payload struct carries `#[serde(deny_unknown_fields)]`.
 - Enums with data-carrying variants use adjacent tagging (`#[serde(tag = "...", content = "...")]`), never internal tagging. serde rejects `deny_unknown_fields` combined with an internal tag, so internal tagging would silently drop the strictness this contract depends on.
 - Task IDs are exactly 22 characters: 13 decimal digits, `-`, 8 lowercase hex digits.
 - Verification for every task: `cargo test -p feathertalk-domain --all-targets`. Verification for the final task adds `cargo test --workspace --all-targets`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`, all requiring exit code 0.
@@ -39,7 +39,7 @@ rust/crates/feathertalk-domain/
   src/task_error.rs                              ErrorCode, Recovery, TaskError
   src/stage.rs                                   TaskStage, projection to TaskStatus, is_terminal
   src/lifecycle.rs                               TaskLifecycle transition validator
-  src/request.rs                                 Request, 13 params structs, wire-level mirrors
+  src/request.rs                                 Request, 12 params structs, wire-level mirrors
   src/event.rs                                   Event envelope, Progress, Metrics
   src/frame.rs                                   ClientFrame, ServerFrame, Ready capability types
   src/codec.rs                                   encode_line / decode_line, MAX_FRAME_BYTES
@@ -86,7 +86,7 @@ The spec's §4 table mapping each command to the stages it emits has no task her
 - Consumes: nothing.
 - Produces: `PROTOCOL_VERSION: u32`, `DomainError`, `TaskId::parse(&str) -> Result<TaskId, DomainError>`, `TaskId::as_str(&self) -> &str`, `TaskKind` with `as_slug(self) -> &'static str` / `from_slug(&str) -> Option<TaskKind>` / `ALL: [TaskKind; 13]`, `TaskStatus` with `is_incomplete(self) -> bool` / `ALL: [TaskStatus; 5]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/public_api.rs`:
 
@@ -150,13 +150,13 @@ fn only_queued_and_running_are_incomplete() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: FAIL. Cargo reports `error: package ID specification 'feathertalk-domain' did not match any packages` because the crate does not exist yet.
 
-- [ ] **Step 3: Register the crate in the workspace**
+- [x] **Step 3: Register the crate in the workspace**
 
 In `rust/Cargo.toml`, add `"crates/feathertalk-domain",` to `members` as the first entry, before `"crates/feathertalk-face"`. Keep the existing entries and the `exclude` line untouched.
 
@@ -177,7 +177,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 ```
 
-- [ ] **Step 4: Implement DomainError**
+- [x] **Step 4: Implement DomainError**
 
 Create `rust/crates/feathertalk-domain/src/error.rs`:
 
@@ -202,7 +202,7 @@ pub enum DomainError {
 }
 ```
 
-- [ ] **Step 5: Implement task identity**
+- [x] **Step 5: Implement task identity**
 
 Create `rust/crates/feathertalk-domain/src/task.rs`:
 
@@ -355,13 +355,13 @@ pub use task::{
 };
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 5 passed, 0 failed.
 
-- [ ] **Step 7: Format and commit**
+- [x] **Step 7: Format and commit**
 
 ```bash
 cargo fmt --all
@@ -384,7 +384,7 @@ git commit -m "feat: add task domain identity types"
 
 **Ordering note for the implementer:** `TaskError.stage` must hold a `TaskStage`, and `TaskStage::Failed` must hold an `ErrorCode`. Task 2 therefore defines `ErrorCode`, `Recovery`, and a `TaskError` **without** the `stage` field; Task 3 defines `TaskStage` and adds `stage` to `TaskError` along with the validation rule that rejects terminal stages. Do not try to write both halves in one task — the compiler cannot accept a forward reference.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/error_model.rs`:
 
@@ -461,13 +461,13 @@ fn task_error_round_trips_and_rejects_unknown_fields() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test error_model`
 
 Expected: FAIL with `unresolved import` for `ErrorCode`, `Recovery`, and `TaskError`.
 
-- [ ] **Step 3: Implement the error model**
+- [x] **Step 3: Implement the error model**
 
 Create `rust/crates/feathertalk-domain/src/task_error.rs`:
 
@@ -610,13 +610,13 @@ In `src/lib.rs`, add `mod task_error;` and extend the re-exports:
 pub use task_error::{ErrorCode, MAX_DETAIL_CHARS, MAX_SUMMARY_CHARS, Recovery, TaskError};
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 9 passed, 0 failed.
 
-- [ ] **Step 5: Format and commit**
+- [x] **Step 5: Format and commit**
 
 ```bash
 cargo fmt --all
@@ -639,7 +639,7 @@ git commit -m "feat: add protocol error codes and recovery hints"
 - Consumes: `ErrorCode`, `TaskStatus`, `DomainError`.
 - Produces: `TaskStage` with `ALL_UNIT_SAMPLES: [TaskStage; 13]` / `status(&self) -> TaskStatus` / `is_terminal(&self) -> bool` / `as_slug(&self) -> &'static str`, and `TaskError::new(code, summary, detail, stage)` now taking a fourth argument.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/stage_status.rs`:
 
@@ -729,13 +729,13 @@ fn task_error_stage_must_not_be_terminal() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test stage_status`
 
 Expected: FAIL with `unresolved import` for `TaskStage`.
 
-- [ ] **Step 3: Implement the stage vocabulary**
+- [x] **Step 3: Implement the stage vocabulary**
 
 Create `rust/crates/feathertalk-domain/src/stage.rs`:
 
@@ -853,7 +853,7 @@ impl TaskStage {
 
 Write `status` with every non-terminal variant spelled out rather than a `_ =>` arm. That is the whole point: adding a stage later must break this match.
 
-- [ ] **Step 4: Add the stage field to TaskError**
+- [x] **Step 4: Add the stage field to TaskError**
 
 In `src/task_error.rs`, add `use crate::TaskStage;`, add the field, and extend `new` and `validate`. **Also drop `Eq` from `TaskError`'s derive list**, leaving `#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]`: `TaskStage::Training` and the metrics carry `f64`, so nothing containing a `TaskStage` can be `Eq`. Leaving `Eq` on will not compile.
 
@@ -894,13 +894,13 @@ In `src/lib.rs`, add `mod stage;` and `pub use stage::TaskStage;`.
 
 In `tests/error_model.rs`, add a fourth argument `TaskStage::Preparing` to every `TaskError::new` call, import `TaskStage`, and update the unknown-field JSON literal to include `"stage":{"stage":"preparing"}` before `"recovery"`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 14 passed, 0 failed.
 
-- [ ] **Step 6: Format and commit**
+- [x] **Step 6: Format and commit**
 
 ```bash
 cargo fmt --all
@@ -923,7 +923,7 @@ git commit -m "feat: add task stage vocabulary and status projection"
 
 `request_cancel` returns `Ok(true)` when this call moved the task into `Cancelled`, and `Ok(false)` when the task was already terminal. It never returns `Err`. That signature is what makes cancellation idempotent for callers that do not know the current state, and it guarantees at most one `Cancelled` per task.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/lifecycle.rs`:
 
@@ -1017,13 +1017,13 @@ fn queued_cannot_be_re_entered() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test lifecycle`
 
 Expected: FAIL with `unresolved import` for `TaskLifecycle`.
 
-- [ ] **Step 3: Implement the validator**
+- [x] **Step 3: Implement the validator**
 
 Create `rust/crates/feathertalk-domain/src/lifecycle.rs`:
 
@@ -1081,13 +1081,13 @@ impl TaskLifecycle {
 
 In `src/lib.rs`, add `mod lifecycle;` and `pub use lifecycle::TaskLifecycle;`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 20 passed, 0 failed.
 
-- [ ] **Step 5: Format, lint, and commit**
+- [x] **Step 5: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -1109,11 +1109,13 @@ git commit -m "feat: add task lifecycle transition validator"
 - Consumes: `TaskKind`.
 - Produces: `Request` (13 variants, each wrapping a params struct), the params structs `ProbeMediaParams`, `NormalizeMediaParams`, `ProjectDirParams`, `ExtractFramesParams`, `ExtractFeaturesParams`, `TrainParams`, `RenderParams`, `InspectModelParams`, `ImportLegacyModelParams`, `ExportModelPackageParams`, `ExportOnnxParams`, `MigrateLegacyFeaturesParams`, the wire mirrors `TrainingMode`, `UnetVariant`, `LegacyModelKind`, `OnnxExportKind`, and `Request::kind(&self) -> TaskKind`.
 
-`ValidateProject` and `LockAssetPackage` share `ProjectDirParams` because both take only a project directory. That is 12 params structs for 13 commands.
+`ValidateProject` and `LockAssetPackage` share `ProjectDirParams` because both take only a project directory. That is 12 params structs for 13 task commands. Together with the control-plane `Cancel` operation, the protocol exposes 14 operations; `Cancel` is a frame-level control operation, not a `Request` variant.
+
+The `ErrorCode` enum intentionally uses explicit uppercase Serde names (`MEDIA_INVALID`, `GPU_DEVICE_LOST`, and so on), an exception to the general `snake_case` enum convention. These names are wire-contract literals and must not be normalized.
 
 **Why the wire mirrors exist:** `TrainingMode`, `UnetVariant`, `LegacyModelKind`, and `OnnxExportKind` duplicate enums that live in `feathertalk-training`, `feathertalk-models`, `feathertalk-weights`, and `feathertalk-export`. `domain` cannot depend on those crates without breaking the Global Constraints, so these are protocol-level types and slice 2 owns the mapping in both directions and tests it there. Do not add those crates as dependencies to make the duplication go away.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/request.rs`:
 
@@ -1260,13 +1262,13 @@ fn sample_requests() -> Vec<Request> {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test request`
 
 Expected: FAIL with `unresolved import` for `Request` and the params structs.
 
-- [ ] **Step 3: Implement the wire mirrors and params structs**
+- [x] **Step 3: Implement the wire mirrors and params structs**
 
 Create `rust/crates/feathertalk-domain/src/request.rs`:
 
@@ -1333,7 +1335,7 @@ params!(ExportOnnxParams { source: PathBuf, kind: OnnxExportKind, destination: P
 
 The `params!` macro exists only to keep twelve near-identical struct definitions readable. `TrainParams` and `RenderParams` are written out longhand below because they carry more fields and are the two a reader will look up most often.
 
-- [ ] **Step 4: Implement TrainParams, RenderParams, and the Request enum**
+- [x] **Step 4: Implement TrainParams, RenderParams, and the Request enum**
 
 Append to `src/request.rs`:
 
@@ -1401,13 +1403,13 @@ impl Request {
 
 In `src/lib.rs`, add `mod request;` and re-export every public item from `request`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 26 passed, 0 failed.
 
-- [ ] **Step 6: Format, lint, and commit**
+- [x] **Step 6: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -1431,7 +1433,7 @@ git commit -m "feat: add worker command vocabulary"
 
 `emitted_at` is an RFC 3339 `String`, matching how `feathertalk-project` stores `updated_at`. `domain` does not read the clock; the caller supplies the timestamp.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/event.rs`:
 
@@ -1549,13 +1551,13 @@ fn events_round_trip_and_reject_unknown_fields() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test event`
 
 Expected: FAIL with `unresolved import` for `Event`, `Metrics`, and `Progress`.
 
-- [ ] **Step 3: Implement the envelope**
+- [x] **Step 3: Implement the envelope**
 
 Create `rust/crates/feathertalk-domain/src/event.rs`:
 
@@ -1613,7 +1615,7 @@ impl Event {
 }
 ```
 
-- [ ] **Step 4: Implement validation**
+- [x] **Step 4: Implement validation**
 
 Append to `src/event.rs`:
 
@@ -1666,13 +1668,13 @@ impl Event {
 
 In `src/lib.rs`, add `mod event;` and `pub use event::{Event, Metrics, Progress};`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 32 passed, 0 failed.
 
-- [ ] **Step 6: Format, lint, and commit**
+- [x] **Step 6: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -1696,7 +1698,7 @@ git commit -m "feat: add task event envelope with progress and metrics"
 
 Each frame struct carries `protocol_version` as its own first field, flat — there is no separate params layer. `ServerFrame::Event` wraps `Event` directly, because `Event` already carries `protocol_version`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/handshake.rs`:
 
@@ -1801,13 +1803,13 @@ fn frames_use_adjacent_tagging_and_round_trip() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test handshake`
 
 Expected: FAIL with `unresolved import` for `ClientFrame`, `ServerFrame`, and the capability types.
 
-- [ ] **Step 3: Implement the capability types**
+- [x] **Step 3: Implement the capability types**
 
 Create `rust/crates/feathertalk-domain/src/frame.rs`:
 
@@ -1859,7 +1861,7 @@ pub struct Capabilities {
 }
 ```
 
-- [ ] **Step 4: Implement the frame structs and enums**
+- [x] **Step 4: Implement the frame structs and enums**
 
 Append to `src/frame.rs`:
 
@@ -1930,7 +1932,7 @@ pub struct RejectedFrame {
 }
 ```
 
-- [ ] **Step 5: Implement the two direction enums**
+- [x] **Step 5: Implement the two direction enums**
 
 Append to `src/frame.rs`:
 
@@ -1976,13 +1978,13 @@ impl ServerFrame {
 
 In `src/lib.rs`, add `mod frame;` and re-export every public item from `frame`.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 37 passed, 0 failed.
 
-- [ ] **Step 7: Format, lint, and commit**
+- [x] **Step 7: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -2006,7 +2008,7 @@ git commit -m "feat: add protocol frames and worker capability report"
 
 `encode_line` returns the JSON without a trailing newline; the writer in Task 9 appends it. `encode_line` fails with `FrameTooLong` when the encoded form exceeds `MAX_FRAME_BYTES`, so an oversized frame can never be put on the wire in the first place.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/frame_codec.rs`:
 
@@ -2119,13 +2121,13 @@ fn protocol_version_comparison_is_exact() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test frame_codec`
 
 Expected: FAIL with `unresolved import` for `encode_line`, `decode_line`, and `MAX_FRAME_BYTES`.
 
-- [ ] **Step 3: Implement the codec**
+- [x] **Step 3: Implement the codec**
 
 Create `rust/crates/feathertalk-domain/src/codec.rs`:
 
@@ -2183,13 +2185,13 @@ The length check in `decode_line` runs before `serde_json::from_str`, so an over
 
 In `src/lib.rs`, add `mod codec;` and `pub use codec::{MAX_FRAME_BYTES, check_protocol_version, decode_line, encode_line};`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 43 passed, 0 failed.
 
-- [ ] **Step 5: Format, lint, and commit**
+- [x] **Step 5: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -2213,7 +2215,7 @@ git commit -m "feat: add JSON Lines frame codec with a length limit"
 
 `read_frame` returns `None` at clean end of stream, `Some(Ok(frame))` for a good line, and `Some(Err(_))` for a bad one. Blank lines are skipped rather than reported, so a worker that flushes a stray newline does not look like a protocol violation.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/stream_io.rs`:
 
@@ -2334,13 +2336,13 @@ fn writing_an_oversized_frame_leaves_the_stream_untouched() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test stream_io`
 
 Expected: FAIL with `unresolved import` for `FrameReader` and `FrameWriter`.
 
-- [ ] **Step 3: Implement the reader**
+- [x] **Step 3: Implement the reader**
 
 Create `rust/crates/feathertalk-domain/src/stream.rs`:
 
@@ -2360,23 +2362,60 @@ impl<R: BufRead> FrameReader<R> {
     pub fn new(inner: R) -> Self {
         Self {
             inner,
-            buffer: Vec::new(),
+            buffer: Vec::with_capacity(MAX_FRAME_BYTES),
         }
     }
 
     pub fn read_frame<T: DeserializeOwned>(&mut self) -> Option<Result<T, DomainError>> {
         loop {
             self.buffer.clear();
-            let read = match self.inner.read_until(b'\n', &mut self.buffer) {
-                Ok(0) => return None,
-                Ok(read) => read,
-                Err(error) => {
-                    return Some(Err(DomainError::MalformedFrame {
-                        reason: error.to_string(),
-                    }));
+            let mut content_len = 0usize;
+            let mut saw_input = false;
+            let mut too_long = false;
+            let mut terminated = false;
+
+            while !terminated {
+                let (content_chunk_len, has_newline) = {
+                    let available = match self.inner.fill_buf() {
+                        Ok(available) => available,
+                        Err(error) => {
+                            return Some(Err(DomainError::MalformedFrame {
+                                reason: error.to_string(),
+                            }));
+                        }
+                    };
+                    if available.is_empty() {
+                        break;
+                    }
+                    saw_input = true;
+                    let newline = available.iter().position(|byte| *byte == b'\n');
+                    let content_chunk_len = newline.unwrap_or(available.len());
+                    if !too_long {
+                        let remaining = MAX_FRAME_BYTES - content_len;
+                        if content_chunk_len > remaining {
+                            self.buffer.extend_from_slice(&available[..remaining]);
+                            too_long = true;
+                        } else {
+                            self.buffer
+                                .extend_from_slice(&available[..content_chunk_len]);
+                            content_len += content_chunk_len;
+                        }
+                    }
+                    let consumed = content_chunk_len + usize::from(newline.is_some());
+                    self.inner.consume(consumed);
+                    (content_chunk_len, newline.is_some())
+                };
+                if has_newline {
+                    terminated = true;
+                } else if !too_long {
+                    debug_assert!(content_len >= content_chunk_len);
                 }
-            };
-            if read > MAX_FRAME_BYTES {
+            }
+
+            if !saw_input {
+                return None;
+            }
+            if too_long {
                 return Some(Err(DomainError::FrameTooLong {
                     limit: MAX_FRAME_BYTES,
                 }));
@@ -2398,11 +2437,14 @@ impl<R: BufRead> FrameReader<R> {
 }
 ```
 
-`read_until` keeps the trailing `\n` in the buffer, which is why the final line of a stream that ends without a newline is still delivered — the loop only stops on a zero-length read. `decode_line` trims, so the retained newline is harmless.
+The reader uses `fill_buf`/`consume` in chunks. The retained frame content never exceeds
+`MAX_FRAME_BYTES`; the terminating `\n` delimiter is consumed but is not counted toward that limit. Once
+a line exceeds the limit, the reader retains only the bounded prefix and continues consuming/discarding
+bytes through the next newline, so the following frame remains synchronized. An unterminated oversized
+line is reported as `FrameTooLong` when EOF is reached. A non-oversized final line does not need a trailing
+newline: EOF after any input still delivers that line, while a clean EOF with no input returns `None`.
 
-**A limitation to state plainly rather than paper over:** `read_until` buffers the entire line before the length check runs, so the limit rejects an oversized frame but does not prevent it from being read into memory first. That is adequate here because the only writer is a worker this application launched itself. If slice 4 ever accepts frames from a process it did not start, replace `read_until` with a `take(MAX_FRAME_BYTES as u64 + 1)`-bounded read at that point. Do not claim the current reader is hardened against a hostile peer.
-
-- [ ] **Step 4: Implement the writer**
+- [x] **Step 4: Implement the writer**
 
 Append to `src/stream.rs`:
 
@@ -2437,13 +2479,13 @@ impl<W: Write> FrameWriter<W> {
 
 In `src/lib.rs`, add `mod stream;` and `pub use stream::{FrameReader, FrameWriter};`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 50 passed, 0 failed.
 
-- [ ] **Step 6: Format, lint, and commit**
+- [x] **Step 6: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -2466,7 +2508,7 @@ git commit -m "feat: add bounded frame reader and writer"
 
 **Do not modify any file under `rust/crates/feathertalk-project/`.** The entire point of this task is that the persisted format stays untouched while the two definitions of the five-state vocabulary are held in step by tests. The dev dependency does not propagate to consumers, so `feathertalk-app` will not pull `feathertalk-project` through `feathertalk-domain`.
 
-- [ ] **Step 1: Add the dev dependency**
+- [x] **Step 1: Add the dev dependency**
 
 Append to `rust/crates/feathertalk-domain/Cargo.toml`:
 
@@ -2475,7 +2517,7 @@ Append to `rust/crates/feathertalk-domain/Cargo.toml`:
 feathertalk-project = { path = "../feathertalk-project" }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/project_compatibility.rs`:
 
@@ -2561,25 +2603,25 @@ fn a_stage_projection_reaches_every_persisted_status() {
 
 **A note on why these guards use `ProjectManifest::validate` rather than restating rules:** `feathertalk-project` enforces the `kind` character class and the 128-byte identifier limit inside private functions. Copying those rules into this test would create a second place to update. Building a real manifest and validating it exercises the actual enforcement, so a future tightening in `feathertalk-project` surfaces here as a failure instead of silently diverging.
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-domain --test project_compatibility`
 
 Expected: FAIL. Before Step 1 is applied the failure is `unresolved import feathertalk_project`; if Step 1 is already applied the four tests compile and must pass, in which case re-check that `Cargo.toml` truly lists `feathertalk-project` under `[dev-dependencies]` and not `[dependencies]`.
 
-- [ ] **Step 4: Verify the dependency direction**
+- [x] **Step 4: Verify the dependency direction**
 
 Run: `cargo tree -p feathertalk-domain --edges normal`
 
 Expected: the output lists only `serde`, `serde_json`, `thiserror`, and `time` with their transitive crates. `feathertalk-project` must not appear. If it does, it is in the wrong section of `Cargo.toml`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, 54 passed, 0 failed.
 
-- [ ] **Step 6: Format, lint, and commit**
+- [x] **Step 6: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -2601,7 +2643,7 @@ git commit -m "test: guard task vocabulary against the persisted project format"
 
 **Why this task exists:** a round-trip test passes even when both the serializer and the deserializer are renamed together, because it only ever compares the crate against itself. The desktop and the worker are separate processes that can be built from different commits during development, so a silent rename is a real incompatibility. Golden lines are literal text, so they fail the moment the wire format moves.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-domain/tests/golden_frames.rs`:
 
@@ -2655,7 +2697,7 @@ fn golden_client_lines_still_decode() {
 }
 ```
 
-- [ ] **Step 2: Add the server-side golden lines**
+- [x] **Step 2: Add the server-side golden lines**
 
 Append to the same file:
 
@@ -2724,7 +2766,7 @@ fn golden_server_lines_still_decode() {
 }
 ```
 
-- [ ] **Step 3: Run the tests**
+- [x] **Step 3: Run the tests**
 
 Run: `cargo test -p feathertalk-domain --test golden_frames`
 
@@ -2734,7 +2776,7 @@ If a golden comparison fails on field order, do not reorder the golden string to
 
 If a golden comparison fails on float formatting — for example `90.0` serialized as `90` — adjust the golden string to whatever `serde_json` actually produces on this toolchain and leave a one-line comment recording that the value is a `f64`. Do not change the field types to make the text prettier.
 
-- [ ] **Step 4: Format, lint, and commit**
+- [x] **Step 4: Format, lint, and commit**
 
 ```bash
 cargo fmt --all
@@ -2755,7 +2797,7 @@ git commit -m "test: pin the wire format with golden frame lines"
 - Consumes: everything above.
 - Produces: nothing new. This task closes the slice.
 
-- [ ] **Step 1: Add the Importing stage to §11**
+- [x] **Step 1: Add the Importing stage to §11**
 
 In `docs/superpowers/specs/2026-08-17-rust-desktop-migration-design.md`, inside the任务事件 code block in §11, insert `Importing` on its own line immediately before `Exporting`:
 
@@ -2767,7 +2809,7 @@ Exporting
 Rendering { frame, total }
 ```
 
-- [ ] **Step 2: Reconcile the crate names in §4.3**
+- [x] **Step 2: Reconcile the crate names in §4.3**
 
 In the same file, in the §4.3 directory tree, rename the crate entries to the prefixed form actually used in the workspace, and add the new crate. Replace the `crates/` block so it reads:
 
@@ -2789,7 +2831,7 @@ In the same file, in the §4.3 directory tree, rename the crate entries to the p
 
 Leave the sentence after the tree unchanged; it already says every crate exchanges data through `domain` types, which is what this slice delivers.
 
-- [ ] **Step 3: Run the full workspace verification**
+- [x] **Step 3: Run the full workspace verification**
 
 Run each command from `E:/workspace/github/FeatherTalk/rust` and record the exit code. All five must be 0.
 
@@ -2803,11 +2845,11 @@ cd .. && git diff --check
 
 The workspace suite takes roughly 30 minutes on a warm target directory and includes long CPU parity tests. Do not shorten it with `-p feathertalk-domain`; the point of this step is confirming the new crate did not disturb the existing 133 test binaries. Expect the 13 pre-existing ignored tests — six subprocess helpers, six gated on a certified WGPU adapter, one gated on a licensed VGG19 package — to stay ignored.
 
-- [ ] **Step 4: Tick every checkbox in this plan**
+- [x] **Step 4: Tick every checkbox in this plan**
 
 Go back through Tasks 1 through 12 and change each `- [ ]` to `- [x]`. The other 26 plans in `docs/superpowers/plans/` were left unticked, which is why their checkboxes cannot be used to read project progress. Do not repeat that.
 
-- [ ] **Step 5: Commit the slice close-out**
+- [x] **Step 5: Commit the slice close-out**
 
 ```bash
 git add docs/superpowers/specs/2026-08-17-rust-desktop-migration-design.md
@@ -2815,7 +2857,7 @@ git add docs/superpowers/plans/2026-08-28-worker-protocol-task-domain.md
 git commit -m "docs: record worker protocol slice completion"
 ```
 
-- [ ] **Step 6: Finish the branch**
+- [x] **Step 6: Finish the branch**
 
 Use the `superpowers:finishing-a-development-branch` skill. Base branch is `main`. Do not merge until Step 3 shows five exit codes of 0 on this branch.
 
@@ -2828,8 +2870,7 @@ One local hazard worth knowing before you get there: `git worktree remove` on a 
 - `feathertalk-domain` exists as a workspace member with exactly four production dependencies.
 - No file under `rust/crates/feathertalk-project/` was modified.
 - `cargo tree -p feathertalk-domain --edges normal` does not list `feathertalk-project`.
-- All 11 test files pass, 59 tests total across Tasks 1 through 11.
+- All tests in the 11 checked-in test files pass; the suite count is determined by the checked-in tests.
 - The five workspace verification commands each exit 0 on the branch that will be merged.
 - §11 of the master design lists `Importing`; §4.3 lists the `feathertalk-*` crate names.
 - Every checkbox in this plan is ticked.
-

@@ -34,7 +34,7 @@ GPU adapter 互斥、既有 crate 错误类型到十个错误码的映射，以�
 ### 方案 A（推荐）：单一版本化信封 + 封闭命令枚举和封闭事件枚举
 
 一个 `Request` 枚举每命令一个变体，一个 `TaskStage` 枚举对应 §11 的阶段，外层信封携带
-`protocol_version`、`task_id` 和时间戳，serde 内部标签配 `deny_unknown_fields`，协议版本精确
+`protocol_version`、`task_id` 和时间戳，serde 相邻标签配 `deny_unknown_fields`，协议版本精确
 相等。
 
 三条理由。其一，它是 §4.2 的字面实现，不增不减。其二，封闭枚举把遗漏推到编译期：worker、
@@ -146,7 +146,8 @@ ExportOnnx            -> export::onnx_feather_hubert | export::onnx_unet
 MigrateLegacyFeatures -> model-package 的 migrate 路径
 ```
 
-加上控制面的 `Cancel { task_id }`，共十三条任务命令。
+上表列出十三条任务命令；再加上控制面的 `Cancel { task_id }`，协议共十四项操作（十三条任务
+命令加一条取消操作）。
 
 不设独立的 `Preview` 命令。`inference::RenderPlan::new` 的第三个参数即
 `max_output_frames: Option<usize>`，预览是 `Some(n)`、完整渲染是 `None`，两者共用同一条
@@ -166,6 +167,7 @@ Event {
   stage: TaskStage,
   progress: Option<Progress>,
   metrics: Metrics,
+  error: Option<TaskError>,
 }
 Progress { completed: u64, total: Option<u64> }
 Metrics  { samples_per_second: Option<f64>, eta_seconds: Option<f64>, vram_bytes: Option<u64> }
@@ -175,6 +177,10 @@ Metrics  { samples_per_second: Option<f64>, eta_seconds: Option<f64>, vram_bytes
 `Progress` 让界面进度条有单一来源，无需为每个阶段各写一套换算。`total` 为 `Option` 是因为长
 音频特征提取在开始时拿不到总量。
 
+`error` 是失败事件的可选详细载荷：当 `stage` 为 `TaskStage::Failed` 时必须存在，且其 `code`
+必须与失败阶段的 `code` 一致；其他阶段必须为 `None`。这样失败阶段仍可保留精简的流式标记，
+同时传输摘要、技术详情、发生阶段和恢复建议。
+
 `Metrics` 采用封闭结构而非 `map<String, f64>`，三个字段正好覆盖 §10.2 要求显示的每秒样本数、
 预计剩余时间和当前显存。开放 map 会把字段名拼写错误推到运行时，与第 2 节选择封闭枚举的
 理由相同。`Metrics` 本身不是 `Option`：不携带指标的阶段发送三个字段全为 `None` 的实例，使
@@ -182,7 +188,8 @@ Metrics  { samples_per_second: Option<f64>, eta_seconds: Option<f64>, vram_bytes
 
 ## 7. 错误模型
 
-§11 要求每个错误包含用户可读摘要、技术详情、任务阶段和可恢复建议，对应四个字段：
+§11 要求每个错误包含错误码、用户可读摘要、技术详情、任务阶段和可恢复建议，对应五个字段
+（其中包含 `code`）：
 
 ```text
 TaskError { code: ErrorCode, summary: String, detail: String, stage: TaskStage, recovery: Recovery }
@@ -194,6 +201,9 @@ ErrorCode = MEDIA_INVALID | FACE_NOT_FOUND | LANDMARK_INVALID | FEATURE_SHAPE_MI
 Recovery  = Retry | ResumeFromCheckpoint | FreeDiskSpace | SelectDifferentAdapter
           | ExcludeBadFrames | ReimportModel | NotRecoverable
 ```
+
+`ErrorCode` 有意使用显式的大写 Serde 名称（`MEDIA_INVALID` 等），这是对一般枚举采用
+`snake_case` 线格式约定的例外；实现必须为每个变体保留这些精确的线上名称。
 
 `recovery` 是封闭枚举而非建议文本，目的是让界面能渲染出一个可点击的动作。例如
 `GPU_DEVICE_LOST` 配 `ResumeFromCheckpoint`，界面直接给出"从最近 checkpoint 恢复"，这正是
@@ -342,4 +352,3 @@ git diff --check
 
 本切片交付后，切片 2 与切片 3 可并行开工——两者都只依赖本文定义的 `Request`、`Event` 和帧
 格式，互不阻塞。
-
