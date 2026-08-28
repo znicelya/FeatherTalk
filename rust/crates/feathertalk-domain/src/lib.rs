@@ -1,3 +1,4 @@
+mod codec;
 mod error;
 mod event;
 mod frame;
@@ -9,6 +10,7 @@ mod task_error;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+pub use codec::{MAX_FRAME_BYTES, check_protocol_version, decode_line, encode_line};
 pub use error::DomainError;
 pub use event::{Event, Metrics, Progress};
 pub use frame::{
