@@ -5,6 +5,7 @@ mod frame;
 mod lifecycle;
 mod request;
 mod stage;
+mod stream;
 mod task;
 mod task_error;
 
@@ -25,6 +26,7 @@ pub use request::{
     Request, TrainParams, TrainingMode, UnetVariant,
 };
 pub use stage::TaskStage;
+pub use stream::{FrameReader, FrameWriter};
 pub use task::{
     TASK_ID_LEN, TASK_ID_MILLIS_DIGITS, TASK_ID_SUFFIX_DIGITS, TaskId, TaskKind, TaskStatus,
 };
