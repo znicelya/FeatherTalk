@@ -4,12 +4,21 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{DomainError, MAX_FRAME_BYTES, decode_line, encode_line};
 
+/// Read newline-delimited JSON values from a buffered byte stream.
+///
+/// `FrameReader` performs transport-level checks only: frame-size bounds,
+/// UTF-8 decoding, blank-line handling, and serde JSON syntax. A successful
+/// [`read_frame`](Self::read_frame) result is not yet a semantically accepted
+/// protocol frame. For protocol values, callers must subsequently invoke
+/// [`crate::ClientFrame::validate`] or [`crate::ServerFrame::validate`] as
+/// appropriate before dispatching the value.
 pub struct FrameReader<R: BufRead> {
     inner: R,
     buffer: Vec<u8>,
 }
 
 impl<R: BufRead> FrameReader<R> {
+    /// Create a reader over a buffered input stream.
     pub fn new(inner: R) -> Self {
         Self {
             inner,
@@ -17,6 +26,13 @@ impl<R: BufRead> FrameReader<R> {
         }
     }
 
+    /// Read and syntactically decode the next non-blank JSON line.
+    ///
+    /// `None` means clean end-of-stream; `Some(Err(_))` reports a transport or
+    /// serde syntax error. This method intentionally does not invoke a
+    /// protocol frame's semantic `validate()` method. Call
+    /// [`crate::ClientFrame::validate`] or [`crate::ServerFrame::validate`]
+    /// after a successful decode before using the frame.
     pub fn read_frame<T: DeserializeOwned>(&mut self) -> Option<Result<T, DomainError>> {
         loop {
             self.buffer.clear();
@@ -87,15 +103,25 @@ impl<R: BufRead> FrameReader<R> {
     }
 }
 
+/// Write values as compact newline-delimited JSON frames.
+///
+/// Serialization and frame-size checks happen before any bytes are written.
+/// This type does not perform protocol-specific semantic validation; callers
+/// should validate a `ClientFrame` or `ServerFrame` before writing it.
 pub struct FrameWriter<W: Write> {
     inner: W,
 }
 
 impl<W: Write> FrameWriter<W> {
+    /// Create a writer over an output stream.
     pub fn new(inner: W) -> Self {
         Self { inner }
     }
 
+    /// Serialize and flush one frame followed by its `\n` delimiter.
+    ///
+    /// This method is a transport helper and does not call a value's semantic
+    /// `validate()` method.
     pub fn write_frame<T: Serialize>(&mut self, value: &T) -> Result<(), DomainError> {
         let line = encode_line(value)?;
         self.inner
@@ -107,6 +133,7 @@ impl<W: Write> FrameWriter<W> {
             })
     }
 
+    /// Return the wrapped output stream.
     pub fn into_inner(self) -> W {
         self.inner
     }

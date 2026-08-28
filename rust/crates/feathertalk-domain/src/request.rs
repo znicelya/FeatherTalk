@@ -99,8 +99,12 @@ pub struct RenderParams {
     pub checkpoint: PathBuf,
     pub audio: PathBuf,
     pub output: PathBuf,
+    /// Fixed-width `u64` frame cap used by the JSON wire contract.
+    ///
     /// `None` renders the full sequence; `Some(n)` caps output frames and is how
     /// a short preview is requested. Preview and full render share this one path.
+    /// A worker mapping this value to inference's local `Option<usize>` must use
+    /// checked conversion and reject values that do not fit.
     pub max_output_frames: Option<u64>,
 }
 

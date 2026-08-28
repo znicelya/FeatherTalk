@@ -1111,6 +1111,12 @@ git commit -m "feat: add task lifecycle transition validator"
 
 `ValidateProject` and `LockAssetPackage` share `ProjectDirParams` because both take only a project directory. That is 12 params structs for 13 task commands. Together with the control-plane `Cancel` operation, the protocol exposes 14 operations; `Cancel` is a frame-level control operation, not a `Request` variant.
 
+`RenderParams.max_output_frames` is a fixed `Option<u64>` on the JSON wire. The
+inference crate's `RenderPlan::new` accepts a local `Option<usize>` instead;
+that `usize` is not the wire contract. Slice 2's worker mapping must perform a
+checked conversion (for example, `usize::try_from`) and reject values that do
+not fit rather than truncating them.
+
 The `ErrorCode` enum intentionally uses explicit uppercase Serde names (`MEDIA_INVALID`, `GPU_DEVICE_LOST`, and so on), an exception to the general `snake_case` enum convention. These names are wire-contract literals and must not be normalized.
 
 **Why the wire mirrors exist:** `TrainingMode`, `UnetVariant`, `LegacyModelKind`, and `OnnxExportKind` duplicate enums that live in `feathertalk-training`, `feathertalk-models`, `feathertalk-weights`, and `feathertalk-export`. `domain` cannot depend on those crates without breaking the Global Constraints, so these are protocol-level types and slice 2 owns the mapping in both directions and tests it there. Do not add those crates as dependencies to make the duplication go away.
@@ -1432,6 +1438,13 @@ git commit -m "feat: add worker command vocabulary"
 - Produces: `Progress { completed: u64, total: Option<u64> }`, `Metrics { samples_per_second, eta_seconds, vram_bytes }` with `Metrics::empty()`, `Event { protocol_version, task_id, emitted_at, stage, progress, metrics, error }` with `Event::new(TaskId, &str, TaskStage) -> Event` and `Event::validate(&self) -> Result<(), DomainError>`.
 
 `emitted_at` is an RFC 3339 `String`, matching how `feathertalk-project` stores `updated_at`. `domain` does not read the clock; the caller supplies the timestamp.
+
+The event validator intentionally covers only the protocol invariants listed
+here (protocol version, timestamp syntax, progress ordering, and error-payload
+relationships). `serde_json` rejects non-finite floating-point values while
+encoding JSON. Loss/metrics finiteness beyond that encoding behavior and
+rendering rules such as `frame > total` are producer/worker business
+responsibilities for a later slice, not additional behavior to add here.
 
 - [x] **Step 1: Write the failing test**
 
@@ -2006,7 +2019,7 @@ git commit -m "feat: add protocol frames and worker capability report"
 - Consumes: `ClientFrame`, `ServerFrame`, `DomainError`, `PROTOCOL_VERSION`.
 - Produces: `MAX_FRAME_BYTES: usize`, `encode_line<T: Serialize>(&T) -> Result<String, DomainError>`, `decode_line<T: DeserializeOwned>(&str) -> Result<T, DomainError>`, `check_protocol_version(u32) -> Result<(), DomainError>`.
 
-`encode_line` returns the JSON without a trailing newline; the writer in Task 9 appends it. `encode_line` fails with `FrameTooLong` when the encoded form exceeds `MAX_FRAME_BYTES`, so an oversized frame can never be put on the wire in the first place.
+`encode_line` returns the JSON without a trailing newline; the writer in Task 9 appends it. `encode_line` fails with `FrameTooLong` when the encoded form exceeds `MAX_FRAME_BYTES`, so an oversized frame can never be put on the wire in the first place. `decode_line` is syntax-only: it checks the length, strips an optional delimiter, rejects blank input, and runs serde JSON deserialization, but it does not call a frame's semantic `validate()` method. Callers must invoke `ClientFrame::validate()` or `ServerFrame::validate()` after decoding and before dispatching a frame.
 
 - [x] **Step 1: Write the failing test**
 
@@ -2213,7 +2226,7 @@ git commit -m "feat: add JSON Lines frame codec with a length limit"
 - Consumes: `encode_line`, `decode_line`, `MAX_FRAME_BYTES`, `DomainError`.
 - Produces: `FrameReader<R: BufRead>` with `new(R)` and `read_frame<T: DeserializeOwned>(&mut self) -> Option<Result<T, DomainError>>`, `FrameWriter<W: Write>` with `new(W)`, `write_frame<T: Serialize>(&mut self, &T) -> Result<(), DomainError>`, and `into_inner(self) -> W`.
 
-`read_frame` returns `None` at clean end of stream, `Some(Ok(frame))` for a good line, and `Some(Err(_))` for a bad one. Blank lines are skipped rather than reported, so a worker that flushes a stray newline does not look like a protocol violation.
+`read_frame` returns `None` at clean end of stream, `Some(Ok(frame))` for a good line, and `Some(Err(_))` for a bad one. Blank lines are skipped rather than reported, so a worker that flushes a stray newline does not look like a protocol violation. Like `decode_line`, it performs only framing/UTF-8/serde syntax checks; a successful result still requires the direction-specific `ClientFrame::validate()` or `ServerFrame::validate()` call.
 
 - [x] **Step 1: Write the failing test**
 

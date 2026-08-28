@@ -25,8 +25,17 @@ The untracked demo directory and Rust source files were not staged.
 ## Verification
 
 ```text
-git diff --check       exit 0
+cargo test --workspace --all-targets                 exit 0
+cargo check --workspace --all-targets                exit 0
+cargo clippy --workspace --all-targets -- -D warnings exit 0
+cargo fmt --all -- --check                           exit 0
+git diff --check                                     exit 0
 ```
+
+The workspace test command completed all non-ignored tests successfully. The
+pre-existing hardware/licensed tests remained ignored as designed. The domain
+slice was also rechecked with `cargo test -p feathertalk-domain --all-targets`
+(72 passed), and the corresponding domain clippy check exited 0.
 
 The staged path audit was restricted to the two files above plus this report.
 
@@ -43,6 +52,7 @@ commit's own SHA in its contents would change that SHA.
 
 ## Concerns
 
-None for the scoped close-out. Workspace-wide Rust verification is intentionally
-not repeated here; this step only closes the already-verified documentation and
-lockfile changes.
+None for the scoped close-out. The workspace-wide verification gate requested
+by the plan has now been run and all five commands exited 0. The commit SHA is
+reported in the handoff rather than embedded in this report, since embedding a
+commit's own SHA would change that SHA.

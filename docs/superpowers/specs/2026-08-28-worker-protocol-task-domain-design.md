@@ -1,6 +1,6 @@
 # FeatherTalk worker 协议与任务域契约设计
 
-日期：2026-08-28  
+日期：2026-08-28
 状态：已确认，按推荐方案实施
 
 ## 1. 目标与边界
@@ -99,7 +99,7 @@ dev 依赖对下游不传递，`app` 的真实依赖图中不会因此出现 `pr
 清单继续通过校验。写入方一律使用 `TaskKind::as_slug()`；读取方遇到无法识别的 slug 按未知类型
 展示，而不是让整份清单校验失败。
 
-阶段列表在 §11 十一个变体基础上新增 `Importing`。命令到阶段的映射为：
+阶段列表在 §11 十二个变体基础上新增 `Importing`。命令到阶段的映射为：
 
 ```text
 NormalizeMedia            Preparing -> ExtractingAudio -> Completed
@@ -149,10 +149,13 @@ MigrateLegacyFeatures -> model-package 的 migrate 路径
 上表列出十三条任务命令；再加上控制面的 `Cancel { task_id }`，协议共十四项操作（十三条任务
 命令加一条取消操作）。
 
-不设独立的 `Preview` 命令。`inference::RenderPlan::new` 的第三个参数即
-`max_output_frames: Option<usize>`，预览是 `Some(n)`、完整渲染是 `None`，两者共用同一条
-`frame()` 路径。§9 中"预览和完整渲染使用同一管线"在本切片通过不给 `Preview` 单独变体来兑现；
-多一个变体等于为将来的管线分叉留门。
+不设独立的 `Preview` 命令。`Request::Render` 的 JSON wire 字段固定为
+`max_output_frames: Option<u64>`；`inference::RenderPlan::new` 的第三个参数
+`Option<usize>` 是本地 inference API 类型，不是 JSON wire 类型。worker 从 wire 请求映射到
+`RenderPlan` 时必须使用 checked conversion（例如 `usize::try_from`），溢出就拒绝请求，禁止
+截断。预览是 `Some(n)`、完整渲染是 `None`，两者共用同一条 `frame()` 路径。§9 中"预览和完整
+渲染使用同一管线"在本切片通过不给 `Preview` 单独变体来兑现；多一个变体等于为将来的管线
+分叉留门。
 
 `Train` 的 `mode` 覆盖 §8 的三种训练模式，`variant` 覆盖 §5.2 的两种 UNet。两者是独立维度，
 不合并为六个变体。
@@ -185,6 +188,11 @@ Metrics  { samples_per_second: Option<f64>, eta_seconds: Option<f64>, vram_bytes
 预计剩余时间和当前显存。开放 map 会把字段名拼写错误推到运行时，与第 2 节选择封闭枚举的
 理由相同。`Metrics` 本身不是 `Option`：不携带指标的阶段发送三个字段全为 `None` 的实例，使
 界面无需区分"没有指标"与"指标为空"两种情形。
+
+`serde_json` 的 JSON 编码路径拒绝非有限浮点值（NaN、`+Infinity`、`-Infinity`），因此这些
+值不会出现在 wire 文本中。本切片不额外规定 loss、metrics 或 `Rendering{frame,total}` 的数值
+业务不变量；例如 `frame > total` 是否有意义由 producer/worker 在其业务边界负责，后续切片
+应在那里决定并测试。
 
 ## 7. 错误模型
 
@@ -280,6 +288,11 @@ Capabilities { training: bool, wgpu_training: bool, onnx_validation: bool, ffmpe
 
 配一对基于 `std::io` 的 `FrameReader<R: BufRead>` 和 `FrameWriter<W: Write>`，只用 std，不触及
 进程。上限检查因此有唯一落点，切片 2 只需递入真实的 stdin 与 stdout 句柄。
+
+`encode_line`、`decode_line` 以及 `FrameReader::read_frame` 是 syntax-only 的传输层操作：它们
+只负责长度、UTF-8（reader）和 serde JSON 语法检查，不执行帧的语义校验。调用方在成功解码后
+必须按方向调用 `ClientFrame::validate()` 或 `ServerFrame::validate()`，再进行握手、派发或
+事件处理；成功解码本身不代表协议帧已被接受。
 
 ## 9. 测试与验收
 
