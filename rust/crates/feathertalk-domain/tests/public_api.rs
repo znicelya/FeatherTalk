@@ -44,8 +44,11 @@ fn task_id_rejects_non_ascii_without_panicking() {
 
 #[test]
 fn task_id_deserialization_rejects_malformed_wire_values() {
-    let result = serde_json::from_str::<TaskId>(r#"\"not-a-task-id\""#);
-    assert!(result.is_err(), "wire TaskId values must go through validation");
+    let result = serde_json::from_str::<TaskId>(r#""not-a-task-id""#);
+    assert!(
+        result.is_err(),
+        "wire TaskId values must go through validation"
+    );
 }
 
 #[test]

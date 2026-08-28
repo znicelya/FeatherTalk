@@ -30,9 +30,7 @@ impl TaskId {
         }
         if !bytes[TASK_ID_MILLIS_DIGITS + 1..]
             .iter()
-            .all(|byte| {
-                byte.is_ascii_digit() || byte.is_ascii_lowercase() && *byte <= b'f'
-            })
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase() && *byte <= b'f')
         {
             return Err(invalid("suffix must be 8 lowercase hex digits"));
         }

@@ -81,6 +81,67 @@ fn an_oversized_line_is_refused() {
 }
 
 #[test]
+fn an_oversized_line_is_discarded_before_the_next_frame() {
+    let oversized = format!("{}\n", "x".repeat(MAX_FRAME_BYTES + 1_024));
+    let good = feathertalk_domain::encode_line(&rejected("after oversized")).unwrap();
+    let input = format!("{oversized}{good}\n");
+    let mut reader = FrameReader::new(Cursor::new(input));
+    assert!(matches!(
+        reader.read_frame::<ServerFrame>().unwrap(),
+        Err(DomainError::FrameTooLong { .. })
+    ));
+    assert_eq!(
+        reader.read_frame::<ServerFrame>().unwrap().unwrap(),
+        rejected("after oversized")
+    );
+}
+
+#[test]
+fn an_oversized_unterminated_line_is_reported_once_at_eof() {
+    let input = "x".repeat(MAX_FRAME_BYTES + 1_024);
+    let mut reader = FrameReader::new(Cursor::new(input));
+    assert!(matches!(
+        reader.read_frame::<ServerFrame>().unwrap(),
+        Err(DomainError::FrameTooLong { .. })
+    ));
+    assert!(reader.read_frame::<ServerFrame>().is_none());
+}
+
+fn rejected_with_exact_json_size() -> ServerFrame {
+    let empty = rejected("");
+    let overhead = feathertalk_domain::encode_line(&empty).unwrap().len();
+    rejected(&"x".repeat(MAX_FRAME_BYTES - overhead))
+}
+
+#[test]
+fn a_max_sized_json_frame_round_trips_with_its_newline_delimiter() {
+    let frame = rejected_with_exact_json_size();
+    let line = feathertalk_domain::encode_line(&frame).unwrap();
+    assert_eq!(line.len(), MAX_FRAME_BYTES);
+
+    let mut writer = FrameWriter::new(Vec::new());
+    writer.write_frame(&frame).unwrap();
+    let bytes = writer.into_inner();
+    assert_eq!(bytes.len(), MAX_FRAME_BYTES + 1);
+    assert_eq!(bytes.last(), Some(&b'\n'));
+
+    let mut reader = FrameReader::new(Cursor::new(bytes));
+    assert_eq!(reader.read_frame::<ServerFrame>().unwrap().unwrap(), frame);
+}
+
+#[test]
+fn decode_line_accepts_a_max_sized_json_line_with_a_trailing_newline() {
+    let frame = rejected_with_exact_json_size();
+    let line = feathertalk_domain::encode_line(&frame).unwrap();
+    assert_eq!(line.len(), MAX_FRAME_BYTES);
+    let with_newline = format!("{line}\n");
+    assert_eq!(
+        feathertalk_domain::decode_line::<ServerFrame>(&with_newline).unwrap(),
+        frame
+    );
+}
+
+#[test]
 fn invalid_utf8_is_reported_as_a_malformed_frame() {
     let input: Vec<u8> = vec![0xff, 0xfe, b'\n'];
     let mut reader = FrameReader::new(Cursor::new(input));

@@ -17,6 +17,7 @@ pub fn encode_line<T: Serialize>(value: &T) -> Result<String, DomainError> {
 }
 
 pub fn decode_line<T: DeserializeOwned>(line: &str) -> Result<T, DomainError> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
     if line.len() > MAX_FRAME_BYTES {
         return Err(DomainError::FrameTooLong {
             limit: MAX_FRAME_BYTES,
