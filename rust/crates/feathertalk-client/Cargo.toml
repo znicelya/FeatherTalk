@@ -13,3 +13,7 @@ time = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[[bin]]
+name = "feathertalk-fake-worker"
+path = "tests/support/fake_worker.rs"
