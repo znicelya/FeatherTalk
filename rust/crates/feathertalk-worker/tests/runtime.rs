@@ -12,13 +12,13 @@ use std::{
 
 use feathertalk_domain::{
     CancelFrame, ClientFrame, DomainError, ErrorCode, Event, PROTOCOL_VERSION, ProbeMediaParams,
-    ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage,
-    TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
+    Progress, ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind,
+    TaskStage, TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_worker::{
-    CPU_ADAPTER_ID, CommandOutcome, JobExecutor, WorkerConfig, execute_with_runner,
-    serve_with_executor,
+    CPU_ADAPTER_ID, CommandOutcome, JobExecutor, NoReporter, TaskReporter, WorkerConfig,
+    execute_with_runner, serve_with_executor,
 };
 
 /// An output sink the test can read while the worker is still writing to it.
@@ -257,12 +257,12 @@ fn broken_config() -> WorkerConfig {
 }
 
 fn instant_executor() -> JobExecutor {
-    Box::new(|_request, _media, _token| CommandOutcome::Completed(None))
+    Box::new(|_request, _media, _token, _reporter| CommandOutcome::Completed(None))
 }
 
 /// Reports that the job started, then runs until it is cancelled.
 fn blocking_executor(started: Sender<TaskId>) -> JobExecutor {
-    Box::new(move |request, _media, token| {
+    Box::new(move |request, _media, token, _reporter| {
         let _ = request;
         started.send(task("0000000f")).unwrap();
         while !token.is_cancelled() {
@@ -275,7 +275,7 @@ fn blocking_executor(started: Sender<TaskId>) -> JobExecutor {
 /// Reports that the job started, then waits for the test to release it. A
 /// dropped release channel or a cancelled token ends the job as cancelled.
 fn gated_executor(started: Sender<()>, release: Receiver<()>) -> JobExecutor {
-    Box::new(move |_request, _media, token| {
+    Box::new(move |_request, _media, token, _reporter| {
         started.send(()).unwrap();
         if release.recv().is_err() || token.is_cancelled() {
             return CommandOutcome::Cancelled;
@@ -305,12 +305,33 @@ impl ProcessRunner for BlockingRunner {
 }
 
 fn blocking_probe_executor(started: Sender<()>) -> JobExecutor {
-    Box::new(move |request, media, token| {
+    Box::new(move |request, media, token, reporter| {
         let runner = BlockingRunner {
             started: Mutex::new(started.clone()),
             token: token.clone(),
         };
-        execute_with_runner(request, media, token, &runner)
+        execute_with_runner(request, media, token, reporter, &runner)
+    })
+}
+
+/// Reports two progress events, then completes.
+fn reporting_executor() -> JobExecutor {
+    Box::new(|_request, _media, _token, reporter| {
+        reporter.report(
+            TaskStage::ExtractingFrames,
+            Some(Progress {
+                completed: 1,
+                total: Some(2),
+            }),
+        );
+        reporter.report(
+            TaskStage::ExtractingAudio,
+            Some(Progress {
+                completed: 2,
+                total: Some(2),
+            }),
+        );
+        CommandOutcome::Completed(None)
     })
 }
 
@@ -537,6 +558,13 @@ fn a_duplicate_task_id_is_rejected() {
         !rejections(frames).is_empty()
     });
     release_tx.send(()).unwrap();
+    // Wait for the terminal event before closing stdin: a drain cancels the
+    // running task, so finishing first would race the executor's own return.
+    harness.wait_for("the released task to complete", |frames| {
+        stages(frames)
+            .iter()
+            .any(|(_, stage)| *stage == "completed")
+    });
     let frames = harness.finish();
 
     let reasons = rejections(&frames);
@@ -667,7 +695,7 @@ fn cancelling_an_unknown_or_finished_task_is_silently_accepted() {
 fn a_failing_command_reports_a_failed_event_with_its_error() {
     let harness = Harness::start(
         bare_config(),
-        Box::new(|_request, _media, _token| {
+        Box::new(|_request, _media, _token, _reporter| {
             CommandOutcome::Failed(feathertalk_domain::TaskError::new(
                 ErrorCode::MediaInvalid,
                 "项目目录缺少必需文件",
@@ -739,5 +767,100 @@ fn closing_the_input_stream_shuts_the_worker_down() {
             ("1787900000000-0000000a", "cancelled"),
         ],
         "a closed stdin cancels the running task and exits"
+    );
+}
+
+#[test]
+fn reported_progress_reaches_the_wire_in_order() {
+    let harness = Harness::start(bare_config(), reporting_executor());
+    let id = task("00000021");
+    harness.send(&start(&id, validate_project("C:/tmp/project")));
+    let frames = harness.wait_for("the task to complete", |frames| {
+        stages(frames)
+            .iter()
+            .any(|(_, stage)| *stage == "completed")
+    });
+
+    assert_eq!(
+        stages(&frames)
+            .into_iter()
+            .map(|(_, stage)| stage)
+            .collect::<Vec<_>>(),
+        vec![
+            "preparing",
+            "extracting_frames",
+            "extracting_audio",
+            "completed"
+        ]
+    );
+    let progressed = events(&frames)
+        .into_iter()
+        .filter_map(|event| event.progress)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        progressed,
+        vec![
+            Progress {
+                completed: 1,
+                total: Some(2)
+            },
+            Progress {
+                completed: 2,
+                total: Some(2)
+            }
+        ]
+    );
+    // Progress events carry no metrics.
+    for event in events(&frames) {
+        assert_eq!(event.metrics, feathertalk_domain::Metrics::empty());
+    }
+    harness.finish();
+}
+
+#[test]
+fn a_cancelled_task_keeps_the_progress_it_already_reported() {
+    let (started, started_rx) = mpsc::channel::<()>();
+    // Reports one progress event, then waits to be cancelled.
+    let executor: JobExecutor = Box::new(move |_request, _media, token, reporter| {
+        reporter.report(
+            TaskStage::ExtractingFrames,
+            Some(Progress {
+                completed: 1,
+                total: Some(2),
+            }),
+        );
+        started.send(()).unwrap();
+        while !token.is_cancelled() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        CommandOutcome::Cancelled
+    });
+    let harness = Harness::start(bare_config(), executor);
+    let id = task("00000022");
+    harness.send(&start(&id, validate_project("C:/tmp/project")));
+    started_rx.recv().unwrap();
+    harness.send(&cancel(&id));
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames)
+            .into_iter()
+            .map(|(_, stage)| stage)
+            .collect::<Vec<_>>(),
+        vec!["preparing", "extracting_frames", "cancelled"]
+    );
+}
+
+#[test]
+fn the_noop_reporter_emits_nothing() {
+    // `NoReporter` is what a direct caller of `execute` passes; it must be safe
+    // to call and must not panic.
+    NoReporter.report(TaskStage::Preparing, None);
+    NoReporter.report(
+        TaskStage::ExtractingAudio,
+        Some(Progress {
+            completed: 1,
+            total: None,
+        }),
     );
 }

@@ -6,15 +6,15 @@ use std::{
 };
 
 use feathertalk_domain::{
-    ClientFrame, DomainError, Event, FrameReader, FrameWriter, PROTOCOL_VERSION, RejectedFrame,
-    Request, ServerFrame, TaskId, TaskKind, TaskLifecycle, TaskStage,
+    ClientFrame, DomainError, Event, FrameReader, FrameWriter, PROTOCOL_VERSION, Progress,
+    RejectedFrame, Request, ServerFrame, TaskId, TaskKind, TaskLifecycle, TaskStage,
 };
 use feathertalk_media::{CancellationToken, MediaToolchain};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     AdapterLockError, AdapterLocks, CPU_ADAPTER_ID, CommandOutcome, ENV_FFMPEG, ENV_FFPROBE,
-    WorkerConfig, execute, ready_frame, supported_commands,
+    TaskReporter, WorkerConfig, execute, ready_frame, supported_commands,
 };
 
 /// How the runtime reaches command execution.
@@ -23,10 +23,33 @@ use crate::{
 /// pass a closure so queueing, cancellation, and shutdown can be observed
 /// without a real external tool.
 pub type JobExecutor = Box<
-    dyn Fn(&Request, Option<&MediaToolchain>, &CancellationToken) -> CommandOutcome
+    dyn Fn(
+            &Request,
+            Option<&MediaToolchain>,
+            &CancellationToken,
+            &dyn TaskReporter,
+        ) -> CommandOutcome
         + Send
         + 'static,
 >;
+
+/// The execution thread's reporter: one per job, holding that job's id and a
+/// clone of the control channel.
+///
+/// A closed channel is ignored. Losing a progress event while the runtime is
+/// already shutting down is not a reason to fail a task.
+struct ChannelReporter {
+    task_id: TaskId,
+    control_tx: Sender<ControlMessage>,
+}
+
+impl TaskReporter for ChannelReporter {
+    fn report(&self, stage: TaskStage, progress: Option<Progress>) {
+        let mut event = Event::new(self.task_id.clone(), &now_rfc3339(), stage);
+        event.progress = progress;
+        let _ = self.control_tx.send(ControlMessage::Emit(event));
+    }
+}
 
 /// Everything the control loop receives. It is the only owner of task state,
 /// so every other thread talks to it through this one channel.
@@ -132,7 +155,11 @@ fn run_jobs(
     executor: JobExecutor,
 ) {
     while let Ok(job) = job_rx.recv() {
-        let event = match executor(&job.request, media.as_ref(), &job.token) {
+        let reporter = ChannelReporter {
+            task_id: job.task_id.clone(),
+            control_tx: control_tx.clone(),
+        };
+        let event = match executor(&job.request, media.as_ref(), &job.token, &reporter) {
             CommandOutcome::Completed(result) => {
                 let mut event =
                     Event::new(job.task_id.clone(), &now_rfc3339(), TaskStage::Completed);

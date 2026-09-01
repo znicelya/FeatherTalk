@@ -5,7 +5,9 @@ use feathertalk_media::{
 };
 use feathertalk_project::validate_project_dir;
 
-use crate::{is_media_cancellation, media_task_error, probe_to_json, project_task_error};
+use crate::{
+    TaskReporter, is_media_cancellation, media_task_error, probe_to_json, project_task_error,
+};
 
 #[derive(Debug)]
 pub enum CommandOutcome {
@@ -20,20 +22,25 @@ pub fn execute(
     request: &Request,
     media: Option<&MediaToolchain>,
     token: &CancellationToken,
+    reporter: &dyn TaskReporter,
 ) -> CommandOutcome {
     let runner = CancellableProcessRunner::new(token.clone());
-    execute_with_runner(request, media, token, &runner)
+    execute_with_runner(request, media, token, reporter, &runner)
 }
 
 pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
     request: &Request,
     media: Option<&MediaToolchain>,
     token: &CancellationToken,
+    reporter: &dyn TaskReporter,
     runner: &R,
 ) -> CommandOutcome {
     if token.is_cancelled() {
         return CommandOutcome::Cancelled;
     }
+    // Task 3's `normalize_media` arm is the first command with phases worth
+    // reporting; until then no arm has anything to report.
+    let _ = reporter;
     match request {
         Request::ValidateProject(params) => match validate_project_dir(&params.project_dir) {
             // Project validation is filesystem-bound and has no interrupt hook,

@@ -10,7 +10,7 @@ use feathertalk_project::{
     AssetManifest, AssetPackageState, FeatureType, ModelSelection, ProjectManifest,
     TaskHistoryEntry, TaskHistoryStatus, lock_asset_package, write_project_manifest_atomic,
 };
-use feathertalk_worker::{CommandOutcome, execute_with_runner};
+use feathertalk_worker::{CommandOutcome, NoReporter, execute_with_runner};
 
 struct FakeRunner {
     outputs: Mutex<VecDeque<Result<ProcessOutput, MediaError>>>,
@@ -126,7 +126,13 @@ fn validating_a_complete_project_completes_without_a_result() {
         project_dir: dir.path().to_path_buf(),
     });
     let runner = FakeRunner::new(vec![]);
-    let outcome = execute_with_runner(&request, None, &CancellationToken::new(), &runner);
+    let outcome = execute_with_runner(
+        &request,
+        None,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    );
     assert!(
         matches!(outcome, CommandOutcome::Completed(None)),
         "{outcome:?}"
@@ -141,9 +147,13 @@ fn validating_a_missing_project_fails_with_a_wire_error() {
         project_dir: dir.path().join("nope"),
     });
     let runner = FakeRunner::new(vec![]);
-    let CommandOutcome::Failed(error) =
-        execute_with_runner(&request, None, &CancellationToken::new(), &runner)
-    else {
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        None,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
         panic!("a missing project must fail");
     };
     error.validate().unwrap();
@@ -163,6 +173,7 @@ fn probing_media_completes_with_the_probe_result() {
         &probe_request(source),
         Some(&toolchain),
         &CancellationToken::new(),
+        &NoReporter,
         &runner,
     ) else {
         panic!("a successful probe must carry a result");
@@ -194,6 +205,7 @@ fn probing_a_missing_file_fails_before_the_tool_runs() {
         &probe_request(temp.path().join("absent.mov")),
         Some(&toolchain),
         &CancellationToken::new(),
+        &NoReporter,
         &runner,
     ) else {
         panic!("a missing input must fail");
@@ -212,6 +224,7 @@ fn a_cancelled_tool_reports_cancellation_not_failure() {
         &probe_request(source),
         Some(&toolchain),
         &CancellationToken::new(),
+        &NoReporter,
         &runner,
     );
     assert!(matches!(outcome, CommandOutcome::Cancelled), "{outcome:?}");
@@ -224,7 +237,13 @@ fn an_already_cancelled_token_runs_nothing() {
     let toolchain = toolchain();
     let token = CancellationToken::new();
     token.cancel();
-    let outcome = execute_with_runner(&probe_request(source), Some(&toolchain), &token, &runner);
+    let outcome = execute_with_runner(
+        &probe_request(source),
+        Some(&toolchain),
+        &token,
+        &NoReporter,
+        &runner,
+    );
     assert!(matches!(outcome, CommandOutcome::Cancelled), "{outcome:?}");
     assert_eq!(runner.call_count(), 0);
 }
@@ -237,6 +256,7 @@ fn probing_without_a_toolchain_is_refused() {
         &probe_request(source),
         None,
         &CancellationToken::new(),
+        &NoReporter,
         &runner,
     ) else {
         panic!("probing without a toolchain must fail");
@@ -255,9 +275,13 @@ fn an_unsupported_command_is_refused_with_its_slug() {
         resume: false,
     });
     let runner = FakeRunner::new(vec![]);
-    let CommandOutcome::Failed(error) =
-        execute_with_runner(&request, None, &CancellationToken::new(), &runner)
-    else {
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        None,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
         panic!("an unsupported command must fail");
     };
     assert_eq!(error.code, ErrorCode::WorkerCrashed);
