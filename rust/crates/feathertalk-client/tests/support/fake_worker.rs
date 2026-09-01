@@ -142,6 +142,41 @@ fn main() {
                 park();
             }
         }
+        // The cooperative path: acknowledges the cancel with a terminal event.
+        "cancel-acks" => {
+            write_frame(&ready(default_commands()));
+            if let Some(task_id) = wait_for_start(&mut reader)
+                && wait_for_cancel(&mut reader).is_some()
+            {
+                write_frame(&ServerFrame::Event(stage_event(
+                    &task_id,
+                    TaskStage::Cancelled,
+                )));
+            }
+        }
+        // Finishes anyway: the completion must win over the pending cancel.
+        "cancel-completes" => {
+            write_frame(&ready(default_commands()));
+            if let Some(task_id) = wait_for_start(&mut reader)
+                && wait_for_cancel(&mut reader).is_some()
+            {
+                write_frame(&ServerFrame::Event(completed(&task_id)));
+            }
+        }
+        // Reads nothing and answers nothing, so only the grace deadline ends it.
+        "cancel-ignored" => {
+            write_frame(&ready(default_commands()));
+            if wait_for_start(&mut reader).is_some() {
+                park();
+            }
+        }
+        // Dies without acknowledging: EOF after a cancel is still a cancellation.
+        "die-on-cancel" => {
+            write_frame(&ready(default_commands()));
+            if wait_for_start(&mut reader).is_some() && wait_for_cancel(&mut reader).is_some() {
+                std::process::exit(0);
+            }
+        }
         other => {
             eprintln!("unknown fake worker scenario: {other}");
             std::process::exit(97);
@@ -208,6 +243,21 @@ fn wait_for_start(reader: &mut Reader) -> Option<TaskId> {
 
 fn stage_event(task_id: &TaskId, stage: TaskStage) -> Event {
     Event::new(task_id.clone(), EMITTED_AT, stage)
+}
+
+/// Block until the client sends `cancel`. Returns `None` on shutdown or EOF.
+fn wait_for_cancel(reader: &mut Reader) -> Option<TaskId> {
+    loop {
+        match reader.read_frame::<ClientFrame>()? {
+            Ok(ClientFrame::Cancel(cancel)) => return Some(cancel.task_id),
+            Ok(ClientFrame::Start(_)) => continue,
+            Ok(ClientFrame::Shutdown(_)) => return None,
+            Err(error) => {
+                eprintln!("fake worker could not decode a client frame: {error}");
+                return None;
+            }
+        }
+    }
 }
 
 fn completed(task_id: &TaskId) -> Event {

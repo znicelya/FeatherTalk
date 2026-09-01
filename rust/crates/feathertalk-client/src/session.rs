@@ -11,9 +11,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use feathertalk_domain::{
-    ClientFrame, DomainError, Event, FrameWriter, MAX_FRAME_BYTES, PROTOCOL_VERSION, ReadyFrame,
-    RejectedFrame, Request, ServerFrame, ShutdownFrame, StartFrame, TaskError, TaskId, TaskKind,
-    TaskStage, decode_line,
+    CancelFrame, ClientFrame, DomainError, Event, FrameWriter, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    ReadyFrame, RejectedFrame, Request, ServerFrame, ShutdownFrame, StartFrame, TaskError, TaskId,
+    TaskKind, TaskStage, decode_line,
 };
 use serde_json::Value;
 
@@ -447,20 +447,30 @@ impl WorkerSession {
         cancel: &CancelToken,
         sink: &mut dyn EventSink,
     ) -> Result<SessionOutcome, ClientError> {
-        // Task 4 replaces this with the cancel state machine.
-        let _ = cancel;
         self.ensure_supported(&request)?;
         self.transport.write_frame(&ClientFrame::Start(StartFrame {
             protocol_version: PROTOCOL_VERSION,
             task_id: task_id.clone(),
             request,
         }))?;
+        let mut cancel_state = CancelState::Idle;
         loop {
+            // Checked before the bounded read, so a request registered while the
+            // worker was quiet is acted on within one POLL_INTERVAL.
+            if let Some(outcome) = self.service_cancel(cancel, &mut cancel_state, &task_id)? {
+                return Ok(outcome);
+            }
             match self.transport.next_frame(POLL_INTERVAL)? {
                 // Quiet worker: keep waiting. The task has no deadline of its
                 // own — training legitimately runs for hours.
                 FrameEvent::Timeout => continue,
-                FrameEvent::Eof => return Err(self.transport.worker_gone()),
+                FrameEvent::Eof => {
+                    // A worker that exits after being asked to stop has stopped.
+                    if !matches!(cancel_state, CancelState::Idle) {
+                        return Ok(SessionOutcome::Cancelled);
+                    }
+                    return Err(self.transport.worker_gone());
+                }
                 FrameEvent::Frame(line) => {
                     // Validation happens here, not on the reader thread, so the
                     // error can be attributed to this phase of the protocol.
@@ -498,6 +508,61 @@ impl WorkerSession {
     /// How many events for other tasks were ignored.
     pub fn foreign_event_count(&self) -> usize {
         self.foreign_events
+    }
+
+    /// Act on the cancel token, and on the grace deadline if one is running.
+    ///
+    /// `Some(Cancelled)` means the session is over. Every branch here is
+    /// bounded: the polite path has a deadline, and the deadline has a kill.
+    fn service_cancel(
+        &mut self,
+        cancel: &CancelToken,
+        state: &mut CancelState,
+        task_id: &TaskId,
+    ) -> Result<Option<SessionOutcome>, ClientError> {
+        match (cancel.count(), *state) {
+            // Nothing asked for, or already asked and still within the grace.
+            (0, _) | (1, CancelState::Requested { .. }) => {}
+            (1, CancelState::Idle) => {
+                let grace = self.transport.options.cancel_grace;
+                let frame = ClientFrame::Cancel(CancelFrame {
+                    protocol_version: PROTOCOL_VERSION,
+                    task_id: task_id.clone(),
+                });
+                if self.transport.write_frame(&frame).is_err() {
+                    // The worker is already unreachable. The user asked for the
+                    // task to stop, and it has: report that, not a transport
+                    // failure they can do nothing about.
+                    self.transport.kill_and_reap();
+                    return Ok(Some(SessionOutcome::Cancelled));
+                }
+                *state = CancelState::Requested {
+                    deadline: Instant::now() + grace,
+                };
+            }
+            // Two or more requests: the user has asked twice, stop now.
+            _ => {
+                self.transport.kill_and_reap();
+                return Ok(Some(SessionOutcome::Cancelled));
+            }
+        }
+        if let CancelState::Requested { deadline } = *state
+            && Instant::now() >= deadline
+        {
+            // The worker had its chance. Escalate: shutdown, then EOF, then kill.
+            let grace = self.transport.options.shutdown_grace;
+            let _ = self
+                .transport
+                .write_frame(&ClientFrame::Shutdown(ShutdownFrame {
+                    protocol_version: PROTOCOL_VERSION,
+                }));
+            self.transport.close_stdin();
+            if self.transport.wait_for_exit(grace).is_none() {
+                self.transport.kill_and_reap();
+            }
+            return Ok(Some(SessionOutcome::Cancelled));
+        }
+        Ok(None)
     }
 
     /// Ask the worker to exit and wait out the shutdown grace.
@@ -585,4 +650,14 @@ fn terminal_outcome(event: Event) -> Option<SessionOutcome> {
         TaskStage::Cancelled => Some(SessionOutcome::Cancelled),
         _ => None,
     }
+}
+
+/// Where the cancel escalation currently is.
+///
+/// Two states are enough: every kill path returns an outcome immediately, so
+/// there is no "killed" state anyone could observe.
+#[derive(Debug, Copy, Clone)]
+enum CancelState {
+    Idle,
+    Requested { deadline: Instant },
 }
