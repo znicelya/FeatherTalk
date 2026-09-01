@@ -92,7 +92,7 @@ The locator rule that matters: **the first source that is *set* wins.** A `--wor
   - `ENV_WORKER_BIN: &str = "FEATHERTALK_WORKER_BIN"`, `WORKER_FILE_STEM: &str = "feathertalk-worker"`.
   - `generate_task_id() -> Result<TaskId, DomainError>`.
 
-- [ ] **Step 1: Register the crate in the workspace**
+- [x] **Step 1: Register the crate in the workspace**
 
 In `rust/Cargo.toml`, add the member immediately after `crates/feathertalk-worker` so the list stays roughly in dependency order:
 
@@ -103,7 +103,7 @@ In `rust/Cargo.toml`, add the member immediately after `crates/feathertalk-worke
   "crates/feathertalk-face",
 ```
 
-- [ ] **Step 2: Create the crate manifest**
+- [x] **Step 2: Create the crate manifest**
 
 Create `rust/crates/feathertalk-client/Cargo.toml`:
 
@@ -125,7 +125,7 @@ time = { workspace = true }
 tempfile = { workspace = true }
 ```
 
-- [ ] **Step 3: Write the failing discovery tests**
+- [x] **Step 3: Write the failing discovery tests**
 
 Create `rust/crates/feathertalk-client/tests/discovery.rs`:
 
@@ -226,7 +226,7 @@ fn the_sibling_name_carries_the_platform_executable_suffix() {
 
 A note on why `from_parts` exists at all: `std::env::set_var` is `unsafe` in edition 2024, so tests must not mutate the process environment. `from_env` reads the environment once and hands the three candidates to `from_parts`, which is the seam the tests drive.
 
-- [ ] **Step 4: Write the failing task id test**
+- [x] **Step 4: Write the failing task id test**
 
 Create `rust/crates/feathertalk-client/tests/task_id.rs`:
 
@@ -259,13 +259,13 @@ fn two_task_ids_generated_in_the_same_millisecond_differ() {
 }
 ```
 
-- [ ] **Step 5: Run both test files to verify they fail**
+- [x] **Step 5: Run both test files to verify they fail**
 
 Run: `cargo test -p feathertalk-client --all-targets`
 
 Expected: FAIL. Cargo cannot find the crate root, reporting `error: failed to load manifest` or `couldn't read src/lib.rs`, because `src/lib.rs` does not exist yet.
 
-- [ ] **Step 6: Write the error types**
+- [x] **Step 6: Write the error types**
 
 Create `rust/crates/feathertalk-client/src/error.rs`:
 
@@ -362,7 +362,7 @@ impl ClientError {
 }
 ```
 
-- [ ] **Step 7: Write the locator**
+- [x] **Step 7: Write the locator**
 
 Create `rust/crates/feathertalk-client/src/locator.rs`:
 
@@ -457,7 +457,7 @@ impl WorkerLocator {
 }
 ```
 
-- [ ] **Step 8: Write the task id generator**
+- [x] **Step 8: Write the task id generator**
 
 Create `rust/crates/feathertalk-client/src/task_id.rs`:
 
@@ -491,7 +491,7 @@ pub fn generate_task_id() -> Result<TaskId, DomainError> {
 
 `rem_euclid` keeps the value non-negative, and `{millis:013}` pads it, so the millisecond field is always exactly thirteen digits. `suffix` is a `u32`, so `{suffix:08x}` is always exactly eight lowercase hex digits. `TaskId::parse` is still called, because the format is the domain's to enforce.
 
-- [ ] **Step 9: Write the crate root**
+- [x] **Step 9: Write the crate root**
 
 Create `rust/crates/feathertalk-client/src/lib.rs`:
 
@@ -513,20 +513,20 @@ pub use locator::{ENV_WORKER_BIN, WORKER_FILE_STEM, WorkerLocator};
 pub use task_id::generate_task_id;
 ```
 
-- [ ] **Step 10: Run the tests to verify they pass**
+- [x] **Step 10: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-client --all-targets`
 
 Expected: PASS, 8 tests across the two integration test files.
 
-- [ ] **Step 11: Run the linters**
+- [x] **Step 11: Run the linters**
 
 Run: `cargo clippy -p feathertalk-client --all-targets -- -D warnings`
 Run: `cargo fmt --all -- --check`
 
 Expected: both exit 0. If `fmt --check` prints a diff, run `cargo fmt --all` and re-run it.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add rust/Cargo.toml rust/crates/feathertalk-client
@@ -564,7 +564,7 @@ Two design points that are easy to get wrong:
   - Private: `Transport`, `FrameEvent { Frame(FrameLine), Timeout, Eof }`, `read_line_bounded`, `spawn_reader`, `spawn_stderr_pump`.
   - Test-only: the `feathertalk-fake-worker` binary and the `harness` module.
 
-- [ ] **Step 1: Declare the fake worker binary**
+- [x] **Step 1: Declare the fake worker binary**
 
 Append to `rust/crates/feathertalk-client/Cargo.toml`:
 
@@ -578,7 +578,7 @@ No `required-features`: `CARGO_BIN_EXE_feathertalk-fake-worker` is only defined 
 
 A `[[bin]]` target cannot use dev-dependencies, so the fake worker may only use `feathertalk-domain`, `serde_json`, and std. That is why the next step hard-codes timestamps instead of reading a clock.
 
-- [ ] **Step 2: Write the fake worker**
+- [x] **Step 2: Write the fake worker**
 
 Create `rust/crates/feathertalk-client/tests/support/fake_worker.rs`:
 
@@ -769,7 +769,7 @@ fn park() -> ! {
 
 `encode_line` already appends the newline; `trim_end()` makes `write_line` the single place a line ending is chosen, so the two write paths cannot disagree.
 
-- [ ] **Step 3: Write the shared test harness**
+- [x] **Step 3: Write the shared test harness**
 
 Create `rust/crates/feathertalk-client/tests/support/harness.rs`:
 
@@ -811,7 +811,7 @@ pub fn fast_options() -> SessionOptions {
 }
 ```
 
-- [ ] **Step 4: Write the failing handshake tests**
+- [x] **Step 4: Write the failing handshake tests**
 
 Create `rust/crates/feathertalk-client/tests/handshake.rs`:
 
@@ -948,7 +948,7 @@ Run: `cargo test -p feathertalk-client --test handshake`
 
 Expected: FAIL to compile — `WorkerSession` does not exist yet.
 
-- [ ] **Step 5: Write the session options**
+- [x] **Step 5: Write the session options**
 
 Create `rust/crates/feathertalk-client/src/options.rs`:
 
@@ -983,7 +983,7 @@ impl Default for SessionOptions {
 }
 ```
 
-- [ ] **Step 6: Write the transport and the handshake**
+- [x] **Step 6: Write the transport and the handshake**
 
 Create `rust/crates/feathertalk-client/src/session.rs`:
 
@@ -1379,7 +1379,7 @@ impl WorkerSession {
 
 `foreign_events` is written here and read in Task 3. Until then `cargo clippy -D warnings` will flag it as never read, so keep Steps 6 and 7 in the same commit and expect the field's first real use in Task 3; if clippy complains before then, the fix is to finish Task 3, not to add an allow.
 
-- [ ] **Step 7: Wire the new modules into the crate root**
+- [x] **Step 7: Wire the new modules into the crate root**
 
 Rewrite the module block of `rust/crates/feathertalk-client/src/lib.rs`:
 
@@ -1397,7 +1397,7 @@ pub use session::{FrameLine, WorkerSession};
 pub use task_id::generate_task_id;
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-client --all-targets`
 
@@ -1405,14 +1405,14 @@ Expected: PASS, 17 tests (8 from Task 1, 9 handshake tests). The whole file shou
 
 If a test hangs instead of failing, the bug is a missing bound, not a slow machine. Check that `next_frame` is called with a timeout and that `Drop` kills before it waits.
 
-- [ ] **Step 9: Run the linters**
+- [x] **Step 9: Run the linters**
 
 Run: `cargo clippy -p feathertalk-client --all-targets -- -D warnings`
 Run: `cargo fmt --all -- --check`
 
 Expected: both exit 0.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add rust/crates/feathertalk-client
@@ -1445,7 +1445,7 @@ A session now runs exactly one task and reports one of four outcomes. Two rules 
   - `WorkerSession::run(&mut self, TaskId, Request, &CancelToken, &mut dyn EventSink) -> SessionOutcome`, `WorkerSession::foreign_event_count(&self) -> usize`, `WorkerSession::shutdown(self) -> Option<i32>`.
   - New fake worker scenarios: `only-validate`, `only-probe`, `fail`, `self-cancel`, `foreign-event`, `die-after-ready`, `oversized-line`.
 
-- [ ] **Step 1: Extend the fake worker**
+- [x] **Step 1: Extend the fake worker**
 
 In `rust/crates/feathertalk-client/tests/support/fake_worker.rs`, add to the import list: `ErrorCode`, `MAX_FRAME_BYTES`, `TaskError`.
 
@@ -1531,7 +1531,7 @@ fn failed(task_id: &TaskId) -> Event {
 }
 ```
 
-- [ ] **Step 2: Write the failing run tests**
+- [x] **Step 2: Write the failing run tests**
 
 Create `rust/crates/feathertalk-client/tests/run.rs`:
 
@@ -1691,7 +1691,7 @@ Run: `cargo test -p feathertalk-client --test run`
 
 Expected: FAIL to compile — `run`, `EventSink`, `SessionOutcome`, and `CancelToken` do not exist yet.
 
-- [ ] **Step 3: Add the sink, the outcome, and the cancel token**
+- [x] **Step 3: Add the sink, the outcome, and the cancel token**
 
 Extend the imports at the top of `rust/crates/feathertalk-client/src/session.rs`:
 
@@ -1780,7 +1780,7 @@ fn terminal_outcome(event: Event) -> Option<SessionOutcome> {
 }
 ```
 
-- [ ] **Step 4: Add the run loop to `WorkerSession`**
+- [x] **Step 4: Add the run loop to `WorkerSession`**
 
 Add to the `impl WorkerSession` block in `rust/crates/feathertalk-client/src/session.rs`:
 
@@ -1903,7 +1903,7 @@ Add to the `impl WorkerSession` block in `rust/crates/feathertalk-client/src/ses
     }
 ```
 
-- [ ] **Step 5: Export the new types**
+- [x] **Step 5: Export the new types**
 
 In `rust/crates/feathertalk-client/src/lib.rs`, replace the session re-export:
 
@@ -1911,7 +1911,7 @@ In `rust/crates/feathertalk-client/src/lib.rs`, replace the session re-export:
 pub use session::{CancelToken, EventSink, FrameLine, SessionOutcome, WorkerSession};
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-client --all-targets`
 
@@ -1919,14 +1919,14 @@ Expected: PASS, 25 tests (17 from Tasks 1–2, 8 run tests).
 
 `an_oversized_line_is_a_protocol_error` allocates just over a mebibyte in the child and streams it; if it is slow rather than failing, that is the copy, not a bug.
 
-- [ ] **Step 7: Run the linters**
+- [x] **Step 7: Run the linters**
 
 Run: `cargo clippy -p feathertalk-client --all-targets -- -D warnings`
 Run: `cargo fmt --all -- --check`
 
 Expected: both exit 0. `foreign_events` now has a reader, so the dead-code warning from Task 2 is gone.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add rust/crates/feathertalk-client
@@ -1958,7 +1958,7 @@ The race rule falls out of the loop's ordering rather than being special-cased: 
   - New fake worker scenarios: `cancel-acks`, `cancel-completes`, `cancel-ignored`, `die-on-cancel`.
 - No public API changes: `CancelToken` was already threaded through `run` in Task 3.
 
-- [ ] **Step 1: Teach the fake worker to receive cancels**
+- [x] **Step 1: Teach the fake worker to receive cancels**
 
 In `rust/crates/feathertalk-client/tests/support/fake_worker.rs`, add a cancel reader next to `wait_for_start`:
 
@@ -2019,7 +2019,7 @@ And add these arms before the `other =>` arm:
         }
 ```
 
-- [ ] **Step 2: Write the failing cancellation tests**
+- [x] **Step 2: Write the failing cancellation tests**
 
 Create `rust/crates/feathertalk-client/tests/cancel.rs`:
 
@@ -2140,7 +2140,7 @@ Run: `cargo test -p feathertalk-client --test cancel`
 
 Expected: FAIL — the token is still ignored, so `cancel-acks`, `cancel-ignored`, and the double request hang until the test harness gives up rather than returning `Cancelled`.
 
-- [ ] **Step 3: Add the cancel state machine**
+- [x] **Step 3: Add the cancel state machine**
 
 Add `CancelFrame` to the `feathertalk_domain` import list in `rust/crates/feathertalk-client/src/session.rs`, and add the state type next to `terminal_outcome`:
 
@@ -2215,7 +2215,7 @@ Then add the escalation to the `impl WorkerSession` block:
     }
 ```
 
-- [ ] **Step 4: Wire the escalation into the run loop**
+- [x] **Step 4: Wire the escalation into the run loop**
 
 In `run_inner`, delete the `let _ = cancel;` placeholder, declare the state before the loop, service it at the top of every iteration, and reinterpret EOF:
 
@@ -2245,7 +2245,7 @@ In `run_inner`, delete the `let _ = cancel;` placeholder, declare the state befo
 
 The frame arm is untouched. Terminal events are still handled the instant they arrive, which is exactly what makes `a_completion_in_flight_beats_a_cancel` pass: the `completed` frame is processed before the next `service_cancel` call ever runs.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-client --all-targets`
 
@@ -2253,14 +2253,14 @@ Expected: PASS, 30 tests (25 from Tasks 1–3, 5 cancel tests).
 
 If `a_second_request_kills_without_waiting` is flaky above 200 ms, the cause is a `write_frame` call before the count check; the count must be read first.
 
-- [ ] **Step 6: Run the linters**
+- [x] **Step 6: Run the linters**
 
 Run: `cargo clippy -p feathertalk-client --all-targets -- -D warnings`
 Run: `cargo fmt --all -- --check`
 
 Expected: both exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/crates/feathertalk-client
@@ -2295,7 +2295,7 @@ The output contract is the part to get right: **stdout is the result channel, st
   - `run(cli: Cli) -> i32` plus the four `EXIT_*` constants.
   - The `feathertalk` binary and, for tests, `feathertalk-cli-fake-worker`.
 
-- [ ] **Step 1: Add the dependency and the member**
+- [x] **Step 1: Add the dependency and the member**
 
 In `rust/Cargo.toml`, add the member after `crates/feathertalk-client`:
 
@@ -2312,7 +2312,7 @@ ctrlc = "=3.4.5"
 
 Pinned with `=` because it installs a signal handler: a patch release that changes handler semantics should be an explicit decision, not something a `cargo update` does silently. If that exact version does not resolve, pin the newest 3.4.x and note the change in the commit body.
 
-- [ ] **Step 2: Create the crate manifest**
+- [x] **Step 2: Create the crate manifest**
 
 Create `rust/crates/feathertalk-cli/Cargo.toml`:
 
@@ -2352,7 +2352,7 @@ tempfile = { workspace = true }
 
 The binary is `feathertalk`, not `feathertalk-cli`: that is the command users type.
 
-- [ ] **Step 3: Re-use the fake worker**
+- [x] **Step 3: Re-use the fake worker**
 
 Create `rust/crates/feathertalk-cli/tests/support/fake_worker_bin.rs`:
 
@@ -2368,7 +2368,7 @@ Create `rust/crates/feathertalk-cli/tests/support/fake_worker_bin.rs`:
 include!("../../../feathertalk-client/tests/support/fake_worker.rs");
 ```
 
-- [ ] **Step 4: Write the argument surface**
+- [x] **Step 4: Write the argument surface**
 
 Create `rust/crates/feathertalk-cli/src/cli.rs`:
 
@@ -2429,7 +2429,7 @@ pub enum Command {
 
 `--quiet` conflicts with `--json` rather than silently losing to it: the two ask for opposite things, and clap can say so better than a precedence rule nobody reads.
 
-- [ ] **Step 5: Write the presentation layer**
+- [x] **Step 5: Write the presentation layer**
 
 Create `rust/crates/feathertalk-cli/src/render.rs`:
 
@@ -2772,7 +2772,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 6: Write the driver**
+- [x] **Step 6: Write the driver**
 
 Create `rust/crates/feathertalk-cli/src/run.rs`:
 
@@ -2931,7 +2931,7 @@ fn install_cancel_handler(cancel: &CancelToken) {
 }
 ```
 
-- [ ] **Step 7: Write the crate root and the binary**
+- [x] **Step 7: Write the crate root and the binary**
 
 Create `rust/crates/feathertalk-cli/src/lib.rs`:
 
@@ -2987,7 +2987,7 @@ fn main() {
 const EXIT_COMPLETED_ON_HELP: i32 = 0;
 ```
 
-- [ ] **Step 8: Write the end-to-end CLI tests**
+- [x] **Step 8: Write the end-to-end CLI tests**
 
 Create `rust/crates/feathertalk-cli/tests/cli.rs`:
 
@@ -3116,7 +3116,7 @@ fn an_empty_path_argument_is_refused() {
 }
 ```
 
-- [ ] **Step 9: Run the tests to verify they pass**
+- [x] **Step 9: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-cli --all-targets`
 
@@ -3124,14 +3124,14 @@ Expected: PASS, 13 tests (10 CLI tests, 3 render unit tests).
 
 If `stdout_carries_only_the_result` fails because stdout has more than one document, something is printing narration to stdout. The rule is absolute: only the result, only under the human mode.
 
-- [ ] **Step 10: Run the linters**
+- [x] **Step 10: Run the linters**
 
 Run: `cargo clippy -p feathertalk-cli --all-targets -- -D warnings`
 Run: `cargo fmt --all -- --check`
 
 Expected: both exit 0.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add rust/Cargo.toml rust/Cargo.lock rust/crates/feathertalk-cli
@@ -3157,7 +3157,7 @@ The end-to-end test is deliberately narrow: three cases, one per exit code that 
 - Consumes: the `feathertalk` binary via `env!("CARGO_BIN_EXE_feathertalk")`; the `feathertalk-worker` binary as a sibling file on disk; `tempfile::TempDir`; `feathertalk_worker::ENV_FFPROBE` as a string literal, not a dependency.
 - Produces: no library code. Only a test target and documentation.
 
-- [ ] **Step 1: Write the real-worker end-to-end test**
+- [x] **Step 1: Write the real-worker end-to-end test**
 
 Create `rust/crates/feathertalk-cli/tests/real_worker.rs`:
 
@@ -3288,7 +3288,7 @@ fn a_missing_ffprobe_makes_probe_media_unsupported() {
 
 `FEATHERTALK_WORKER_FFPROBE` is written as a literal rather than imported from `feathertalk_worker::ENV_FFPROBE`, because taking a dev-dependency on the worker crate to reach one `&str` would make the CLI's test build depend on the whole worker.
 
-- [ ] **Step 2: Run the end-to-end test against a built worker**
+- [x] **Step 2: Run the end-to-end test against a built worker**
 
 Run: `cargo build -p feathertalk-worker`
 Run: `cargo test -p feathertalk-cli --test real_worker -- --nocapture`
@@ -3297,7 +3297,7 @@ Expected: PASS, 3 tests, and no "skipping" lines in the output. If a skip is pri
 
 If `an_empty_directory_is_not_a_project` reports exit 0 instead of 1, the worker accepted an empty directory as a project. Do not weaken the assertion — that would be a worker bug worth reporting.
 
-- [ ] **Step 3: Record the slice in the migration design**
+- [x] **Step 3: Record the slice in the migration design**
 
 In `docs/superpowers/specs/2026-08-17-rust-desktop-migration-design.md`, section 16 「完成定义」, replace this line:
 
@@ -3313,11 +3313,11 @@ with:
 
 The wording keeps the definition of done unchanged and states where the CLI stands against it today, so the next slice that adds a worker command knows the CLI is part of its scope.
 
-- [ ] **Step 4: Tick every step in this plan**
+- [x] **Step 4: Tick every step in this plan**
 
 Change every `- [ ]` in `docs/superpowers/plans/2026-09-01-feathertalk-cli-worker-client.md` to `- [x]`. The plan is the record of what was done; leaving the boxes empty makes it look abandoned.
 
-- [ ] **Step 5: Run the full workspace gate**
+- [x] **Step 5: Run the full workspace gate**
 
 From `rust/`:
 
@@ -3334,7 +3334,7 @@ Run: `git diff --check`
 
 Expected: no output. This catches trailing whitespace and conflict markers that `cargo fmt` does not look at, including in the Markdown edited above.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/crates/feathertalk-cli/tests/real_worker.rs docs/superpowers

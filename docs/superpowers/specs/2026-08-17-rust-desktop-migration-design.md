@@ -652,7 +652,7 @@ WGPU 前向：
 - FeatherHuBERT 特征提取与当前基准一致。
 - 两种 UNet 的训练、恢复、推理和重参数化达到数值门槛。
 - 素材包制作、三种训练模式、生成和模型管理均可从 GPUI 完成。
-- CLI 覆盖所有 worker 能力，便于自动化测试和无界面运行。
+- CLI 覆盖所有 worker 能力，便于自动化测试和无界面运行。当前 `feathertalk` 已覆盖 worker 的全部命令（`capabilities`、`validate-project`、`probe-media`），后续每新增一个 worker 命令都必须同步新增子命令。
 - 三平台安装包无需 Python 和系统 FFmpeg。
 - 产品运行路径不引用 Wenet、原始 HuBERT 或 FeatherHuBERT 蒸馏训练。
 - 仓库默认分支不再包含 Python 源码、Wenet vendored 目录或旧 C++ 运行器。
