@@ -21,8 +21,11 @@ pub fn cpu_adapter() -> AdapterInfo {
 
 pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
     let mut commands = vec![TaskKind::ValidateProject];
+    // Both media commands shell out to the same two binaries, so they are
+    // available together or not at all.
     if config.media().is_some() {
         commands.push(TaskKind::ProbeMedia);
+        commands.push(TaskKind::NormalizeMedia);
     }
     commands
 }

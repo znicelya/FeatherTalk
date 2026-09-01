@@ -389,7 +389,9 @@ fn write_frame<W: Write>(
 fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
     let slug = request.kind().as_slug();
     match request.kind() {
-        TaskKind::ProbeMedia => match config.media_rejection() {
+        // Both media commands need the same two binaries, so they share the
+        // reason that names what to fix.
+        TaskKind::ProbeMedia | TaskKind::NormalizeMedia => match config.media_rejection() {
             Some(rejection) => format!(
                 "命令 {slug} 需要可用的媒体工具链，当前配置被拒绝：{rejection}。修正后重启 worker。"
             ),
@@ -397,7 +399,17 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
                 "命令 {slug} 需要媒体工具链，请设置 {ENV_FFPROBE} 与 {ENV_FFMPEG} 后重启 worker。"
             ),
         },
-        _ => format!("此 worker 不支持命令 {slug}，当前仅支持 validate_project 与 probe_media。"),
+        // Listing `supported_commands` instead of a hard-coded set keeps this
+        // message correct as later commands land.
+        _ => format!(
+            "此 worker 不支持命令 {slug}，当前支持：{}。",
+            supported_commands(config)
+                .iter()
+                .copied()
+                .map(TaskKind::as_slug)
+                .collect::<Vec<_>>()
+                .join("、")
+        ),
     }
 }
 

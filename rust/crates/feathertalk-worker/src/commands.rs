@@ -1,13 +1,19 @@
-use feathertalk_domain::{ErrorCode, Request, TaskError, TaskKind, TaskStage};
+use feathertalk_domain::{ErrorCode, Progress, Request, TaskError, TaskKind, TaskStage};
 use feathertalk_media::{
     CancellableProcessRunner, CancellationToken, MediaError, MediaInput, MediaToolchain,
-    ProcessRunner, probe_media_with_runner, validate_input,
+    NormalizationSpec, NormalizePhase, ProcessRunner, normalize_media_observed,
+    probe_media_with_runner, validate_input,
 };
 use feathertalk_project::validate_project_dir;
 
 use crate::{
-    TaskReporter, is_media_cancellation, media_task_error, probe_to_json, project_task_error,
+    TaskReporter, is_media_cancellation, media_task_error, normalize_to_json, probe_to_json,
+    project_task_error,
 };
+
+/// How many progress steps `normalize_media` reports. Verification and the
+/// commit are bounded and short, so they end the count rather than extend it.
+const NORMALIZE_STEPS: u64 = 3;
 
 #[derive(Debug)]
 pub enum CommandOutcome {
@@ -38,9 +44,6 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
     if token.is_cancelled() {
         return CommandOutcome::Cancelled;
     }
-    // Task 3's `normalize_media` arm is the first command with phases worth
-    // reporting; until then no arm has anything to report.
-    let _ = reporter;
     match request {
         Request::ValidateProject(params) => match validate_project_dir(&params.project_dir) {
             // Project validation is filesystem-bound and has no interrupt hook,
@@ -68,8 +71,56 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 Err(error) => media_failure(&error),
             }
         }
+        Request::NormalizeMedia(params) => {
+            let Some(toolchain) = media else {
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            let input = match validate_input(&MediaInput {
+                source: params.input.clone(),
+            }) {
+                Ok(input) => input,
+                Err(error) => return media_failure(&error),
+            };
+            // The targets are fixed by the asset contract, and
+            // `validate_normalization` rejects anything else, so there is
+            // nothing here for a caller to configure.
+            let spec = NormalizationSpec {
+                target_video_fps: 25,
+                target_audio_sample_rate: 16_000,
+                target_audio_channels: 1,
+                output_dir: params.output_dir.clone(),
+            };
+            match normalize_media_observed(&input, &spec, toolchain, runner, &|phase| {
+                report_phase(reporter, phase)
+            }) {
+                Ok(normalized) => CommandOutcome::Completed(Some(normalize_to_json(&normalized))),
+                Err(error) => media_failure(&error),
+            }
+        }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
+}
+
+/// Map a normalization phase onto the protocol stage that names it.
+///
+/// Protocol version 2 has no stage for media normalization, so the two passes
+/// that dominate wall time borrow the stages that describe their output.
+/// Verification and the commit report nothing: giving them a stage would mean
+/// moving the label backwards to `preparing`, which reads as a bug.
+fn report_phase(reporter: &dyn TaskReporter, phase: NormalizePhase) {
+    let (stage, completed) = match phase {
+        NormalizePhase::Probing => (TaskStage::Preparing, 1),
+        NormalizePhase::NormalizingVideo => (TaskStage::ExtractingFrames, 2),
+        NormalizePhase::NormalizingAudio => (TaskStage::ExtractingAudio, 3),
+        NormalizePhase::Verifying | NormalizePhase::Committing => return,
+    };
+    reporter.report(
+        stage,
+        Some(Progress {
+            completed,
+            total: Some(NORMALIZE_STEPS),
+        }),
+    );
 }
 
 fn media_failure(error: &MediaError) -> CommandOutcome {

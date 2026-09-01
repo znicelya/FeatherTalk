@@ -38,7 +38,11 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
     assert_eq!(frame.adapters[0].vram_bytes, None);
     assert_eq!(
         frame.supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::ProbeMedia]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia
+        ]
     );
     assert!(frame.capabilities.ffmpeg);
     assert!(!frame.capabilities.training);

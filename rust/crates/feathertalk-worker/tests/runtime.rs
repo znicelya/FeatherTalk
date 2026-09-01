@@ -11,9 +11,10 @@ use std::{
 };
 
 use feathertalk_domain::{
-    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, PROTOCOL_VERSION, ProbeMediaParams,
-    Progress, ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind,
-    TaskStage, TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
+    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, NormalizeMediaParams,
+    PROTOCOL_VERSION, ProbeMediaParams, Progress, ProjectDirParams, Request, ServerFrame,
+    ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage, TrainParams, TrainingMode, UnetVariant,
+    decode_line, encode_line,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_worker::{
@@ -403,7 +404,11 @@ fn a_usable_media_toolchain_enables_probe_media_in_the_handshake() {
     };
     assert_eq!(
         ready.supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::ProbeMedia]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia
+        ]
     );
 }
 
@@ -444,6 +449,28 @@ fn probe_media_is_rejected_when_the_media_toolchain_is_unavailable() {
     let reasons = rejections(&frames);
     assert_eq!(reasons.len(), 1, "{frames:?}");
     assert!(reasons[0].contains("probe_media"), "{}", reasons[0]);
+    assert!(events(&frames).is_empty());
+}
+
+#[test]
+fn normalize_media_is_rejected_when_the_media_toolchain_is_unavailable() {
+    let harness = Harness::start(broken_config(), instant_executor());
+    let request = Request::NormalizeMedia(NormalizeMediaParams {
+        input: PathBuf::from("C:/tmp/clip.mp4"),
+        output_dir: PathBuf::from("C:/tmp/assets"),
+    });
+    harness.send(&start(&task("00000023"), request));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("normalize_media"), "{}", reasons[0]);
+    // The reason has to name the variable an operator can fix.
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_FFPROBE"),
+        "{}",
+        reasons[0]
+    );
     assert!(events(&frames).is_empty());
 }
 

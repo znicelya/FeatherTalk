@@ -1,7 +1,8 @@
 use std::{collections::VecDeque, path::PathBuf, sync::Mutex, time::Duration};
 
 use feathertalk_domain::{
-    ErrorCode, ProbeMediaParams, ProjectDirParams, Request, TrainParams, TrainingMode, UnetVariant,
+    ErrorCode, NormalizeMediaParams, ProbeMediaParams, Progress, ProjectDirParams, Request,
+    TaskStage, TrainParams, TrainingMode, UnetVariant,
 };
 use feathertalk_media::{
     CancellationToken, CommandSpec, MediaError, MediaToolchain, ProcessOutput, ProcessRunner,
@@ -10,7 +11,7 @@ use feathertalk_project::{
     AssetManifest, AssetPackageState, FeatureType, ModelSelection, ProjectManifest,
     TaskHistoryEntry, TaskHistoryStatus, lock_asset_package, write_project_manifest_atomic,
 };
-use feathertalk_worker::{CommandOutcome, NoReporter, execute_with_runner};
+use feathertalk_worker::{CommandOutcome, NoReporter, TaskReporter, execute_with_runner};
 
 struct FakeRunner {
     outputs: Mutex<VecDeque<Result<ProcessOutput, MediaError>>>,
@@ -287,4 +288,217 @@ fn an_unsupported_command_is_refused_with_its_slug() {
     assert_eq!(error.code, ErrorCode::WorkerCrashed);
     assert!(error.detail.contains("train"), "{}", error.detail);
     error.validate().unwrap();
+}
+
+/// A runner that scripts probe output and writes the bytes `ffmpeg` would have
+/// written, so the normalization pipeline can verify and commit them.
+struct NormalizeRunner {
+    outputs: Mutex<VecDeque<Result<ProcessOutput, MediaError>>>,
+    commands: Mutex<Vec<CommandSpec>>,
+}
+
+impl NormalizeRunner {
+    fn new(outputs: Vec<Result<ProcessOutput, MediaError>>) -> Self {
+        Self {
+            outputs: Mutex::new(outputs.into_iter().collect()),
+            commands: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ProcessRunner for NormalizeRunner {
+    fn run(&self, command: &CommandSpec, _timeout: Duration) -> Result<ProcessOutput, MediaError> {
+        self.commands.lock().unwrap().push(command.clone());
+        let output = self.outputs.lock().unwrap().pop_front().unwrap()?;
+        if matches!(command.operation(), "normalize_video" | "normalize_audio") {
+            let path = PathBuf::from(command.arguments().last().unwrap());
+            std::fs::write(path, b"normalized-bytes").unwrap();
+        }
+        Ok(output)
+    }
+}
+
+/// Records everything a command reports.
+#[derive(Default)]
+struct RecordingReporter {
+    reports: Mutex<Vec<(String, Option<Progress>)>>,
+}
+
+impl TaskReporter for RecordingReporter {
+    fn report(&self, stage: TaskStage, progress: Option<Progress>) {
+        self.reports
+            .lock()
+            .unwrap()
+            .push((stage.as_slug().to_owned(), progress));
+    }
+}
+
+fn normalized_video_probe() -> Vec<u8> {
+    br#"{"format":{"format_name":"mp4","duration":"2.0"},"streams":[{"codec_type":"video","codec_name":"mpeg4","pix_fmt":"yuv420p","width":640,"height":480,"avg_frame_rate":"25/1","nb_read_frames":"50","duration":"2.0"}]}"#.to_vec()
+}
+
+fn normalized_audio_probe() -> Vec<u8> {
+    br#"{"format":{"format_name":"wav","duration":"2.0"},"streams":[{"codec_type":"audio","codec_name":"pcm_s16le","sample_fmt":"s16","sample_rate":"16000","channels":1,"duration":"2.0"}]}"#.to_vec()
+}
+
+fn normalize_request(input: PathBuf, output_dir: PathBuf) -> Request {
+    Request::NormalizeMedia(NormalizeMediaParams { input, output_dir })
+}
+
+fn normalize_outputs() -> Vec<Result<ProcessOutput, MediaError>> {
+    vec![
+        Ok(ProcessOutput::new(Some(0), valid_probe(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(
+            Some(0),
+            normalized_video_probe(),
+            Vec::new(),
+        )),
+        Ok(ProcessOutput::new(
+            Some(0),
+            normalized_audio_probe(),
+            Vec::new(),
+        )),
+    ]
+}
+
+#[test]
+fn normalizing_media_reports_paths_sizes_and_hashes() {
+    let (temp, source) = media_file();
+    let output_dir = temp.path().join("assets");
+    let runner = NormalizeRunner::new(normalize_outputs());
+    let reporter = RecordingReporter::default();
+
+    let CommandOutcome::Completed(Some(result)) = execute_with_runner(
+        &normalize_request(source, output_dir.clone()),
+        Some(&toolchain()),
+        &CancellationToken::new(),
+        &reporter,
+        &runner,
+    ) else {
+        panic!("a scripted normalization completes with a result");
+    };
+
+    assert_eq!(result["video"]["codec_name"], "mpeg4");
+    assert_eq!(result["video"]["frame_rate"]["numerator"], 25);
+    assert_eq!(result["audio"]["sample_rate"], 16_000);
+    assert_eq!(result["audio"]["channels"], 1);
+    assert_eq!(result["video"]["bytes"], b"normalized-bytes".len());
+    assert_eq!(
+        result["video"]["sha256"].as_str().unwrap().len(),
+        64,
+        "{result}"
+    );
+    // The source probe is reported under `source`, in the probe payload shape.
+    assert_eq!(result["source"]["video"]["codec_name"], "h264");
+    // The committed paths are what a later task has to open.
+    let video_path = PathBuf::from(result["video"]["path"].as_str().unwrap());
+    assert!(video_path.is_file(), "{}", video_path.display());
+    assert_eq!(video_path.file_name().unwrap(), "video_25fps.mp4");
+    let audio_path = PathBuf::from(result["audio"]["path"].as_str().unwrap());
+    assert_eq!(audio_path.file_name().unwrap(), "audio_16k_mono.wav");
+    assert!(
+        result["output_dir"].as_str().unwrap().ends_with("assets"),
+        "{result}"
+    );
+}
+
+#[test]
+fn normalizing_media_reports_three_progress_steps() {
+    let (temp, source) = media_file();
+    let output_dir = temp.path().join("assets");
+    let runner = NormalizeRunner::new(normalize_outputs());
+    let reporter = RecordingReporter::default();
+
+    execute_with_runner(
+        &normalize_request(source, output_dir),
+        Some(&toolchain()),
+        &CancellationToken::new(),
+        &reporter,
+        &runner,
+    );
+
+    assert_eq!(
+        *reporter.reports.lock().unwrap(),
+        vec![
+            (
+                "preparing".to_owned(),
+                Some(Progress {
+                    completed: 1,
+                    total: Some(3)
+                })
+            ),
+            (
+                "extracting_frames".to_owned(),
+                Some(Progress {
+                    completed: 2,
+                    total: Some(3)
+                })
+            ),
+            (
+                "extracting_audio".to_owned(),
+                Some(Progress {
+                    completed: 3,
+                    total: Some(3)
+                })
+            ),
+        ]
+    );
+}
+
+#[test]
+fn normalizing_without_a_toolchain_is_unsupported() {
+    let (temp, source) = media_file();
+    let runner = NormalizeRunner::new(vec![]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &normalize_request(source, temp.path().join("assets")),
+        None,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("no toolchain means the command cannot run");
+    };
+    assert_eq!(error.code, ErrorCode::WorkerCrashed);
+    assert!(error.detail.contains("normalize_media"), "{}", error.detail);
+}
+
+#[test]
+fn a_source_without_audio_fails_before_any_output_is_written() {
+    let (temp, source) = media_file();
+    let output_dir = temp.path().join("assets");
+    let video_only = br#"{"format":{"format_name":"mov,mp4","duration":"2.0"},"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":640,"height":480,"avg_frame_rate":"25/1","nb_read_frames":"50","duration":"2.0"}]}"#.to_vec();
+    let runner = NormalizeRunner::new(vec![Ok(ProcessOutput::new(
+        Some(0),
+        video_only,
+        Vec::new(),
+    ))]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &normalize_request(source, output_dir.clone()),
+        Some(&toolchain()),
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("a source without audio cannot be normalized");
+    };
+    assert_eq!(error.code, ErrorCode::MediaInvalid);
+    assert!(!output_dir.join("video_25fps.mp4").exists());
+}
+
+#[test]
+fn a_cancelled_normalization_reports_cancelled() {
+    let (temp, source) = media_file();
+    let runner = NormalizeRunner::new(vec![Err(MediaError::ToolCancelled {
+        operation: "ffprobe",
+    })]);
+    let outcome = execute_with_runner(
+        &normalize_request(source, temp.path().join("assets")),
+        Some(&toolchain()),
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    );
+    assert!(matches!(outcome, CommandOutcome::Cancelled), "{outcome:?}");
 }
