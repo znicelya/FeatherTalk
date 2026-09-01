@@ -1,0 +1,17 @@
+[package]
+name = "feathertalk-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+feathertalk-domain = { path = "../feathertalk-domain" }
+feathertalk-media = { path = "../feathertalk-media" }
+feathertalk-project = { path = "../feathertalk-project" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

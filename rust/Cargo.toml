@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/feathertalk-domain",
+  "crates/feathertalk-worker",
   "crates/feathertalk-face",
   "crates/feathertalk-preprocess",
   "crates/feathertalk-media",

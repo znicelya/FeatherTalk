@@ -2668,6 +2668,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-worker"
+version = "0.1.0"
+dependencies = [
+ "feathertalk-domain",
+ "feathertalk-media",
+ "feathertalk-project",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "time",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
