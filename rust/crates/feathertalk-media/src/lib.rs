@@ -18,7 +18,9 @@ pub use model::{
     NormalizationSpec, NormalizedMedia, NormalizedMediaLayout, ProbeFormat, ValidatedInput,
     VideoMetadata,
 };
-pub use normalize::{normalize_media, normalize_media_with_runner};
+pub use normalize::{
+    NormalizePhase, normalize_media, normalize_media_observed, normalize_media_with_runner,
+};
 pub use probe::parse_probe_json;
 pub use process::{
     CancellableProcessRunner, CancellationToken, MAX_CAPTURE_BYTES, ProcessOutput, ProcessRunner,

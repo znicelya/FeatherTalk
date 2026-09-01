@@ -7,8 +7,9 @@ use std::{
 };
 
 use feathertalk_media::{
-    CommandSpec, MediaError, MediaInput, MediaToolchain, NormalizationSpec, ProcessOutput,
-    ProcessRunner, normalize_media_with_runner, validate_input, validate_normalization,
+    CommandSpec, MediaError, MediaInput, MediaToolchain, NormalizationSpec, NormalizePhase,
+    ProcessOutput, ProcessRunner, normalize_media_observed, normalize_media_with_runner,
+    validate_input, validate_normalization,
 };
 
 struct FakeRunner {
@@ -400,4 +401,84 @@ fn rejects_normalized_output_larger_than_two_gibibytes() {
         })
     ));
     assert_old_outputs_and_no_staging(&layout, layout.output_dir());
+}
+
+#[test]
+fn a_successful_run_reports_every_phase_in_order() {
+    let (root, input, spec) = setup();
+    let runner = FakeRunner::new(vec![
+        Ok(ProcessOutput::new(Some(0), source_probe(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), video_probe(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), audio_probe(), Vec::new())),
+    ]);
+    let phases = Mutex::new(Vec::new());
+
+    normalize_media_observed(&input, &spec, &tools(root.path()), &runner, &|phase| {
+        phases.lock().unwrap().push(phase)
+    })
+    .unwrap();
+
+    assert_eq!(
+        *phases.lock().unwrap(),
+        vec![
+            NormalizePhase::Probing,
+            NormalizePhase::NormalizingVideo,
+            NormalizePhase::NormalizingAudio,
+            NormalizePhase::Verifying,
+            NormalizePhase::Committing,
+        ]
+    );
+}
+
+#[test]
+fn a_failing_video_pass_reports_no_phase_after_the_one_that_failed() {
+    let (root, input, spec) = setup();
+    let runner = FakeRunner::new(vec![
+        Ok(ProcessOutput::new(Some(0), source_probe(), Vec::new())),
+        Ok(ProcessOutput::new(
+            Some(1),
+            Vec::new(),
+            b"encode failed".to_vec(),
+        )),
+    ]);
+    let phases = Mutex::new(Vec::new());
+
+    let error = normalize_media_observed(&input, &spec, &tools(root.path()), &runner, &|phase| {
+        phases.lock().unwrap().push(phase)
+    })
+    .expect_err("the video pass fails");
+
+    assert!(matches!(
+        error,
+        MediaError::ToolFailed {
+            operation: "normalize_video",
+            ..
+        }
+    ));
+    assert_eq!(
+        *phases.lock().unwrap(),
+        vec![NormalizePhase::Probing, NormalizePhase::NormalizingVideo]
+    );
+}
+
+#[test]
+fn an_unusable_output_directory_reports_no_phase_at_all() {
+    // A file where the output directory should be: layout validation fails
+    // before any work is announced.
+    let (root, input, mut spec) = setup();
+    let blocked = root.path().join("blocked");
+    fs::write(&blocked, b"not-a-directory").unwrap();
+    spec.output_dir = blocked;
+    let runner = FakeRunner::new(vec![]);
+    let phases = Mutex::new(Vec::new());
+
+    let error = normalize_media_observed(&input, &spec, &tools(root.path()), &runner, &|phase| {
+        phases.lock().unwrap().push(phase)
+    })
+    .expect_err("an output directory that is a file is refused");
+
+    assert!(matches!(error, MediaError::OutputDirectoryInvalid { .. }));
+    assert!(phases.lock().unwrap().is_empty());
 }

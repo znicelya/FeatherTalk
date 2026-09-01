@@ -21,29 +21,53 @@ use crate::{
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-pub fn normalize_media_with_runner<R: ProcessRunner + ?Sized>(
+/// The phases of one normalization, in the order they run.
+///
+/// Reported to an observer immediately *before* each phase starts, so a caller
+/// that displays the phase describes what is running. The observer is an output
+/// channel only: it cannot fail and cannot stop the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NormalizePhase {
+    Probing,
+    NormalizingVideo,
+    NormalizingAudio,
+    Verifying,
+    Committing,
+}
+
+pub fn normalize_media_observed<R: ProcessRunner + ?Sized>(
     input: &crate::ValidatedInput,
     spec: &NormalizationSpec,
     toolchain: &MediaToolchain,
     runner: &R,
+    observer: &dyn Fn(NormalizePhase),
 ) -> Result<NormalizedMedia, MediaError> {
+    // Layout validation runs before the first phase is announced: a spec that
+    // names an unusable output directory never claims work it did not start.
     let layout = validate_normalization(input, spec)?;
+
+    observer(NormalizePhase::Probing);
     let source = probe_media_with_runner(input, toolchain, runner)?;
     require_source_streams(&source)?;
 
     let mut video_temp = TempOutput::create(layout.output_dir(), "video", "mp4")?;
     let mut audio_temp = TempOutput::create(layout.output_dir(), "audio", "wav")?;
+
+    observer(NormalizePhase::NormalizingVideo);
     run_tool(
         runner,
         &video_normalization_command(toolchain, input.source(), video_temp.path()),
         toolchain,
     )?;
+
+    observer(NormalizePhase::NormalizingAudio);
     run_tool(
         runner,
         &audio_normalization_command(toolchain, input.source(), audio_temp.path()),
         toolchain,
     )?;
 
+    observer(NormalizePhase::Verifying);
     let video = verify_video_output(video_temp.path(), toolchain, runner)?;
     let audio = verify_audio_output(audio_temp.path(), toolchain, runner)?;
     let delta = (video.duration_seconds() - audio.duration_seconds()).abs();
@@ -54,6 +78,8 @@ pub fn normalize_media_with_runner<R: ProcessRunner + ?Sized>(
             actual: format!("{delta:.6} seconds"),
         });
     }
+
+    observer(NormalizePhase::Committing);
     let video_artifact = hash_file(video_temp.path())?;
     let audio_artifact = hash_file(audio_temp.path())?;
     commit_output_pair(
@@ -73,6 +99,15 @@ pub fn normalize_media_with_runner<R: ProcessRunner + ?Sized>(
         video_artifact,
         audio_artifact,
     ))
+}
+
+pub fn normalize_media_with_runner<R: ProcessRunner + ?Sized>(
+    input: &crate::ValidatedInput,
+    spec: &NormalizationSpec,
+    toolchain: &MediaToolchain,
+    runner: &R,
+) -> Result<NormalizedMedia, MediaError> {
+    normalize_media_observed(input, spec, toolchain, runner, &|_phase| {})
 }
 
 pub fn normalize_media(
