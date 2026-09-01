@@ -4,12 +4,14 @@
 //! other command in [`feathertalk_domain::TaskKind`] is reported as unsupported
 //! in the handshake and rejected if a client asks for it anyway.
 
+mod adapters;
 mod commands;
 mod config;
 mod error_map;
 mod handshake;
 mod probe_result;
 
+pub use adapters::{AdapterLockError, AdapterLocks};
 pub use commands::{CommandOutcome, execute, execute_with_runner};
 pub use config::{
     DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFMPEG, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, WorkerConfig,
