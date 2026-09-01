@@ -56,6 +56,8 @@ pub enum MediaError {
         operation: &'static str,
         timeout_ms: u64,
     },
+    #[error("media tool was cancelled during {operation}")]
+    ToolCancelled { operation: &'static str },
     #[error("media tool output exceeded {limit} bytes during {operation} on {stream}: {actual}")]
     ToolOutputTooLarge {
         operation: &'static str,

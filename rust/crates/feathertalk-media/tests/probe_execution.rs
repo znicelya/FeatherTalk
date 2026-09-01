@@ -123,3 +123,16 @@ fn injected_output_cannot_bypass_capture_limit() {
         })
     ));
 }
+
+#[test]
+fn a_cancelled_probe_surfaces_as_tool_cancelled() {
+    let toolchain = toolchain();
+    let (_temp, input) = input();
+    let runner = FakeRunner::new(vec![Err(MediaError::ToolCancelled { operation: "probe" })]);
+    let error = probe_media_with_runner(&input, &toolchain, &runner)
+        .expect_err("a cancelled probe must not report success");
+    assert!(
+        matches!(error, MediaError::ToolCancelled { operation: "probe" }),
+        "{error:?}"
+    );
+}

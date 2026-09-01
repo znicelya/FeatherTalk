@@ -20,5 +20,8 @@ pub use model::{
 };
 pub use normalize::{normalize_media, normalize_media_with_runner};
 pub use probe::parse_probe_json;
-pub use process::{MAX_CAPTURE_BYTES, ProcessOutput, ProcessRunner, SystemProcessRunner};
+pub use process::{
+    CancellableProcessRunner, CancellationToken, MAX_CAPTURE_BYTES, ProcessOutput, ProcessRunner,
+    SystemProcessRunner,
+};
 pub use validate::{validate_input, validate_normalization};

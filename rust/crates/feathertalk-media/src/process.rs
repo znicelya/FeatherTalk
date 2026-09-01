@@ -1,6 +1,10 @@
 use std::{
     io::Read,
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -44,58 +48,120 @@ pub struct SystemProcessRunner;
 
 impl ProcessRunner for SystemProcessRunner {
     fn run(&self, command: &CommandSpec, timeout: Duration) -> Result<ProcessOutput, MediaError> {
-        validate_executable(command)?;
-        let mut child = Command::new(command.executable())
-            .args(command.arguments())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| MediaError::ToolSpawn {
-                operation: command.operation(),
-                message: error.to_string(),
-            })?;
-        let mut stdout = child.stdout.take().expect("stdout was piped");
-        let mut stderr = child.stderr.take().expect("stderr was piped");
-        let stdout_thread = thread::spawn(move || read_limited(&mut stdout));
-        let stderr_thread = thread::spawn(move || read_limited(&mut stderr));
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() >= timeout => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stdout_thread.join();
-                    let _ = stderr_thread.join();
-                    return Err(MediaError::ToolTimedOut {
-                        operation: command.operation(),
-                        timeout_ms: timeout.as_millis().min(u128::from(u64::MAX)) as u64,
-                    });
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(5)),
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stdout_thread.join();
-                    let _ = stderr_thread.join();
-                    return Err(MediaError::ToolSpawn {
-                        operation: command.operation(),
-                        message: error.to_string(),
-                    });
-                }
-            }
-        };
-        let stdout = stdout_thread
-            .join()
-            .unwrap_or_else(|_| ReadResult::Error("stdout reader panicked".to_owned()));
-        let stderr = stderr_thread
-            .join()
-            .unwrap_or_else(|_| ReadResult::Error("stderr reader panicked".to_owned()));
-        let stdout = stdout.into_result(command.operation(), "stdout")?;
-        let stderr = stderr.into_result(command.operation(), "stderr")?;
-        Ok(ProcessOutput::new(status.code(), stdout, stderr))
+        run_child(command, timeout, None)
     }
+}
+
+/// Cooperative cancellation flag shared between the thread that requests a stop
+/// and the thread waiting on a child process.
+#[derive(Debug, Clone, Default)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
+/// A [`SystemProcessRunner`] that kills its child as soon as its token is
+/// cancelled instead of waiting for the timeout.
+#[derive(Debug, Clone)]
+pub struct CancellableProcessRunner {
+    token: CancellationToken,
+}
+
+impl CancellableProcessRunner {
+    pub fn new(token: CancellationToken) -> Self {
+        Self { token }
+    }
+}
+
+impl ProcessRunner for CancellableProcessRunner {
+    fn run(&self, command: &CommandSpec, timeout: Duration) -> Result<ProcessOutput, MediaError> {
+        run_child(command, timeout, Some(&self.token))
+    }
+}
+
+fn run_child(
+    command: &CommandSpec,
+    timeout: Duration,
+    token: Option<&CancellationToken>,
+) -> Result<ProcessOutput, MediaError> {
+    validate_executable(command)?;
+    if token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(MediaError::ToolCancelled {
+            operation: command.operation(),
+        });
+    }
+    let mut child = Command::new(command.executable())
+        .args(command.arguments())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| MediaError::ToolSpawn {
+            operation: command.operation(),
+            message: error.to_string(),
+        })?;
+    let mut stdout = child.stdout.take().expect("stdout was piped");
+    let mut stderr = child.stderr.take().expect("stderr was piped");
+    let stdout_thread = thread::spawn(move || read_limited(&mut stdout));
+    let stderr_thread = thread::spawn(move || read_limited(&mut stderr));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if token.is_some_and(CancellationToken::is_cancelled) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(MediaError::ToolCancelled {
+                    operation: command.operation(),
+                });
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(MediaError::ToolTimedOut {
+                    operation: command.operation(),
+                    timeout_ms: timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                });
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(5)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_thread.join();
+                let _ = stderr_thread.join();
+                return Err(MediaError::ToolSpawn {
+                    operation: command.operation(),
+                    message: error.to_string(),
+                });
+            }
+        }
+    };
+    let stdout = stdout_thread
+        .join()
+        .unwrap_or_else(|_| ReadResult::Error("stdout reader panicked".to_owned()));
+    let stderr = stderr_thread
+        .join()
+        .unwrap_or_else(|_| ReadResult::Error("stderr reader panicked".to_owned()));
+    let stdout = stdout.into_result(command.operation(), "stdout")?;
+    let stderr = stderr.into_result(command.operation(), "stderr")?;
+    Ok(ProcessOutput::new(status.code(), stdout, stderr))
 }
 
 enum ReadResult {
@@ -230,6 +296,60 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn cancelling_mid_run_kills_the_child() {
+        let token = CancellationToken::new();
+        let runner = CancellableProcessRunner::new(token.clone());
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            token.cancel();
+        });
+        let started = Instant::now();
+        let error = runner
+            .run(&helper_command("helper_sleep"), Duration::from_secs(30))
+            .expect_err("cancellation must surface as an error");
+        assert!(
+            matches!(
+                error,
+                MediaError::ToolCancelled {
+                    operation: "test_process"
+                }
+            ),
+            "{error:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "cancellation waited {:?} for a child that sleeps 5 s",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn an_already_cancelled_token_never_spawns() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let runner = CancellableProcessRunner::new(token);
+        let started = Instant::now();
+        let error = runner
+            .run(&helper_command("helper_sleep"), Duration::from_secs(30))
+            .expect_err("a cancelled token must refuse to start work");
+        assert!(
+            matches!(error, MediaError::ToolCancelled { .. }),
+            "{error:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn an_uncancelled_token_behaves_like_the_system_runner() {
+        let runner = CancellableProcessRunner::new(CancellationToken::new());
+        let output = runner
+            .run(&helper_command("helper_success"), Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(output.exit_code(), Some(0));
+        assert!(String::from_utf8_lossy(output.stdout()).contains("helper-output"));
     }
 
     #[test]
