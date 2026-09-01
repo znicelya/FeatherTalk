@@ -34,7 +34,7 @@ pub struct Cli {
 }
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
-/// `capabilities`.
+/// `normalize-media`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -46,6 +46,13 @@ pub enum Command {
     ProbeMedia {
         /// 输入的音视频文件
         input: PathBuf,
+    },
+    /// 归一化媒体文件：输出 25fps 视频与 16kHz 单声道音频
+    NormalizeMedia {
+        /// 输入的音视频文件
+        input: PathBuf,
+        /// 输出目录，归一化后的视频与音频写入其中
+        output_dir: PathBuf,
     },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,

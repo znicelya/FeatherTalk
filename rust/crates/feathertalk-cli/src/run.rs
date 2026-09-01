@@ -6,7 +6,9 @@ use feathertalk_client::{
     CancelToken, EventSink, SessionOptions, SessionOutcome, WorkerLocator, WorkerSession,
     generate_task_id,
 };
-use feathertalk_domain::{ProbeMediaParams, ProjectDirParams, Request, TaskId};
+use feathertalk_domain::{
+    NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, Request, TaskId,
+};
 
 use crate::cli::{Cli, Command};
 use crate::render::{HumanSink, JsonSink, capabilities_report, failure_block, render_client_error};
@@ -77,6 +79,14 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
             reject_empty(input, "输入文件")?;
             Ok(Some(Request::ProbeMedia(ProbeMediaParams {
                 input: input.clone(),
+            })))
+        }
+        Command::NormalizeMedia { input, output_dir } => {
+            reject_empty(input, "输入文件")?;
+            reject_empty(output_dir, "输出目录")?;
+            Ok(Some(Request::NormalizeMedia(NormalizeMediaParams {
+                input: input.clone(),
+                output_dir: output_dir.clone(),
             })))
         }
     }
@@ -179,6 +189,23 @@ mod tests {
         })
         .expect_err("an empty input is refused");
         assert_eq!(error, "输入文件不能为空。");
+    }
+
+    #[test]
+    fn normalize_media_refuses_empty_arguments() {
+        let error = build_request(&Command::NormalizeMedia {
+            input: PathBuf::new(),
+            output_dir: PathBuf::from("assets"),
+        })
+        .expect_err("an empty input is refused");
+        assert_eq!(error, "输入文件不能为空。");
+
+        let error = build_request(&Command::NormalizeMedia {
+            input: PathBuf::from("clip.mp4"),
+            output_dir: PathBuf::new(),
+        })
+        .expect_err("an empty output directory is refused");
+        assert_eq!(error, "输出目录不能为空。");
     }
 
     #[test]

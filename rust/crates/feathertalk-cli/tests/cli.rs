@@ -138,6 +138,22 @@ fn capabilities_reports_the_handshake() {
 }
 
 #[test]
+fn normalize_media_prints_the_result_and_narrates_progress() {
+    let output = run(
+        "normalize-progress",
+        &["normalize-media", "clip.mp4", "assets"],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("video_25fps.mp4"), "{text}");
+    assert!(text.contains("audio_16k_mono.wav"), "{text}");
+    let narration = stderr(&output);
+    assert!(narration.contains("正在提取视频帧"), "{narration}");
+    assert!(narration.contains("正在提取音频"), "{narration}");
+    assert!(narration.contains("进度 2/3 (66.7%)"), "{narration}");
+}
+
+#[test]
 fn an_empty_path_argument_is_refused() {
     let output = run("ready-complete", &["validate-project", ""]);
     assert_eq!(code(&output), 3);

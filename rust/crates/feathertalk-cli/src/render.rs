@@ -8,10 +8,12 @@ use feathertalk_domain::{
     Event, ReadyFrame, Recovery, RejectedFrame, TaskError, TaskKind, TaskStage,
 };
 
-/// The worker's own variable for locating `ffprobe`. Written as a literal
-/// because the CLI must not link the worker crate; `feathertalk-worker`'s
-/// `ENV_FFPROBE` is the source of truth for the name.
+/// The worker's own variables for locating its media tools. Written as
+/// literals because the CLI must not link the worker crate;
+/// `feathertalk-worker`'s `ENV_FFPROBE` and `ENV_FFMPEG` are the source of
+/// truth for the names.
 const ENV_WORKER_FFPROBE: &str = "FEATHERTALK_WORKER_FFPROBE";
+const ENV_WORKER_FFMPEG: &str = "FEATHERTALK_WORKER_FFMPEG";
 
 /// The Chinese name of every stage.
 ///
@@ -266,10 +268,10 @@ pub fn render_client_error(error: &ClientError) -> String {
                 "工作进程不支持命令 {requested}。它声明支持：{}。",
                 supported.join(", ")
             );
-            if *requested == "probe_media" {
+            if matches!(*requested, "probe_media" | "normalize_media") {
                 text.push_str(&format!(
-                    "\nprobe_media 需要可用的 ffprobe。请安装 ffmpeg，或用环境变量 \
-                     {ENV_WORKER_FFPROBE} 指定 ffprobe 的完整路径。"
+                    "\n{requested} 需要可用的 ffprobe 与 ffmpeg。请安装 ffmpeg，或用环境变量 \
+                     {ENV_WORKER_FFPROBE} 与 {ENV_WORKER_FFMPEG} 指定它们的完整路径。"
                 ));
             }
             text

@@ -93,6 +93,12 @@ fn main() {
             write_frame(&ready(default_commands()));
             serve_one_task(&mut reader);
         }
+        // Three progress steps and a normalization result, like the real
+        // worker's `normalize_media`.
+        "normalize-progress" => {
+            write_frame(&ready(default_commands()));
+            serve_normalize_task(&mut reader);
+        }
         // Advertises one command each, to exercise the capability gate both ways.
         "only-validate" => {
             write_frame(&ready(vec![TaskKind::ValidateProject]));
@@ -188,9 +194,13 @@ fn main() {
     }
 }
 
-/// Both task commands the real worker offers when a media toolchain resolved.
+/// Every task command the real worker offers when a media toolchain resolved.
 fn default_commands() -> Vec<TaskKind> {
-    vec![TaskKind::ValidateProject, TaskKind::ProbeMedia]
+    vec![
+        TaskKind::ValidateProject,
+        TaskKind::ProbeMedia,
+        TaskKind::NormalizeMedia,
+    ]
 }
 
 fn ready(commands: Vec<TaskKind>) -> ServerFrame {
@@ -228,6 +238,54 @@ fn serve_one_task(reader: &mut Reader) {
     });
     write_frame(&ServerFrame::Event(preparing));
     write_frame(&ServerFrame::Event(completed(&task_id)));
+}
+
+/// Read frames until a `start` arrives, then narrate three normalization steps
+/// and finish with a payload shaped like `normalize_to_json`.
+fn serve_normalize_task(reader: &mut Reader) {
+    let Some(task_id) = wait_for_start(reader) else {
+        return;
+    };
+    for (stage, completed) in [
+        (TaskStage::Preparing, 1),
+        (TaskStage::ExtractingFrames, 2),
+        (TaskStage::ExtractingAudio, 3),
+    ] {
+        let mut event = stage_event(&task_id, stage);
+        event.progress = Some(Progress {
+            completed,
+            total: Some(3),
+        });
+        write_frame(&ServerFrame::Event(event));
+    }
+    let mut event = stage_event(&task_id, TaskStage::Completed);
+    event.result = Some(serde_json::json!({
+        "output_dir": "C:/tmp/assets",
+        "video": {
+            "path": "C:/tmp/assets/video_25fps.mp4",
+            "bytes": 16,
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "codec_name": "mpeg4",
+            "pixel_format": "yuv420p",
+            "width": 640,
+            "height": 480,
+            "frame_rate": { "numerator": 25, "denominator": 1 },
+            "frame_count": 50,
+            "duration_seconds": 2.0
+        },
+        "audio": {
+            "path": "C:/tmp/assets/audio_16k_mono.wav",
+            "bytes": 16,
+            "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "codec_name": "pcm_s16le",
+            "sample_format": "s16",
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_count": 32000,
+            "duration_seconds": 2.0
+        }
+    }));
+    write_frame(&ServerFrame::Event(event));
 }
 
 /// Block until the client sends `start`. Returns `None` on shutdown or EOF.

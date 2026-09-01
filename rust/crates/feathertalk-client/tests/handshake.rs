@@ -18,7 +18,11 @@ fn a_healthy_worker_completes_the_handshake() {
     assert_eq!(session.ready().worker_version, "fake-0");
     assert_eq!(
         session.ready().supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::ProbeMedia]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia
+        ]
     );
     assert_eq!(session.ready().adapters.len(), 1);
     assert!(
