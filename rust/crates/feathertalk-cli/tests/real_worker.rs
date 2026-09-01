@@ -127,3 +127,129 @@ fn a_missing_ffprobe_makes_probe_media_unsupported() {
         "the advice names the variable that would fix it: {text}"
     );
 }
+
+#[test]
+fn a_missing_toolchain_makes_normalize_media_unsupported() {
+    let Some(worker) = worker_or_skip("a_missing_toolchain_makes_normalize_media_unsupported")
+    else {
+        return;
+    };
+    // A relative tool path is refused by the worker's configuration, so
+    // `normalize_media` never reaches `supported_commands` and the client's
+    // capability gate answers instead of a task.
+    let output = run(
+        &worker,
+        &["normalize-media", "clip.mp4", "assets"],
+        &[("FEATHERTALK_WORKER_FFPROBE", "relative-ffprobe")],
+    );
+    assert_eq!(code(&output), 3, "stdout was: {}", stdout(&output));
+    let text = stderr(&output);
+    assert!(text.contains("normalize_media"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_FFMPEG"), "{text}");
+}
+
+#[test]
+fn a_missing_input_is_a_normalize_task_failure() {
+    let Some(worker) = worker_or_skip("a_missing_input_is_a_normalize_task_failure") else {
+        return;
+    };
+    // Absolute tool paths are all the worker's configuration requires, so the
+    // command is accepted and fails where it should: on the input. This is the
+    // one end-to-end normalization path that needs no real ffmpeg.
+    let temp = TempDir::new().expect("a temporary directory is available");
+    let missing = temp.path().join("absent.mp4");
+    let assets = temp.path().join("assets");
+    let fake_tool = temp
+        .path()
+        .join("not-a-real-ffmpeg")
+        .to_string_lossy()
+        .into_owned();
+    let output = run(
+        &worker,
+        &[
+            "normalize-media",
+            &missing.to_string_lossy(),
+            &assets.to_string_lossy(),
+        ],
+        &[
+            ("FEATHERTALK_WORKER_FFPROBE", fake_tool.as_str()),
+            ("FEATHERTALK_WORKER_FFMPEG", fake_tool.as_str()),
+        ],
+    );
+    assert_eq!(code(&output), 1, "stdout was: {}", stdout(&output));
+    let text = stderr(&output);
+    assert!(text.contains("MEDIA_INVALID"), "{text}");
+    // The task failed before the output directory was needed.
+    assert!(!assets.join("video_25fps.mp4").exists());
+}
+
+/// A full normalization, only when real tools are pointed at by the
+/// environment. Neither this repository nor CI ships ffmpeg, so an absent tool
+/// is a skip, not a failure: the alternative is a test that fails for reasons
+/// that have nothing to do with the code under test.
+#[test]
+fn a_real_clip_is_normalized_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_clip_is_normalized_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(ffprobe)) = (real_tool("FFMPEG"), real_tool("FFPROBE")) else {
+        println!(
+            "skipping a_real_clip_is_normalized_end_to_end: set FEATHERTALK_WORKER_FFMPEG and \
+             FEATHERTALK_WORKER_FFPROBE to real binaries to run it"
+        );
+        return;
+    };
+    let temp = TempDir::new().expect("a temporary directory is available");
+    let clip = temp.path().join("clip.mp4");
+    // One second of colour bars and a tone: the smallest input with both
+    // streams the pipeline requires.
+    let generated = Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x240:rate=30:duration=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-shortest",
+        ])
+        .arg(&clip)
+        .output()
+        .expect("ffmpeg runs");
+    assert!(
+        generated.status.success(),
+        "ffmpeg could not generate the clip: {}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let assets = temp.path().join("assets");
+    let ffmpeg_arg = ffmpeg.to_string_lossy().into_owned();
+    let ffprobe_arg = ffprobe.to_string_lossy().into_owned();
+    let output = run(
+        &worker,
+        &[
+            "normalize-media",
+            &clip.to_string_lossy(),
+            &assets.to_string_lossy(),
+        ],
+        &[
+            ("FEATHERTALK_WORKER_FFMPEG", ffmpeg_arg.as_str()),
+            ("FEATHERTALK_WORKER_FFPROBE", ffprobe_arg.as_str()),
+        ],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    assert!(assets.join("video_25fps.mp4").is_file());
+    assert!(assets.join("audio_16k_mono.wav").is_file());
+    let text = stdout(&output);
+    assert!(text.contains("pcm_s16le"), "{text}");
+    let narration = stderr(&output);
+    assert!(narration.contains("进度 3/3"), "{narration}");
+}
+
+/// A media tool from the environment, only if it is an existing file.
+fn real_tool(suffix: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var(format!("FEATHERTALK_WORKER_{suffix}")).ok()?);
+    path.is_file().then_some(path)
+}
