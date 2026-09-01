@@ -16,6 +16,7 @@ fn a_new_event_carries_the_protocol_version_and_empty_metrics() {
     assert_eq!(event.metrics, Metrics::empty());
     assert_eq!(event.progress, None);
     assert_eq!(event.error, None);
+    assert_eq!(event.result, None);
     event.validate().unwrap();
 }
 
@@ -143,4 +144,54 @@ fn events_round_trip_and_reject_unknown_fields() {
 
     let injected = json.replace(r#""metrics":{"#, r#""surprise":1,"metrics":{"#);
     assert!(serde_json::from_str::<Event>(&injected).is_err());
+}
+
+#[test]
+fn a_completed_stage_may_carry_a_result_object() {
+    let mut event = Event::new(task_id(), NOW, TaskStage::Completed);
+    event.validate().unwrap();
+    event.result = Some(serde_json::json!({"format_name": "mov,mp4"}));
+    event.validate().unwrap();
+}
+
+#[test]
+fn only_a_completed_stage_may_carry_a_result() {
+    for stage in [
+        TaskStage::Preparing,
+        TaskStage::Rendering {
+            frame: 1,
+            total: 10,
+        },
+        TaskStage::Cancelled,
+    ] {
+        let mut event = Event::new(task_id(), NOW, stage);
+        event.result = Some(serde_json::json!({}));
+        assert!(matches!(
+            event.validate(),
+            Err(DomainError::InvalidField {
+                field: "result",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn a_result_must_be_a_json_object() {
+    for value in [
+        serde_json::json!(7),
+        serde_json::json!("mov,mp4"),
+        serde_json::json!([1, 2]),
+        serde_json::Value::Null,
+    ] {
+        let mut event = Event::new(task_id(), NOW, TaskStage::Completed);
+        event.result = Some(value);
+        assert!(matches!(
+            event.validate(),
+            Err(DomainError::InvalidField {
+                field: "result",
+                ..
+            })
+        ));
+    }
 }

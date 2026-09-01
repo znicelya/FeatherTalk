@@ -34,6 +34,10 @@ pub struct Event {
     pub progress: Option<Progress>,
     pub metrics: Metrics,
     pub error: Option<TaskError>,
+    /// Command output for a successful task. Only a `Completed` stage may set
+    /// it, and it is always a JSON object so a command can add fields later
+    /// without another protocol break.
+    pub result: Option<serde_json::Value>,
 }
 
 impl Event {
@@ -46,6 +50,7 @@ impl Event {
             progress: None,
             metrics: Metrics::empty(),
             error: None,
+            result: None,
         }
     }
 
@@ -92,6 +97,23 @@ impl Event {
                 return Err(DomainError::InvalidField {
                     field: "error",
                     reason: "only a failed stage may carry an error payload".into(),
+                });
+            }
+        }
+        match (&self.result, &self.stage) {
+            (None, _) => {}
+            (Some(result), TaskStage::Completed) => {
+                if !result.is_object() {
+                    return Err(DomainError::InvalidField {
+                        field: "result",
+                        reason: "a command result must be a JSON object".into(),
+                    });
+                }
+            }
+            (Some(_), _) => {
+                return Err(DomainError::InvalidField {
+                    field: "result",
+                    reason: "only a completed stage may carry a command result".into(),
                 });
             }
         }

@@ -173,6 +173,7 @@ fn frame_enum_validation_dispatches_and_event_validation_remains_valid() {
         }),
         metrics: Metrics::empty(),
         error: None,
+        result: None,
     };
     assert!(ServerFrame::Event(event).validate().is_ok());
 }
