@@ -47,9 +47,10 @@ argument parsing and no terminal rendering:
 - `WorkerLocator` resolves the worker executable.
 - `WorkerSession` spawns the child, performs the handshake, exposes the
   `ReadyFrame`, runs one task, and cancels or shuts down.
-- `SessionOptions` carries the two cancellation deadlines, `cancel_grace`
-  (default 10 s) and `shutdown_grace` (default 5 s), so tests can inject short
-  values instead of waiting out the production timeouts.
+- `SessionOptions` carries three deadlines: `handshake_timeout` (default 30 s),
+  `cancel_grace` (default 10 s), and `shutdown_grace` (default 5 s). Tests
+  inject short values instead of waiting out the production timeouts.
+- `generate_task_id()` produces a protocol-valid task ID.
 - `CancelToken` is an `Arc<AtomicUsize>` request counter that callers bump from
   any thread, including a signal handler.
 - `EventSink` is the callback trait the caller implements to observe frames.
@@ -88,13 +89,17 @@ spawn --> handshake --> capability gate --> run --> teardown
 Spawn uses piped stdin, stdout, and stderr. A spawn failure is a session-level
 error.
 
-Handshake reads exactly one line, decodes a `ServerFrame`, requires
-`ServerFrame::Ready`, and calls `validate()`, which enforces the protocol
-version. Three handshake failures are distinguished in the message:
+Handshake reads exactly one line under `handshake_timeout`, decodes a
+`ServerFrame`, requires `ServerFrame::Ready`, and calls `validate()`, which
+enforces the protocol version. A worker that never writes `ready` must not hang
+the CLI forever, which is why the timeout exists even though the slice 2 worker
+always writes `ready` before reading input. Four handshake failures are
+distinguished in the message:
 
 - The first line is absent, malformed, or not a `ready` frame, including the
   case where the child dies immediately. The tail of the worker's stderr is
   attached.
+- No line arrives within `handshake_timeout`.
 - `DomainError::ProtocolVersion { expected, actual }` reports both versions and
   advises rebuilding both binaries from the same revision.
 - A `rejected` frame in the handshake position prints its reason verbatim,
@@ -164,11 +169,17 @@ type, and manifest state, and canonicalization on Windows would inject a
 `\\?\` prefix into error messages. Duplicating validation would create two
 divergent sets of error wording.
 
-Task IDs are generated locally as `<command-slug>-<UTC timestamp>-<pid>`, for
-example `validate-project-20260901T083012Z-12345`, and then passed through
-`TaskId::parse` before use. The `time` crate is already a workspace dependency,
-so this needs no new dependency and keeps log correlation readable. An invalid
-`--task-id` is a session-level error.
+`TaskId` is a fixed 22-character wire format: thirteen decimal digits of Unix
+milliseconds, a `-`, then eight lowercase hex digits. No generator exists yet,
+so `feathertalk-client` adds `generate_task_id()`: the millisecond field comes
+from the `time` crate, already a workspace dependency, and the hex suffix mixes
+the process ID with a per-process atomic counter so two invocations in the same
+millisecond cannot collide. The result goes through `TaskId::parse` before use.
+
+The generator lives in the client rather than in `feathertalk-domain` because
+the wire format is domain-owned but the generation policy is a client concern,
+and adding it to the domain would disturb that crate's golden-frame fixtures
+for no benefit in this slice. An invalid `--task-id` is a session-level error.
 
 ## 5. Output Contract
 
@@ -299,7 +310,11 @@ cancellation semantics.
 The worker's stderr is drained continuously by its own thread into a ring
 buffer holding the last twenty lines. Draining prevents a full pipe from
 blocking the child, and bounding it prevents unbounded memory growth if the
-worker becomes noisy.
+worker becomes noisy. This buffer is the one piece of shared state in the
+crate, an `Arc<Mutex<VecDeque<String>>>` with a critical section of one push
+and one pop; frame flow stays on channels. A channel-fed buffer was rejected
+because nothing would bound it while the main thread is blocked waiting for the
+child to exit.
 
 `WorkerSession` implements `Drop` with an unconditional `kill()` followed by
 `wait()`, ignoring the error from killing an already-exited process. No early
@@ -339,6 +354,8 @@ position; an empty `supported_commands`; an invalid JSON line; an oversized
 line; an exit immediately after `ready`; ignoring `cancel` and hanging, to
 exercise the cancel timeout with an injected shorter deadline; and answering
 `cancel` with `completed`, to exercise the race rule.
+It also supports writing nothing at all, to exercise `handshake_timeout`, and
+writing a burst of stderr lines, to exercise the ring buffer bound.
 
 The client's integration tests use `env!("CARGO_BIN_EXE_feathertalk-fake-worker")`,
 so they need no skip logic and no platform branches.
@@ -368,6 +385,9 @@ single-crate verification self-contained.
 - Worker discovery precedence across all three sources and the failure message
   content.
 - Handshake success and each of the five handshake failures.
+- `handshake_timeout` firing when the worker writes nothing.
+- `generate_task_id()` output parsing as a `TaskId`, and two consecutive calls
+  differing.
 - The capability gate for a supported and an unsupported command.
 - All four `SessionOutcome` variants.
 - The three cancellation branches plus the cancel/complete race.
