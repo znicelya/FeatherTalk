@@ -1,8 +1,8 @@
 use feathertalk_domain::{DomainError, PROTOCOL_VERSION, TaskId, TaskKind, TaskStatus};
 
 #[test]
-fn protocol_version_is_one() {
-    assert_eq!(PROTOCOL_VERSION, 1);
+fn protocol_version_is_two() {
+    assert_eq!(PROTOCOL_VERSION, 2);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use feathertalk_domain::{
     AdapterInfo, AdapterKind, Backend, CancelFrame, Capabilities, ClientFrame, DomainError,
-    PROTOCOL_VERSION, ReadyFrame, ServerFrame, TaskId,
+    PROTOCOL_VERSION, ReadyFrame, ServerFrame, TaskId, TaskKind,
 };
 
 fn adapters() -> Vec<AdapterInfo> {
@@ -30,6 +30,7 @@ fn ready() -> ReadyFrame {
         worker_version: "0.1.0".to_owned(),
         backends: vec![Backend::Cpu, Backend::Wgpu],
         adapters: adapters(),
+        supported_commands: vec![TaskKind::ValidateProject, TaskKind::ProbeMedia],
         capabilities: Capabilities {
             training: true,
             wgpu_training: true,
@@ -106,6 +107,49 @@ fn frames_use_adjacent_tagging_and_round_trip() {
 
 #[test]
 fn ready_frame_rejects_unknown_outer_fields() {
-    let json = r#"{"frame":"ready","data":{"protocol_version":1,"worker_version":"0.1.0","backends":["cpu"],"adapters":[],"capabilities":{"training":false,"wgpu_training":false,"onnx_validation":false,"ffmpeg":true}},"extra":1}"#;
+    let json = r#"{"frame":"ready","data":{"protocol_version":2,"worker_version":"0.1.0","backends":["cpu"],"adapters":[],"supported_commands":["probe_media"],"capabilities":{"training":false,"wgpu_training":false,"onnx_validation":false,"ffmpeg":true}},"extra":1}"#;
     assert!(serde_json::from_str::<ServerFrame>(json).is_err());
+}
+
+#[test]
+fn the_protocol_version_is_two() {
+    assert_eq!(PROTOCOL_VERSION, 2);
+    assert_eq!(ready().protocol_version, 2);
+}
+
+#[test]
+fn a_worker_reporting_no_supported_command_is_rejected() {
+    let mut params = ready();
+    params.supported_commands.clear();
+    assert!(matches!(
+        params.validate(),
+        Err(DomainError::InvalidField {
+            field: "supported_commands",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn duplicate_supported_commands_are_rejected() {
+    let mut params = ready();
+    params.supported_commands = vec![TaskKind::ProbeMedia, TaskKind::ProbeMedia];
+    assert!(matches!(
+        params.validate(),
+        Err(DomainError::InvalidField {
+            field: "supported_commands",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn supported_commands_travel_as_task_slugs() {
+    let json = serde_json::to_string(&ready()).unwrap();
+    assert!(
+        json.contains(r#""supported_commands":["validate_project","probe_media"]"#),
+        "{json}"
+    );
+    let restored: ReadyFrame = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, ready());
 }

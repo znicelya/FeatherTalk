@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainError, Event, Request, TaskId, check_protocol_version};
+use crate::{DomainError, Event, Request, TaskId, TaskKind, check_protocol_version};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +51,10 @@ pub struct ReadyFrame {
     pub worker_version: String,
     pub backends: Vec<Backend>,
     pub adapters: Vec<AdapterInfo>,
+    /// Commands this worker will actually accept. A `start` frame naming any
+    /// other command is rejected, so the desktop can grey out unsupported
+    /// actions instead of discovering them through a failed task.
+    pub supported_commands: Vec<TaskKind>,
     pub capabilities: Capabilities,
 }
 
@@ -75,6 +79,21 @@ impl ReadyFrame {
                 return Err(DomainError::InvalidField {
                     field: "adapters",
                     reason: format!("duplicate adapter id {}", adapter.id),
+                });
+            }
+        }
+        if self.supported_commands.is_empty() {
+            return Err(DomainError::InvalidField {
+                field: "supported_commands",
+                reason: "a worker must report at least one supported command".into(),
+            });
+        }
+        let mut commands = BTreeSet::new();
+        for command in &self.supported_commands {
+            if !commands.insert(*command) {
+                return Err(DomainError::InvalidField {
+                    field: "supported_commands",
+                    reason: format!("duplicate supported command {}", command.as_slug()),
                 });
             }
         }
