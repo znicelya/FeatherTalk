@@ -1,0 +1,743 @@
+use std::{
+    fs,
+    io::{self, BufRead, Read, Write},
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, Sender},
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
+
+use feathertalk_domain::{
+    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, PROTOCOL_VERSION, ProbeMediaParams,
+    ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage,
+    TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
+};
+use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
+use feathertalk_worker::{
+    CPU_ADAPTER_ID, CommandOutcome, JobExecutor, WorkerConfig, execute_with_runner,
+    serve_with_executor,
+};
+
+/// An output sink the test can read while the worker is still writing to it.
+#[derive(Clone, Default)]
+struct SharedSink(Arc<Mutex<Vec<u8>>>);
+
+impl Write for SharedSink {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedSink {
+    /// Decode every frame that has already been fully written.
+    ///
+    /// A trailing fragment without its `\n` is skipped rather than decoded, so
+    /// polling never races a half-written line. Every decoded frame is
+    /// validated here, which is what asserts the runtime never emits a frame
+    /// that fails `ServerFrame::validate`.
+    fn frames(&self) -> Vec<ServerFrame> {
+        let bytes = self.0.lock().unwrap().clone();
+        let text = String::from_utf8(bytes).unwrap();
+        let complete = match text.rfind('\n') {
+            Some(index) => &text[..=index],
+            None => "",
+        };
+        complete
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let frame: ServerFrame = decode_line(line).unwrap();
+                frame.validate().unwrap();
+                frame
+            })
+            .collect()
+    }
+}
+
+/// A `BufRead` whose bytes arrive from the test thread. Dropping the sender is
+/// end-of-stream, which is how the tests model a closed stdin.
+struct ChannelReader {
+    receiver: Receiver<Vec<u8>>,
+    buffer: Vec<u8>,
+    cursor: usize,
+    closed: bool,
+}
+
+impl ChannelReader {
+    fn new(receiver: Receiver<Vec<u8>>) -> Self {
+        Self {
+            receiver,
+            buffer: Vec::new(),
+            cursor: 0,
+            closed: false,
+        }
+    }
+}
+
+impl BufRead for ChannelReader {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        while self.cursor >= self.buffer.len() {
+            if self.closed {
+                return Ok(&[]);
+            }
+            match self.receiver.recv() {
+                Ok(chunk) => {
+                    self.buffer = chunk;
+                    self.cursor = 0;
+                }
+                Err(_) => {
+                    self.closed = true;
+                    return Ok(&[]);
+                }
+            }
+        }
+        Ok(&self.buffer[self.cursor..])
+    }
+
+    fn consume(&mut self, amount: usize) {
+        self.cursor += amount;
+    }
+}
+
+impl Read for ChannelReader {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let available = self.fill_buf()?;
+        let count = available.len().min(out.len());
+        out[..count].copy_from_slice(&available[..count]);
+        self.consume(count);
+        Ok(count)
+    }
+}
+
+struct Harness {
+    input: Option<Sender<Vec<u8>>>,
+    sink: SharedSink,
+    worker: Option<JoinHandle<Result<(), DomainError>>>,
+}
+
+impl Harness {
+    fn start(config: WorkerConfig, executor: JobExecutor) -> Self {
+        let (input, receiver) = mpsc::channel::<Vec<u8>>();
+        let sink = SharedSink::default();
+        let worker_sink = sink.clone();
+        let worker = thread::spawn(move || {
+            serve_with_executor(ChannelReader::new(receiver), worker_sink, &config, executor)
+        });
+        Self {
+            input: Some(input),
+            sink,
+            worker: Some(worker),
+        }
+    }
+
+    fn send(&self, frame: &ClientFrame) {
+        let mut line = encode_line(frame).unwrap().into_bytes();
+        line.push(b'\n');
+        self.input.as_ref().unwrap().send(line).unwrap();
+    }
+
+    fn send_raw(&self, line: &str) {
+        self.input
+            .as_ref()
+            .unwrap()
+            .send(format!("{line}\n").into_bytes())
+            .unwrap();
+    }
+
+    fn frames(&self) -> Vec<ServerFrame> {
+        self.sink.frames()
+    }
+
+    fn wait_for(
+        &self,
+        description: &str,
+        predicate: impl Fn(&[ServerFrame]) -> bool,
+    ) -> Vec<ServerFrame> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frames = self.frames();
+            if predicate(&frames) {
+                return frames;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {description}; frames so far: {frames:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Close the input stream, wait for the worker to exit, and return every
+    /// frame it wrote.
+    fn finish(mut self) -> Vec<ServerFrame> {
+        self.input = None;
+        self.worker.take().unwrap().join().unwrap().unwrap();
+        self.frames()
+    }
+}
+
+fn task(suffix: &str) -> TaskId {
+    TaskId::parse(&format!("1787900000000-{suffix}")).unwrap()
+}
+
+fn start(task_id: &TaskId, request: Request) -> ClientFrame {
+    ClientFrame::Start(StartFrame {
+        protocol_version: PROTOCOL_VERSION,
+        task_id: task_id.clone(),
+        request,
+    })
+}
+
+fn cancel(task_id: &TaskId) -> ClientFrame {
+    ClientFrame::Cancel(CancelFrame {
+        protocol_version: PROTOCOL_VERSION,
+        task_id: task_id.clone(),
+    })
+}
+
+fn shutdown() -> ClientFrame {
+    ClientFrame::Shutdown(ShutdownFrame {
+        protocol_version: PROTOCOL_VERSION,
+    })
+}
+
+fn validate_project(dir: &str) -> Request {
+    Request::ValidateProject(ProjectDirParams {
+        project_dir: PathBuf::from(dir),
+    })
+}
+
+fn train_request() -> Request {
+    Request::Train(TrainParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+        mode: TrainingMode::Baseline,
+        variant: UnetVariant::OriginalUnet,
+        epochs: 1,
+        resume: false,
+    })
+}
+
+fn absolute(name: &str) -> String {
+    std::env::current_dir()
+        .unwrap()
+        .join(name)
+        .display()
+        .to_string()
+}
+
+/// A configuration whose media toolchain is accepted, so `probe_media` is
+/// supported. The paths never have to exist: `MediaToolchain::new` only
+/// requires absolute paths.
+fn media_config() -> WorkerConfig {
+    WorkerConfig::from_values(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+    )
+}
+
+/// No media environment at all: `probe_media` is unsupported and there is no
+/// rejection reason to report.
+fn bare_config() -> WorkerConfig {
+    WorkerConfig::from_values(None, None, None)
+}
+
+/// Relative paths are rejected by `MediaToolchain::new`, so this configuration
+/// carries a rejection reason.
+fn broken_config() -> WorkerConfig {
+    WorkerConfig::from_values(Some("ffprobe".to_owned()), Some("ffmpeg".to_owned()), None)
+}
+
+fn instant_executor() -> JobExecutor {
+    Box::new(|_request, _media, _token| CommandOutcome::Completed(None))
+}
+
+/// Reports that the job started, then runs until it is cancelled.
+fn blocking_executor(started: Sender<TaskId>) -> JobExecutor {
+    Box::new(move |request, _media, token| {
+        let _ = request;
+        started.send(task("0000000f")).unwrap();
+        while !token.is_cancelled() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        CommandOutcome::Cancelled
+    })
+}
+
+/// Reports that the job started, then waits for the test to release it. A
+/// dropped release channel or a cancelled token ends the job as cancelled.
+fn gated_executor(started: Sender<()>, release: Receiver<()>) -> JobExecutor {
+    Box::new(move |_request, _media, token| {
+        started.send(()).unwrap();
+        if release.recv().is_err() || token.is_cancelled() {
+            return CommandOutcome::Cancelled;
+        }
+        CommandOutcome::Completed(None)
+    })
+}
+
+/// A process runner that behaves like an external tool killed by the
+/// cancellation token: it blocks while the token is clear and then reports the
+/// cancellation the real `CancellableProcessRunner` reports after a kill.
+struct BlockingRunner {
+    started: Mutex<Sender<()>>,
+    token: CancellationToken,
+}
+
+impl ProcessRunner for BlockingRunner {
+    fn run(&self, _spec: &CommandSpec, _timeout: Duration) -> Result<ProcessOutput, MediaError> {
+        self.started.lock().unwrap().send(()).unwrap();
+        while !self.token.is_cancelled() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        Err(MediaError::ToolCancelled {
+            operation: "ffprobe",
+        })
+    }
+}
+
+fn blocking_probe_executor(started: Sender<()>) -> JobExecutor {
+    Box::new(move |request, media, token| {
+        let runner = BlockingRunner {
+            started: Mutex::new(started.clone()),
+            token: token.clone(),
+        };
+        execute_with_runner(request, media, token, &runner)
+    })
+}
+
+fn events(frames: &[ServerFrame]) -> Vec<&Event> {
+    frames
+        .iter()
+        .filter_map(|frame| match frame {
+            ServerFrame::Event(event) => Some(event),
+            _ => None,
+        })
+        .collect()
+}
+
+fn stages(frames: &[ServerFrame]) -> Vec<(&str, &str)> {
+    events(frames)
+        .into_iter()
+        .map(|event| (event.task_id.as_str(), event.stage.as_slug()))
+        .collect()
+}
+
+fn rejections(frames: &[ServerFrame]) -> Vec<&str> {
+    frames
+        .iter()
+        .filter_map(|frame| match frame {
+            ServerFrame::Rejected(rejected) => Some(rejected.reason.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// One task at a time: no task may report a non-terminal stage while another
+/// task is still in flight. A task that is cancelled while queued terminates
+/// without ever being in flight, which is the one allowed exception.
+fn assert_serialized(frames: &[ServerFrame]) {
+    let mut in_flight: Option<TaskId> = None;
+    for event in events(frames) {
+        match (in_flight.as_ref(), event.stage.is_terminal()) {
+            (Some(active), true) if *active == event.task_id => in_flight = None,
+            (_, true) => assert_eq!(
+                event.stage,
+                TaskStage::Cancelled,
+                "only a queued task may terminate without running: {frames:?}"
+            ),
+            (None, false) => in_flight = Some(event.task_id.clone()),
+            (Some(_), false) => panic!("two tasks were in flight at once: {frames:?}"),
+        }
+    }
+}
+
+#[test]
+fn ready_is_the_first_frame_and_reports_the_cpu_adapter() {
+    let frames = Harness::start(bare_config(), instant_executor()).finish();
+
+    let ServerFrame::Ready(ready) = &frames[0] else {
+        panic!("the first frame must be ready: {frames:?}");
+    };
+    assert_eq!(ready.protocol_version, PROTOCOL_VERSION);
+    assert_eq!(ready.adapters.len(), 1);
+    assert_eq!(ready.adapters[0].id, CPU_ADAPTER_ID);
+    assert_eq!(frames.len(), 1, "an idle worker emits nothing else");
+}
+
+#[test]
+fn a_usable_media_toolchain_enables_probe_media_in_the_handshake() {
+    let frames = Harness::start(media_config(), instant_executor()).finish();
+
+    let ServerFrame::Ready(ready) = &frames[0] else {
+        panic!("the first frame must be ready: {frames:?}");
+    };
+    assert_eq!(
+        ready.supported_commands,
+        vec![TaskKind::ValidateProject, TaskKind::ProbeMedia]
+    );
+}
+
+#[test]
+fn a_rejected_media_configuration_leaves_probe_media_out_of_the_handshake() {
+    let frames = Harness::start(broken_config(), instant_executor()).finish();
+
+    let ServerFrame::Ready(ready) = &frames[0] else {
+        panic!("the first frame must be ready: {frames:?}");
+    };
+    assert_eq!(ready.supported_commands, vec![TaskKind::ValidateProject]);
+}
+
+#[test]
+fn an_unsupported_command_is_rejected_without_creating_a_task() {
+    let harness = Harness::start(media_config(), instant_executor());
+    harness.send(&start(&task("0000000a"), train_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("train"), "{}", reasons[0]);
+    assert!(
+        events(&frames).is_empty(),
+        "a rejected start creates no task"
+    );
+}
+
+#[test]
+fn probe_media_is_rejected_when_the_media_toolchain_is_unavailable() {
+    let harness = Harness::start(broken_config(), instant_executor());
+    let request = Request::ProbeMedia(ProbeMediaParams {
+        input: PathBuf::from("C:/tmp/input.mp4"),
+    });
+    harness.send(&start(&task("0000000a"), request));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("probe_media"), "{}", reasons[0]);
+    assert!(events(&frames).is_empty());
+}
+
+#[test]
+fn a_protocol_version_mismatch_is_rejected() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    harness.send(&ClientFrame::Start(StartFrame {
+        protocol_version: PROTOCOL_VERSION - 1,
+        task_id: task("0000000a"),
+        request: validate_project("C:/tmp/project"),
+    }));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(
+        reasons[0].contains(&PROTOCOL_VERSION.to_string()),
+        "{}",
+        reasons[0]
+    );
+    assert!(events(&frames).is_empty());
+}
+
+#[test]
+fn an_undecodable_line_is_rejected_without_ending_the_session() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    harness.send_raw("{ not json");
+    harness.send(&start(
+        &task("0000000a"),
+        validate_project("C:/tmp/project"),
+    ));
+    let frames = harness.finish();
+
+    assert_eq!(rejections(&frames).len(), 1, "{frames:?}");
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "completed"),
+        ]
+    );
+}
+
+#[test]
+fn queued_tasks_run_one_after_another_in_arrival_order() {
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let harness = Harness::start(bare_config(), gated_executor(started_tx, release_rx));
+
+    let first = task("0000000a");
+    let second = task("0000000b");
+    harness.send(&start(&first, validate_project("C:/tmp/first")));
+    harness.send(&start(&second, validate_project("C:/tmp/second")));
+
+    started_rx.recv().unwrap();
+    let frames = harness.wait_for("the first task to start", |frames| {
+        !stages(frames).is_empty()
+    });
+    assert_eq!(
+        stages(&frames),
+        vec![("1787900000000-0000000a", "preparing")],
+        "the second task must stay queued while the first runs"
+    );
+
+    release_tx.send(()).unwrap();
+    started_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "completed"),
+            ("1787900000000-0000000b", "preparing"),
+            ("1787900000000-0000000b", "completed"),
+        ]
+    );
+    assert_serialized(&frames);
+}
+
+#[test]
+fn only_one_task_holds_the_cpu_adapter_at_a_time() {
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let harness = Harness::start(bare_config(), gated_executor(started_tx, release_rx));
+
+    for suffix in ["0000000a", "0000000b", "0000000c"] {
+        harness.send(&start(&task(suffix), validate_project("C:/tmp/project")));
+    }
+    for _ in 0..3 {
+        started_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+    }
+    let frames = harness.finish();
+
+    assert_eq!(events(&frames).len(), 6, "{frames:?}");
+    assert_serialized(&frames);
+}
+
+#[test]
+fn a_duplicate_task_id_is_rejected() {
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let harness = Harness::start(bare_config(), gated_executor(started_tx, release_rx));
+
+    let task_id = task("0000000a");
+    harness.send(&start(&task_id, validate_project("C:/tmp/project")));
+    started_rx.recv().unwrap();
+    harness.send(&start(&task_id, validate_project("C:/tmp/project")));
+    harness.wait_for("the duplicate to be rejected", |frames| {
+        !rejections(frames).is_empty()
+    });
+    release_tx.send(()).unwrap();
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains(task_id.as_str()), "{}", reasons[0]);
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "completed"),
+        ],
+        "the duplicate must not affect the running task"
+    );
+}
+
+#[test]
+fn cancelling_a_queued_task_ends_it_before_it_ever_runs() {
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let harness = Harness::start(bare_config(), gated_executor(started_tx, release_rx));
+
+    let running = task("0000000a");
+    let queued = task("0000000b");
+    harness.send(&start(&running, validate_project("C:/tmp/first")));
+    started_rx.recv().unwrap();
+    harness.send(&start(&queued, validate_project("C:/tmp/second")));
+    harness.send(&cancel(&queued));
+    harness.wait_for("the queued task to be cancelled", |frames| {
+        stages(frames).contains(&("1787900000000-0000000b", "cancelled"))
+    });
+    release_tx.send(()).unwrap();
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000b", "cancelled"),
+            ("1787900000000-0000000a", "completed"),
+        ],
+        "a cancelled queued task never reports preparing"
+    );
+    assert!(
+        started_rx.try_recv().is_err(),
+        "a cancelled queued task must never be handed to the executor"
+    );
+}
+
+#[test]
+fn cancelling_a_running_task_emits_exactly_one_cancelled_event() {
+    let (started_tx, started_rx) = mpsc::channel::<TaskId>();
+    let harness = Harness::start(bare_config(), blocking_executor(started_tx));
+
+    let task_id = task("0000000a");
+    harness.send(&start(&task_id, validate_project("C:/tmp/project")));
+    started_rx.recv().unwrap();
+    harness.send(&cancel(&task_id));
+    harness.send(&cancel(&task_id));
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "cancelled"),
+        ]
+    );
+    assert!(rejections(&frames).is_empty(), "cancel is idempotent");
+}
+
+#[test]
+fn a_cancelled_external_process_becomes_one_cancelled_event() {
+    let input_dir = tempfile::tempdir().unwrap();
+    let input = input_dir.path().join("input.mp4");
+    fs::write(&input, b"not a real video").unwrap();
+
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let harness = Harness::start(media_config(), blocking_probe_executor(started_tx));
+
+    let task_id = task("0000000a");
+    harness.send(&start(
+        &task_id,
+        Request::ProbeMedia(ProbeMediaParams { input }),
+    ));
+    started_rx.recv().unwrap();
+    harness.send(&cancel(&task_id));
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "cancelled"),
+        ]
+    );
+    let cancelled = events(&frames)[1];
+    assert!(
+        cancelled.error.is_none() && cancelled.result.is_none(),
+        "{cancelled:?}"
+    );
+}
+
+#[test]
+fn cancelling_an_unknown_or_finished_task_is_silently_accepted() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    let task_id = task("0000000a");
+
+    harness.send(&cancel(&task("0000000f")));
+    harness.send(&start(&task_id, validate_project("C:/tmp/project")));
+    harness.wait_for("the task to complete", |frames| {
+        stages(frames).contains(&("1787900000000-0000000a", "completed"))
+    });
+    harness.send(&cancel(&task_id));
+    let frames = harness.finish();
+
+    assert!(rejections(&frames).is_empty(), "{frames:?}");
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "completed"),
+        ],
+        "a late cancel must not add a second terminal event"
+    );
+}
+
+#[test]
+fn a_failing_command_reports_a_failed_event_with_its_error() {
+    let harness = Harness::start(
+        bare_config(),
+        Box::new(|_request, _media, _token| {
+            CommandOutcome::Failed(feathertalk_domain::TaskError::new(
+                ErrorCode::MediaInvalid,
+                "项目目录缺少必需文件",
+                "project directory is missing assets/assets.json",
+                TaskStage::Preparing,
+            ))
+        }),
+    );
+    harness.send(&start(
+        &task("0000000a"),
+        validate_project("C:/tmp/project"),
+    ));
+    let frames = harness.finish();
+
+    let failed = events(&frames)[1];
+    assert_eq!(failed.stage.as_slug(), "failed");
+    assert_eq!(
+        failed.error.as_ref().map(|error| error.code),
+        Some(ErrorCode::MediaInvalid)
+    );
+}
+
+#[test]
+fn shutdown_cancels_queued_tasks_and_waits_for_the_running_one() {
+    let (started_tx, started_rx) = mpsc::channel::<TaskId>();
+    let harness = Harness::start(bare_config(), blocking_executor(started_tx));
+
+    let running = task("0000000a");
+    let queued = task("0000000b");
+    harness.send(&start(&running, validate_project("C:/tmp/first")));
+    started_rx.recv().unwrap();
+    harness.send(&start(&queued, validate_project("C:/tmp/second")));
+    harness.send(&shutdown());
+    harness.send(&start(&task("0000000c"), validate_project("C:/tmp/third")));
+    let frames = harness.finish();
+
+    let observed = stages(&frames);
+    assert!(
+        observed.contains(&("1787900000000-0000000b", "cancelled")),
+        "{frames:?}"
+    );
+    assert!(
+        observed.contains(&("1787900000000-0000000a", "cancelled")),
+        "{frames:?}"
+    );
+    assert!(
+        !observed
+            .iter()
+            .any(|(task_id, _)| *task_id == "1787900000000-0000000c"),
+        "a start after shutdown must not create a task: {frames:?}"
+    );
+    assert_serialized(&frames);
+}
+
+#[test]
+fn closing_the_input_stream_shuts_the_worker_down() {
+    let (started_tx, started_rx) = mpsc::channel::<TaskId>();
+    let harness = Harness::start(bare_config(), blocking_executor(started_tx));
+
+    let task_id = task("0000000a");
+    harness.send(&start(&task_id, validate_project("C:/tmp/project")));
+    started_rx.recv().unwrap();
+    let frames = harness.finish();
+
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000000a", "preparing"),
+            ("1787900000000-0000000a", "cancelled"),
+        ],
+        "a closed stdin cancels the running task and exits"
+    );
+}
