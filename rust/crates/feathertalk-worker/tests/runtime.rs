@@ -623,6 +623,11 @@ fn cancelling_a_queued_task_ends_it_before_it_ever_runs() {
         stages(frames).contains(&("1787900000000-0000000b", "cancelled"))
     });
     release_tx.send(()).unwrap();
+    // Same hazard as the duplicate-id test: closing stdin drains the session and
+    // cancels the running task, so wait for its own terminal event first.
+    harness.wait_for("the running task to complete", |frames| {
+        stages(frames).contains(&("1787900000000-0000000a", "completed"))
+    });
     let frames = harness.finish();
 
     assert_eq!(
