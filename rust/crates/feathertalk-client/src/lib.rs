@@ -15,5 +15,5 @@ mod task_id;
 pub use error::{ClientError, ProbedPath, WorkerPathSource};
 pub use locator::{ENV_WORKER_BIN, WORKER_FILE_STEM, WorkerLocator};
 pub use options::SessionOptions;
-pub use session::{FrameLine, WorkerSession};
+pub use session::{CancelToken, EventSink, FrameLine, SessionOutcome, WorkerSession};
 pub use task_id::generate_task_id;

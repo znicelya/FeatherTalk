@@ -4,14 +4,18 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use feathertalk_domain::{
-    ClientFrame, DomainError, FrameWriter, MAX_FRAME_BYTES, ReadyFrame, ServerFrame, decode_line,
+    ClientFrame, DomainError, Event, FrameWriter, MAX_FRAME_BYTES, PROTOCOL_VERSION, ReadyFrame,
+    RejectedFrame, Request, ServerFrame, ShutdownFrame, StartFrame, TaskError, TaskId, TaskKind,
+    TaskStage, decode_line,
 };
+use serde_json::Value;
 
 use crate::{ClientError, SessionOptions};
 
@@ -395,9 +399,190 @@ impl WorkerSession {
         self.transport.stderr_tail()
     }
 
-    /// How many events for another task were seen and ignored. Read by the run
-    /// loop's tests in Task 3; declared here so the field has a reader.
+    /// Run one task to completion. A session runs at most one.
+    ///
+    /// Session-level failures are returned as `SessionOutcome::SessionError`
+    /// rather than `Err`, so the caller has a single total match over the four
+    /// things that can happen.
+    pub fn run(
+        &mut self,
+        task_id: TaskId,
+        request: Request,
+        cancel: &CancelToken,
+        sink: &mut dyn EventSink,
+    ) -> SessionOutcome {
+        match self.run_inner(task_id, request, cancel, sink) {
+            Ok(outcome) => outcome,
+            Err(error) => SessionOutcome::SessionError(error),
+        }
+    }
+
+    /// Refuse a command the worker did not advertise.
+    ///
+    /// The handshake is the only authority here. Sending a command the worker
+    /// disclaimed would earn a rejection frame at best and confuse the user
+    /// about whose fault it is at worst.
+    fn ensure_supported(&self, request: &Request) -> Result<(), ClientError> {
+        let requested = request.kind();
+        if self.ready.supported_commands.contains(&requested) {
+            return Ok(());
+        }
+        Err(ClientError::UnsupportedCommand {
+            // `TaskKind::as_slug` takes `self` by value, so copy out of the slice.
+            requested: requested.as_slug(),
+            supported: self
+                .ready
+                .supported_commands
+                .iter()
+                .copied()
+                .map(TaskKind::as_slug)
+                .collect(),
+        })
+    }
+
+    fn run_inner(
+        &mut self,
+        task_id: TaskId,
+        request: Request,
+        cancel: &CancelToken,
+        sink: &mut dyn EventSink,
+    ) -> Result<SessionOutcome, ClientError> {
+        // Task 4 replaces this with the cancel state machine.
+        let _ = cancel;
+        self.ensure_supported(&request)?;
+        self.transport.write_frame(&ClientFrame::Start(StartFrame {
+            protocol_version: PROTOCOL_VERSION,
+            task_id: task_id.clone(),
+            request,
+        }))?;
+        loop {
+            match self.transport.next_frame(POLL_INTERVAL)? {
+                // Quiet worker: keep waiting. The task has no deadline of its
+                // own — training legitimately runs for hours.
+                FrameEvent::Timeout => continue,
+                FrameEvent::Eof => return Err(self.transport.worker_gone()),
+                FrameEvent::Frame(line) => {
+                    // Validation happens here, not on the reader thread, so the
+                    // error can be attributed to this phase of the protocol.
+                    line.frame.validate().map_err(ClientError::Protocol)?;
+                    match line.frame {
+                        ServerFrame::Event(event) => {
+                            if event.task_id.as_str() != task_id.as_str() {
+                                // A chatty worker is allowed; count it so the
+                                // ignore rule stays observable.
+                                self.foreign_events += 1;
+                                continue;
+                            }
+                            sink.on_event(&event, &line.raw);
+                            if let Some(outcome) = terminal_outcome(event) {
+                                return Ok(outcome);
+                            }
+                        }
+                        ServerFrame::Rejected(rejected) => {
+                            sink.on_rejected(&rejected, &line.raw);
+                            return Err(ClientError::Rejected {
+                                reason: rejected.reason,
+                            });
+                        }
+                        ServerFrame::Ready(_) => {
+                            return Err(ClientError::Protocol(DomainError::MalformedFrame {
+                                reason: "the worker sent a second ready frame".to_string(),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// How many events for other tasks were ignored.
     pub fn foreign_event_count(&self) -> usize {
         self.foreign_events
+    }
+
+    /// Ask the worker to exit and wait out the shutdown grace.
+    ///
+    /// A best-effort write: if the worker is already gone the frame cannot be
+    /// delivered and there is nothing to report. `Drop` kills any survivor, so
+    /// this never leaks a process even when it returns `None`.
+    pub fn shutdown(mut self) -> Option<i32> {
+        let grace = self.transport.options.shutdown_grace;
+        let _ = self
+            .transport
+            .write_frame(&ClientFrame::Shutdown(ShutdownFrame {
+                protocol_version: PROTOCOL_VERSION,
+            }));
+        self.transport.close_stdin();
+        self.transport.wait_for_exit(grace)
+    }
+}
+
+/// How long one wait on the frame channel blocks. The loop has to wake up
+/// regularly even when the worker is quiet, because that is when the cancel flag
+/// is checked; 100 ms keeps Ctrl-C responsive without busy-waiting.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Where a session's events go. The CLI has two implementations, human and
+/// JSON; the desktop shell will add a third that forwards to the UI.
+///
+/// `raw` is the worker's original line. Presenters that echo JSON must use it
+/// rather than re-serialising `event`.
+pub trait EventSink {
+    fn on_event(&mut self, event: &Event, raw: &str);
+
+    /// A mid-session rejection. Default: ignore it — the returned
+    /// `ClientError::Rejected` already carries the reason.
+    fn on_rejected(&mut self, rejected: &RejectedFrame, raw: &str) {
+        let _ = (rejected, raw);
+    }
+}
+
+/// How a session ended. The four variants are the four CLI exit codes: 0, 1, 2,
+/// and 3, in this order.
+#[derive(Debug)]
+pub enum SessionOutcome {
+    Completed { result: Option<Value> },
+    Failed(TaskError),
+    Cancelled,
+    SessionError(ClientError),
+}
+
+/// A cancel request counter shared with a signal handler.
+///
+/// A counter rather than a flag: the first request asks politely, the second
+/// kills. It is `Clone` so a handler can own one, and only ever counts up, so
+/// there is no lost-wakeup case to reason about.
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<AtomicUsize>);
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicUsize::new(0)))
+    }
+
+    /// Signal-handler safe: one atomic add, no allocation, no locks.
+    pub fn request(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn count(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Map a terminal stage onto an outcome. The three arms are exactly the stages
+/// `TaskStage::is_terminal` reports; every other stage is progress.
+fn terminal_outcome(event: Event) -> Option<SessionOutcome> {
+    match event.stage {
+        TaskStage::Completed => Some(SessionOutcome::Completed {
+            result: event.result,
+        }),
+        TaskStage::Failed { .. } => {
+            Some(SessionOutcome::Failed(event.error.expect(
+                "Event::validate guarantees a failed stage carries its error",
+            )))
+        }
+        TaskStage::Cancelled => Some(SessionOutcome::Cancelled),
+        _ => None,
     }
 }

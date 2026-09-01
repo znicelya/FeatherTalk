@@ -12,9 +12,9 @@ use std::io::{BufReader, StdinLock, Write};
 use std::time::Duration;
 
 use feathertalk_domain::{
-    AdapterInfo, AdapterKind, Backend, Capabilities, ClientFrame, Event, FrameReader,
-    PROTOCOL_VERSION, Progress, ReadyFrame, RejectedFrame, ServerFrame, TaskId, TaskKind,
-    TaskStage, encode_line,
+    AdapterInfo, AdapterKind, Backend, Capabilities, ClientFrame, ErrorCode, Event, FrameReader,
+    MAX_FRAME_BYTES, PROTOCOL_VERSION, Progress, ReadyFrame, RejectedFrame, ServerFrame, TaskError,
+    TaskId, TaskKind, TaskStage, encode_line,
 };
 
 /// The scenario selector. Tests set it; there is no command line.
@@ -89,6 +89,59 @@ fn main() {
             write_frame(&ready(default_commands()));
             serve_one_task(&mut reader);
         }
+        // Advertises one command each, to exercise the capability gate both ways.
+        "only-validate" => {
+            write_frame(&ready(vec![TaskKind::ValidateProject]));
+            serve_one_task(&mut reader);
+        }
+        "only-probe" => {
+            write_frame(&ready(vec![TaskKind::ProbeMedia]));
+            serve_one_task(&mut reader);
+        }
+        // Reports a task failure, which is exit 1 rather than a broken session.
+        "fail" => {
+            write_frame(&ready(default_commands()));
+            if let Some(task_id) = wait_for_start(&mut reader) {
+                write_frame(&ServerFrame::Event(failed(&task_id)));
+            }
+        }
+        // Reports itself cancelled without being asked, so the terminal-stage
+        // mapping can be tested without involving a signal.
+        "self-cancel" => {
+            write_frame(&ready(default_commands()));
+            if let Some(task_id) = wait_for_start(&mut reader) {
+                write_frame(&ServerFrame::Event(stage_event(
+                    &task_id,
+                    TaskStage::Cancelled,
+                )));
+            }
+        }
+        // Emits an event for a different task before the real one.
+        "foreign-event" => {
+            write_frame(&ready(default_commands()));
+            if let Some(task_id) = wait_for_start(&mut reader) {
+                let foreign = TaskId::parse(FOREIGN_TASK_ID).expect("the constant id is valid");
+                write_frame(&ServerFrame::Event(stage_event(
+                    &foreign,
+                    TaskStage::Preparing,
+                )));
+                write_frame(&ServerFrame::Event(completed(&task_id)));
+            }
+        }
+        // Exits immediately after the handshake: the client must diagnose a lost
+        // worker whether the `start` write succeeds or fails.
+        "die-after-ready" => {
+            write_frame(&ready(default_commands()));
+            std::process::exit(0);
+        }
+        // Writes a line past the protocol's frame bound.
+        "oversized-line" => {
+            write_frame(&ready(default_commands()));
+            if wait_for_start(&mut reader).is_some() {
+                write_line(&"x".repeat(MAX_FRAME_BYTES + 16));
+                park();
+            }
+        }
         other => {
             eprintln!("unknown fake worker scenario: {other}");
             std::process::exit(97);
@@ -160,6 +213,26 @@ fn stage_event(task_id: &TaskId, stage: TaskStage) -> Event {
 fn completed(task_id: &TaskId) -> Event {
     let mut event = stage_event(task_id, TaskStage::Completed);
     event.result = Some(serde_json::json!({ "checked": true }));
+    event
+}
+
+fn failed(task_id: &TaskId) -> Event {
+    // `TaskError::stage` records where the task was when it broke, so it must be
+    // the non-terminal stage; the event's own stage is the terminal `Failed`.
+    let error = TaskError::new(
+        ErrorCode::MediaInvalid,
+        "输入文件无法解析，请确认它是完整的视频",
+        "ffprobe exited with status 1",
+        TaskStage::Preparing,
+    );
+    let mut event = stage_event(
+        task_id,
+        TaskStage::Failed {
+            code: error.code,
+            message: error.summary.clone(),
+        },
+    );
+    event.error = Some(error);
     event
 }
 
