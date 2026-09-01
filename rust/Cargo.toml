@@ -4,6 +4,7 @@ members = [
   "crates/feathertalk-domain",
   "crates/feathertalk-worker",
   "crates/feathertalk-client",
+  "crates/feathertalk-cli",
   "crates/feathertalk-face",
   "crates/feathertalk-preprocess",
   "crates/feathertalk-media",
@@ -37,6 +38,7 @@ burn = { version = "=0.21.0", default-features = false, features = ["std", "auto
 burn-store = { version = "=0.21.0", default-features = false, features = ["std", "pytorch", "safetensors"] }
 cap-std = "3.4.5"
 clap = { version = "4.5", features = ["derive"] }
+ctrlc = "=3.4.5"
 hex = "0.4"
 jpeg-decoder = "0.3"
 ndarray = "0.17.1"

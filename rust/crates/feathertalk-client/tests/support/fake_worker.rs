@@ -1,12 +1,16 @@
-//! A scripted stand-in for `feathertalk-worker`.
-//!
-//! Compiled as a `[[bin]]` of `feathertalk-client` so integration tests spawn a
-//! real process and talk to it over real pipes. The behaviour is chosen by
-//! `FT_FAKE_WORKER_SCENARIO`; one scenario per test case, each one a straight
-//! line of writes with no branching, so a failing test names its own script.
-//!
-//! Only `feathertalk-domain`, `serde_json`, and std are available here, because
-//! a `[[bin]]` target cannot use dev-dependencies. Hence the fixed timestamp.
+// A scripted stand-in for `feathertalk-worker`.
+//
+// Compiled as a `[[bin]]` of `feathertalk-client` so integration tests spawn a
+// real process and talk to it over real pipes. The behaviour is chosen by
+// `FT_FAKE_WORKER_SCENARIO`; one scenario per test case, each one a straight
+// line of writes with no branching, so a failing test names its own script.
+//
+// Only `feathertalk-domain`, `serde_json`, and std are available here, because
+// a `[[bin]]` target cannot use dev-dependencies. Hence the fixed timestamp.
+//
+// Plain `//` comments rather than `//!`: `feathertalk-cli` `include!`s this file
+// to get its own copy of the binary, and an inner doc comment is not permitted
+// in a macro expansion.
 
 use std::io::{BufReader, StdinLock, Write};
 use std::time::Duration;
