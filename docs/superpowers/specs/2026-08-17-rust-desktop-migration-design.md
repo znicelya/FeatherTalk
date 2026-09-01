@@ -92,10 +92,12 @@ UI 进程不持有 Burn 模型、WGPU device 或 FFmpeg 管线。worker 崩溃�
 
 协议具备以下属性：
 
-- 每条请求包含 `protocol_version`、`task_id`、命令和参数。
+- 每条请求包含 `protocol_version`、`task_id`、命令和参数。当前协议版本为 `2`。
 - 每条事件包含 `task_id`、阶段、进度、时间和可选指标。
+- `completed` 事件可携带 `result` JSON 对象：`probe_media` 返回探测结果，`validate_project` 返回 `null`。
 - 取消请求是幂等操作。
-- worker 启动时报告版本、支持的 backend、adapter 和功能列表。
+- worker 启动时报告版本、支持的 backend、adapter、功能列表和 `supported_commands`。
+- 桌面端请求 `supported_commands` 之外的命令时，worker 在 `start` 阶段即返回 `rejected`，不产生任务。
 - 协议版本不兼容时，桌面端拒绝启动任务并显示可操作错误。
 
 ### 4.3 Rust workspace

@@ -81,7 +81,7 @@ The worker can only run two of the thirteen commands. Rather than discovering th
 - Consumes: `TaskKind` (already `Copy + Ord`), `DomainError::InvalidField`, `check_protocol_version`.
 - Produces: `PROTOCOL_VERSION: u32 = 2`; `ReadyFrame.supported_commands: Vec<TaskKind>` positioned between `adapters` and `capabilities`; `ReadyFrame::validate` rejecting an empty or duplicated command list.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `rust/crates/feathertalk-domain/tests/handshake.rs`, add `TaskKind` to the import list, add the new field to the `ready()` fixture, and append four tests.
 
@@ -149,13 +149,13 @@ fn supported_commands_travel_as_task_slugs() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: FAIL to compile, with `error[E0560]: struct `ReadyFrame` has no field named `supported_commands`` from the `ready()` fixture and `error[E0609]` from the two mutation tests.
 
-- [ ] **Step 3: Bump the protocol version**
+- [x] **Step 3: Bump the protocol version**
 
 In `rust/crates/feathertalk-domain/src/lib.rs`, change the constant:
 
@@ -165,7 +165,7 @@ pub const PROTOCOL_VERSION: u32 = 2;
 
 Leave the doc comment above it, but make sure it does not claim version 1. If it names a version, say: version 2 added `supported_commands` to the handshake and `result` to completed events.
 
-- [ ] **Step 4: Add the field and its validation**
+- [x] **Step 4: Add the field and its validation**
 
 In `rust/crates/feathertalk-domain/src/frame.rs`, add `TaskKind` to the crate import:
 
@@ -206,7 +206,7 @@ Append this to the end of `ReadyFrame::validate`, immediately before the closing
 
 `BTreeSet` is already imported at the top of the file, and the `seen` set above uses `&str` keys, so this second set with `TaskKind` keys needs its own binding name.
 
-- [ ] **Step 5: Update the tests that pinned version 1**
+- [x] **Step 5: Update the tests that pinned version 1**
 
 `rust/crates/feathertalk-domain/tests/public_api.rs` line 5 — rename the test and change the constant:
 
@@ -233,13 +233,13 @@ fn protocol_version_is_two() {
 
 `rust/crates/feathertalk-domain/tests/golden_frames.rs` — change `"protocol_version":1` to `"protocol_version":2` in all five constants (lines 9, 12, 14, 50, 52). Do not touch anything else in those strings; Task 2 changes the two event goldens again.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, exit code 0. If a golden string still says version 1 the failure is a byte-for-byte string comparison, and the diff points at the exact constant.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/crates/feathertalk-domain
@@ -262,7 +262,7 @@ git commit -m "feat(domain): report supported commands in the handshake at proto
 - Consumes: `serde_json::Value`, `TaskStage::Completed`, `DomainError::InvalidField`.
 - Produces: `Event.result: Option<serde_json::Value>` as the last field of the struct and of the wire object; `Event::new` initialising it to `None`; `Event::validate` rejecting a result on a non-completed stage and a non-object result.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `rust/crates/feathertalk-domain/tests/event.rs`, extend the first test with one assertion and append three tests.
 
@@ -353,13 +353,13 @@ Add `COMPLETED_EVENT` to the array in `golden_server_lines_still_decode`:
     for line in [TRAINING_EVENT, FAILED_EVENT, COMPLETED_EVENT] {
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: FAIL to compile with `error[E0609]: no field `result` on type `Event``.
 
-- [ ] **Step 3: Add the field and its validation**
+- [x] **Step 3: Add the field and its validation**
 
 In `rust/crates/feathertalk-domain/src/event.rs`, add the field as the last member of `Event` — the wire order follows the declaration order, and the goldens depend on `result` coming last:
 
@@ -397,7 +397,7 @@ In `Event::validate`, after the existing `match (&self.error, &self.stage)` bloc
 
 `Event` derives `PartialEq` but not `Eq`, and `serde_json::Value` is `PartialEq` only, so no derive changes are needed. `serde_json` is already a production dependency of this crate.
 
-- [ ] **Step 4: Update the fixtures and goldens the new field breaks**
+- [x] **Step 4: Update the fixtures and goldens the new field breaks**
 
 `rust/crates/feathertalk-domain/tests/frame_codec.rs` — the `Event` struct literal near line 164 is exhaustive, so add the field after `error: None,`:
 
@@ -408,13 +408,13 @@ In `Event::validate`, after the existing `match (&self.error, &self.stage)` bloc
 
 `rust/crates/feathertalk-domain/tests/golden_frames.rs` — `TRAINING_EVENT` and `FAILED_EVENT` now end with `,"error":null,"result":null}}` and `...,"recovery":"free_disk_space"},"result":null}}` respectively. Change only the tail of each string.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-domain --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/crates/feathertalk-domain
@@ -437,7 +437,7 @@ Hard cancellation means a running `ffprobe` is killed, not awaited. The media cr
 - Consumes: `CommandSpec`, `MediaError`, the private `read_limited` / `validate_executable` / `ReadResult` helpers in `process.rs`.
 - Produces: `MediaError::ToolCancelled { operation: &'static str }`; `CancellationToken` with `new()`, `cancel(&self)`, `is_cancelled(&self) -> bool`, `Clone`, `Default`; `CancellableProcessRunner::new(CancellationToken)` implementing `ProcessRunner`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `#[cfg(test)] mod tests` block in `rust/crates/feathertalk-media/src/process.rs`, above the `#[ignore]` helpers so the file keeps its "tests first, helpers last" shape:
 
@@ -520,13 +520,13 @@ fn a_cancelled_probe_surfaces_as_tool_cancelled() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p feathertalk-media --all-targets`
 
 Expected: FAIL to compile with `error[E0433]: failed to resolve: use of undeclared type `CancellationToken`` and `error[E0599]: no variant or associated item named `ToolCancelled` found for enum `MediaError``.
 
-- [ ] **Step 3: Add the error variant**
+- [x] **Step 3: Add the error variant**
 
 In `rust/crates/feathertalk-media/src/error.rs`, add the variant next to `ToolTimedOut`:
 
@@ -535,7 +535,7 @@ In `rust/crates/feathertalk-media/src/error.rs`, add the variant next to `ToolTi
     ToolCancelled { operation: &'static str },
 ```
 
-- [ ] **Step 4: Extract the shared run body and add the cancellable runner**
+- [x] **Step 4: Extract the shared run body and add the cancellable runner**
 
 In `rust/crates/feathertalk-media/src/process.rs`, extend the std import:
 
@@ -676,7 +676,7 @@ fn run_child(
 
 The cancellation arm goes **before** the timeout arm: match arms are tried in order, and a cancelled task that has also run past its timeout should report cancellation, which is what the operator asked for.
 
-- [ ] **Step 5: Export the new types**
+- [x] **Step 5: Export the new types**
 
 In `rust/crates/feathertalk-media/src/lib.rs`, replace the `process` re-export line (rustfmt sorts the braces alphabetically):
 
@@ -687,13 +687,13 @@ pub use process::{
 };
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p feathertalk-media --all-targets`
 
 Expected: PASS, exit code 0. `cancelling_mid_run_kills_the_child` should finish in well under a second; if it takes five, the child was awaited rather than killed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/crates/feathertalk-media
@@ -718,7 +718,7 @@ git commit -m "feat(media): kill running tools on cancellation"
 
 `src/main.rs` arrives in Task 8; until then this crate is a library only.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `rust/crates/feathertalk-worker/tests/handshake.rs`:
 
@@ -849,13 +849,13 @@ fn the_default_media_timeout_is_five_minutes() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL with `error: package ID specification 'feathertalk-worker' did not match any packages`, because the crate does not exist yet.
 
-- [ ] **Step 3: Register the crate**
+- [x] **Step 3: Register the crate**
 
 In `rust/Cargo.toml`, add `"crates/feathertalk-worker",` to `members`, immediately after `"crates/feathertalk-domain",`. Leave `exclude` and every other entry untouched.
 
@@ -881,7 +881,7 @@ time = { workspace = true }
 tempfile = { workspace = true }
 ```
 
-- [ ] **Step 4: Implement the configuration**
+- [x] **Step 4: Implement the configuration**
 
 Create `rust/crates/feathertalk-worker/src/config.rs`:
 
@@ -983,7 +983,7 @@ fn required_path(value: Option<String>, variable: &str) -> Result<PathBuf, Strin
 
 `MediaToolchain::new` takes `ffmpeg` first and `ffprobe` second; the argument order above is deliberate. It also checks absoluteness itself, but its message does not name the environment variable, which is the whole point of `required_path`. Neither binary needs to exist at configuration time — the media crate reports a missing tool when it tries to spawn it.
 
-- [ ] **Step 5: Implement the handshake**
+- [x] **Step 5: Implement the handshake**
 
 Create `rust/crates/feathertalk-worker/src/handshake.rs`:
 
@@ -1052,13 +1052,13 @@ pub use config::{
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/Cargo.toml rust/crates/feathertalk-worker
@@ -1080,7 +1080,7 @@ git commit -m "feat(worker): add the worker crate with configuration and handsha
 - Consumes: `ProjectError`, `MediaError`, `TaskError::new(code, summary: &str, detail: &str, stage) -> TaskError`, `ErrorCode`, `MAX_DETAIL_CHARS`.
 - Produces: `project_task_error(&ProjectError) -> TaskError`, `media_task_error(&MediaError) -> TaskError`, `is_media_cancellation(&MediaError) -> bool`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-worker/tests/error_mapping.rs`:
 
@@ -1377,13 +1377,13 @@ fn only_tool_cancelled_counts_as_cancellation() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL to compile with `error[E0432]: unresolved imports `feathertalk_worker::is_media_cancellation`, `feathertalk_worker::media_task_error`, `feathertalk_worker::project_task_error``.
 
-- [ ] **Step 3: Implement the mapping**
+- [x] **Step 3: Implement the mapping**
 
 Create `rust/crates/feathertalk-worker/src/error_map.rs`:
 
@@ -1539,7 +1539,7 @@ fn clamp(detail: &str) -> String {
 
 `io::ErrorKind::StorageFull` and `io::ErrorKind::QuotaExceeded` are both stable on the toolchain in use (rustc 1.95.0). `ErrorKind` is `#[non_exhaustive]`, so the `_` arm there is required; the `ProjectError` and `MediaError` matches must stay exhaustive with no `_` arm, which is what turns a future library variant into a compile error instead of a silent mislabel.
 
-- [ ] **Step 4: Export the mapping**
+- [x] **Step 4: Export the mapping**
 
 In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod error_map;` after `mod config;` and the re-export after the `config` block:
 
@@ -1547,13 +1547,13 @@ In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod error_map;` after `mod 
 pub use error_map::{is_media_cancellation, media_task_error, project_task_error};
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/crates/feathertalk-worker
@@ -1576,7 +1576,7 @@ This is the layer that actually runs work: one function that takes a `Request` a
 - Consumes: `Request`, `ProbeMediaParams.input`, `ProjectDirParams.project_dir`, `validate_project_dir`, `validate_input`, `probe_media_with_runner`, `MediaProbe` accessors, `CancellationToken`, `CancellableProcessRunner`, `project_task_error`, `media_task_error`, `is_media_cancellation`.
 - Produces: `probe_to_json(&MediaProbe) -> serde_json::Value`; `CommandOutcome::{Completed(Option<serde_json::Value>), Cancelled, Failed(TaskError)}`; `execute(&Request, Option<&MediaToolchain>, &CancellationToken) -> CommandOutcome`; `execute_with_runner<R: ProcessRunner + ?Sized>(&Request, Option<&MediaToolchain>, &CancellationToken, &R) -> CommandOutcome`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-worker/tests/commands.rs`:
 
@@ -1856,13 +1856,13 @@ fn an_unsupported_command_is_refused_with_its_slug() {
 
 Read `rust/crates/feathertalk-domain/src/request.rs` before writing the `TrainParams` literal and use its exact fields; the runtime never accepts this command, the literal exists only to prove the defensive arm rejects it. If a field name or enum variant differs, fix the literal, not the params struct.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL to compile with `error[E0432]: unresolved imports `feathertalk_worker::CommandOutcome`, `feathertalk_worker::execute_with_runner``.
 
-- [ ] **Step 3: Implement the probe result payload**
+- [x] **Step 3: Implement the probe result payload**
 
 Create `rust/crates/feathertalk-worker/src/probe_result.rs`:
 
@@ -1910,7 +1910,7 @@ pub fn probe_to_json(probe: &MediaProbe) -> Value {
 
 `Option<Value>` serializes as `null`, so an audio-only or video-only file still produces the same three top-level keys. Frame rate stays an exact rational — `25/1`, not `25.0` — because a later slice checks it against the 25 fps requirement and a float would make that check approximate.
 
-- [ ] **Step 4: Implement command execution**
+- [x] **Step 4: Implement command execution**
 
 Create `rust/crates/feathertalk-worker/src/commands.rs`:
 
@@ -2003,7 +2003,7 @@ fn unsupported(kind: TaskKind) -> TaskError {
 }
 ```
 
-- [ ] **Step 5: Export the new modules**
+- [x] **Step 5: Export the new modules**
 
 In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod commands;` and `mod probe_result;` in alphabetical position among the module declarations, and the re-exports:
 
@@ -2012,13 +2012,13 @@ pub use commands::{CommandOutcome, execute, execute_with_runner};
 pub use probe_result::probe_to_json;
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/crates/feathertalk-worker
@@ -2040,7 +2040,7 @@ One task per adapter is the rule that keeps a later GPU slice from running two t
 - Consumes: `TaskId` (`Clone + Eq + Ord + Hash`, not `Copy`).
 - Produces: `AdapterLocks::new(impl IntoIterator<Item = String>) -> AdapterLocks`, `acquire(&mut self, &str, TaskId) -> Result<(), AdapterLockError>`, `release(&mut self, &str) -> Result<(), AdapterLockError>`, `holder(&self, &str) -> Option<&TaskId>`, `is_free(&self, &str) -> bool`; `AdapterLockError::{Unknown, Occupied, NotHeld}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `rust/crates/feathertalk-worker/tests/adapter_locks.rs`:
 
@@ -2128,13 +2128,13 @@ fn adapters_are_locked_independently() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL to compile with `error[E0432]: unresolved imports `feathertalk_worker::AdapterLockError`, `feathertalk_worker::AdapterLocks``.
 
-- [ ] **Step 3: Implement the table**
+- [x] **Step 3: Implement the table**
 
 Create `rust/crates/feathertalk-worker/src/adapters.rs`:
 
@@ -2211,7 +2211,7 @@ impl AdapterLocks {
 
 `TaskId` is not `Copy`, so `holder` is cloned into the error and `acquire` takes the id by value.
 
-- [ ] **Step 4: Export the table**
+- [x] **Step 4: Export the table**
 
 In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod adapters;` as the first module declaration and the re-export:
 
@@ -2219,13 +2219,13 @@ In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod adapters;` as the first
 pub use adapters::{AdapterLockError, AdapterLocks};
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/crates/feathertalk-worker
@@ -2251,7 +2251,7 @@ Command execution is reached through one injectable seam, `JobExecutor`. Product
 - Consumes: `FrameReader::read_frame::<ClientFrame>()`, `FrameWriter::{write_frame, into_inner}`, `ClientFrame::validate` (which already includes the protocol-version check, so a version mismatch surfaces as `DomainError::ProtocolVersion` at decode time), `ServerFrame::validate`, `Event::new`, `TaskLifecycle::advance`, `TaskStage`, `TaskId::as_str`, `CancellationToken`, `MediaToolchain` (`Clone`), `WorkerConfig`, `ready_frame`, `supported_commands`, `AdapterLocks`, `CPU_ADAPTER_ID`, `execute`, `CommandOutcome`, `ENV_FFPROBE`, `ENV_FFMPEG`.
 - Produces: `JobExecutor = Box<dyn Fn(&Request, Option<&MediaToolchain>, &CancellationToken) -> CommandOutcome + Send + 'static>`; `serve<R: BufRead + Send + 'static, W: Write>(input: R, output: W, config: &WorkerConfig) -> Result<(), DomainError>`; `serve_with_executor<R: BufRead + Send + 'static, W: Write>(input: R, output: W, config: &WorkerConfig, executor: JobExecutor) -> Result<(), DomainError>`; the `feathertalk-worker` binary.
 
-- [ ] **Step 1: Write the failing runtime test**
+- [x] **Step 1: Write the failing runtime test**
 
 Create `rust/crates/feathertalk-worker/tests/runtime.rs`:
 
@@ -3011,13 +3011,13 @@ fn closing_the_input_stream_shuts_the_worker_down() {
 
 `blocking_executor` reports a fixed `TaskId` because the executor closure receives the request, not the id; the tests only need the "a job reached the executor" signal, and `assert_serialized` verifies the real ids from the event stream.
 
-- [ ] **Step 2: Run the test to verify it fails for the right reason**
+- [x] **Step 2: Run the test to verify it fails for the right reason**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL to compile with `error[E0432]: unresolved imports \`feathertalk_worker::JobExecutor\`, \`feathertalk_worker::serve_with_executor\``.
 
-- [ ] **Step 3: Implement the runtime**
+- [x] **Step 3: Implement the runtime**
 
 Create `rust/crates/feathertalk-worker/src/runtime.rs`:
 
@@ -3409,7 +3409,7 @@ fn now_rfc3339() -> String {
 }
 ```
 
-- [ ] **Step 4: Export the runtime**
+- [x] **Step 4: Export the runtime**
 
 In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod runtime;` after `mod probe_result;` and the re-export:
 
@@ -3417,13 +3417,13 @@ In `rust/crates/feathertalk-worker/src/lib.rs`, add `mod runtime;` after `mod pr
 pub use runtime::{JobExecutor, serve, serve_with_executor};
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0. If a test times out inside `wait_for`, the panic message prints every frame written so far.
 
-- [ ] **Step 6: Write the failing process-boundary test**
+- [x] **Step 6: Write the failing process-boundary test**
 
 Create `rust/crates/feathertalk-worker/tests/process_boundary.rs`:
 
@@ -3509,7 +3509,7 @@ Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: FAIL to compile with `error: environment variable \`CARGO_BIN_EXE_feathertalk-worker\` not defined at compile time`, because the crate has no binary target yet.
 
-- [ ] **Step 7: Add the binary**
+- [x] **Step 7: Add the binary**
 
 Create `rust/crates/feathertalk-worker/src/main.rs`:
 
@@ -3530,13 +3530,13 @@ fn main() {
 
 Cargo discovers `src/main.rs` as the `feathertalk-worker` binary alongside the library; no `[[bin]]` section is needed.
 
-- [ ] **Step 8: Run the test to verify it passes**
+- [x] **Step 8: Run the test to verify it passes**
 
 Run: `cargo test -p feathertalk-worker --all-targets`
 
 Expected: PASS, exit code 0.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add rust/crates/feathertalk-worker
@@ -3554,7 +3554,7 @@ git commit -m "feat(worker): serve the task protocol over stdio"
 
 **Interfaces:** none. This task changes documentation and verifies the whole workspace.
 
-- [ ] **Step 1: Record the version-2 protocol properties in the migration design**
+- [x] **Step 1: Record the version-2 protocol properties in the migration design**
 
 In `docs/superpowers/specs/2026-08-17-rust-desktop-migration-design.md`, section `### 4.2`, the bullet list under `协议具备以下属性：` currently reads:
 
@@ -3580,7 +3580,7 @@ Replace that list with:
 
 Do not touch any other section of the spec. The design document describes the whole migration; this slice only settles the protocol properties listed above.
 
-- [ ] **Step 2: Verify the whole workspace**
+- [x] **Step 2: Verify the whole workspace**
 
 Run each command from `E:/workspace/github/FeatherTalk/rust`. Every command must exit 0.
 
@@ -3601,7 +3601,7 @@ git diff --check
 
 Expected: no output, exit code 0 (no trailing whitespace and no conflict markers).
 
-- [ ] **Step 3: Tick every checkbox in this plan**
+- [x] **Step 3: Tick every checkbox in this plan**
 
 Go through `docs/superpowers/plans/2026-09-01-feathertalk-worker-runtime.md` and change every `- [ ]` to `- [x]`. Verify with:
 
@@ -3613,7 +3613,7 @@ Expected: no match, exit code 1.
 
 This step is easy to skip and it has been skipped before. Of the 28 plans already in `docs/superpowers/plans/`, only three (`2026-08-17-burn-feasibility-loop.md`, `2026-08-27-onnx-opset17-export.md`, `2026-08-28-worker-protocol-task-domain.md`) have their boxes ticked; the other 25 still show unticked boxes for work that shipped. A stale plan is worse than no plan, because the next reader cannot tell which steps actually ran.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-17-rust-desktop-migration-design.md docs/superpowers/plans/2026-09-01-feathertalk-worker-runtime.md
@@ -3622,7 +3622,7 @@ git commit -m "docs: record the version 2 task protocol"
 
 Never stage `demo/kanghui_training_video_featherhubert_188_latest/`. Check with `git status --short` before committing that the directory is still listed as untracked (`??`).
 
-- [ ] **Step 5: Finish the branch**
+- [x] **Step 5: Finish the branch**
 
 Use the `superpowers:finishing-a-development-branch` skill with base branch `main`.
 
