@@ -40,29 +40,50 @@ fn compare(actual: &[f32], expected: &[f32]) -> (f32, f32) {
     (max_abs, sum_abs / actual.len() as f32)
 }
 
+/// Constructing the GhostOne graph moves a 125 768-byte runtime struct through
+/// several frames, which overruns the default libtest thread stack on Windows
+/// and aborts the whole test binary with `STATUS_STACK_OVERFLOW`.
+/// `feathertalk-weights` already solves the same problem for its detached clone
+/// with a dedicated 64 MiB stack; this mirrors that here.
+const RUNTIME_LOAD_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Runs `body` on a thread whose stack is large enough for the artifact load.
+/// Panics travel back through `join`, so failed assertions still fail the test.
+fn on_load_stack(name: &str, body: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .stack_size(RUNTIME_LOAD_STACK_BYTES)
+        .spawn(body)
+        .expect("the loader thread starts")
+        .join()
+        .expect("the loader thread does not panic");
+}
+
 #[test]
 fn committed_pfld_runtime_matches_python_on_all_220_cpu_outputs() {
-    let root = fixture_dir();
-    let input_values = read_f32(&root.join("input.f32"));
-    let expected = read_f32(&root.join("output.f32"));
-    let device = Default::default();
-    let runtime = PfldRuntime::<CpuBackend>::load(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("artifacts/pfld_ghost_one"),
-        &device,
-    )
-    .unwrap();
-    let input = Tensor::<CpuBackend, 4>::from_data(
-        TensorData::new(input_values, [1, 3, 192, 192]),
-        &device,
-    );
-    let actual = runtime
-        .forward(input)
-        .unwrap()
-        .into_data()
-        .to_vec::<f32>()
+    on_load_stack("pfld-cpu-parity", || {
+        let root = fixture_dir();
+        let input_values = read_f32(&root.join("input.f32"));
+        let expected = read_f32(&root.join("output.f32"));
+        let device = Default::default();
+        let runtime = PfldRuntime::<CpuBackend>::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("artifacts/pfld_ghost_one"),
+            &device,
+        )
         .unwrap();
-    let (max_abs, mean_abs) = compare(&actual, &expected);
-    assert!(max_abs <= 1e-4, "max_abs={max_abs}, mean_abs={mean_abs}");
+        let input = Tensor::<CpuBackend, 4>::from_data(
+            TensorData::new(input_values, [1, 3, 192, 192]),
+            &device,
+        );
+        let actual = runtime
+            .forward(input)
+            .unwrap()
+            .into_data()
+            .to_vec::<f32>()
+            .unwrap();
+        let (max_abs, mean_abs) = compare(&actual, &expected);
+        assert!(max_abs <= 1e-4, "max_abs={max_abs}, mean_abs={mean_abs}");
+    });
 }
 
 #[test]

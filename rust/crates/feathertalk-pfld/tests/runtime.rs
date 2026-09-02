@@ -20,47 +20,69 @@ fn copy_artifact() -> tempfile::TempDir {
     temp
 }
 
+/// Constructing the GhostOne graph moves a 125 768-byte runtime struct through
+/// several frames, which overruns the default libtest thread stack on Windows
+/// and aborts the whole test binary with `STATUS_STACK_OVERFLOW`.
+/// `feathertalk-weights` already solves the same problem for its detached clone
+/// with a dedicated 64 MiB stack; this mirrors that here. The rejection tests
+/// below stay on the libtest thread because they fail before construction.
+const RUNTIME_LOAD_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Runs `body` on a thread whose stack is large enough for the artifact load.
+/// Panics travel back through `join`, so failed assertions still fail the test.
+fn on_load_stack(name: &str, body: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .stack_size(RUNTIME_LOAD_STACK_BYTES)
+        .spawn(body)
+        .expect("the loader thread starts")
+        .join()
+        .expect("the loader thread does not panic");
+}
+
 #[test]
 fn committed_artifact_loads_and_runs_the_fixed_cpu_contract() {
-    let device = Default::default();
-    let runtime = PfldRuntime::<CpuBackend>::load(&artifact_dir(), &device).unwrap();
-    assert_eq!(runtime.manifest().schema_version, 1);
-    assert_eq!(runtime.tensor_count(), 1735);
+    on_load_stack("pfld-cpu-contract", || {
+        let device = Default::default();
+        let runtime = PfldRuntime::<CpuBackend>::load(&artifact_dir(), &device).unwrap();
+        assert_eq!(runtime.manifest().schema_version, 1);
+        assert_eq!(runtime.tensor_count(), 1735);
 
-    for shape in [
-        [2, 3, 192, 192],
-        [1, 1, 192, 192],
-        [1, 3, 191, 192],
-        [1, 3, 192, 191],
-    ] {
-        let input = Tensor::<CpuBackend, 4>::zeros(shape, &device);
+        for shape in [
+            [2, 3, 192, 192],
+            [1, 1, 192, 192],
+            [1, 3, 191, 192],
+            [1, 3, 192, 191],
+        ] {
+            let input = Tensor::<CpuBackend, 4>::zeros(shape, &device);
+            assert!(matches!(
+                runtime.forward(input),
+                Err(PfldRuntimeError::InvalidInputShape { actual }) if actual == shape
+            ));
+        }
+
+        let mut values = vec![0.0_f32; 3 * 192 * 192];
+        values[0] = f32::NAN;
+        let input =
+            Tensor::<CpuBackend, 4>::from_data(TensorData::new(values, [1, 3, 192, 192]), &device);
         assert!(matches!(
             runtime.forward(input),
-            Err(PfldRuntimeError::InvalidInputShape { actual }) if actual == shape
+            Err(PfldRuntimeError::NonFiniteInput)
         ));
-    }
 
-    let mut values = vec![0.0_f32; 3 * 192 * 192];
-    values[0] = f32::NAN;
-    let input =
-        Tensor::<CpuBackend, 4>::from_data(TensorData::new(values, [1, 3, 192, 192]), &device);
-    assert!(matches!(
-        runtime.forward(input),
-        Err(PfldRuntimeError::NonFiniteInput)
-    ));
-
-    let output = runtime
-        .forward(Tensor::<CpuBackend, 4>::zeros([1, 3, 192, 192], &device))
-        .unwrap();
-    assert_eq!(output.dims(), [1, 220]);
-    assert!(
-        output
-            .into_data()
-            .to_vec::<f32>()
-            .unwrap()
-            .iter()
-            .all(|value| value.is_finite())
-    );
+        let output = runtime
+            .forward(Tensor::<CpuBackend, 4>::zeros([1, 3, 192, 192], &device))
+            .unwrap();
+        assert_eq!(output.dims(), [1, 220]);
+        assert!(
+            output
+                .into_data()
+                .to_vec::<f32>()
+                .unwrap()
+                .iter()
+                .all(|value| value.is_finite())
+        );
+    });
 }
 
 #[test]
