@@ -108,6 +108,20 @@ ffmpeg -hide_banner -loglevel error -ss <ts(first_index)> -i <video>
 
 块大小不做成参数。它不是用户关心的量，暴露出来只会变成一个需要文档和校验的旋钮。
 
+### 2.5 既有假 runner 的迁移
+
+这是分块改造的主要机械成本，先记清楚。现有 6 个假 `ProcessRunner` 都假设「命令的最后一个参数就是这一帧的具体路径」，直接往 `command.arguments().last()` 写字节：
+
+- `feathertalk-frame-pipeline/tests/extraction.rs:14` `FakeRunner`、`:207` `SymlinkRunner`
+- `feathertalk-frame-pipeline/tests/evaluation.rs:15` `OneFrameRunner`
+- `feathertalk-frame-pipeline/tests/pipeline.rs:10` `Runner`
+- `feathertalk-frame-pipeline/tests/publish.rs:11` `Runner`
+- `feathertalk-frame-adapters/tests/pipeline.rs:39` `FixtureRunner`
+
+改造后最后一个参数是 `%06d.jpg` 模板。`FixtureRunner` 还会把文件名主干 `parse::<usize>()` 成帧号来选载荷，模板会让它在 `pipeline.rs:59` panic（「unexpected frame name」）。所以每个假 runner 都要改成：从参数里读 `-start_number` 与 `-frames:v`，把模板里的 `%06d` 按 `first_index..first_index + count` 展开，逐个写出。
+
+这段展开逻辑约 15 行，在 frame-pipeline 与 frame-adapters 两个 crate 的测试里各放一份。不为此新增公开 API——只为测试导出「把块命令解析回 `(first_index, count, pattern)`」的函数会把测试便利固化进 crate 的公开面，代价大于一次复制。
+
 ## 3. frame-pipeline 的观察者与取消
 
 `feathertalk-frame-pipeline` 现在完全不知道进度和取消的存在，而 worker 必须在长达数分钟的推理过程中报进度并响应取消。新增一个最小接缝：
@@ -194,13 +208,18 @@ if video_path == output_root || video_path.starts_with(&output_root) {
 
 不调用 `run_frame_pipeline_with_runner`。它把 extract、evaluate、publish 三段包成一个调用，`FrameEvaluation` 留在函数内部，失败时 worker 只能拿到 `QualityRejected { count }`，报不出「哪几帧坏了、为什么」。而主线路线图 `2026-08-17-rust-desktop-migration-design.md` §11 明确要求坏帧定位到具体帧。所以 worker 依次调用：
 
-```
-extract_frames_observed(&spec, &extractor, &runner, &observer)?
-evaluate_frames_observed(&batch, decoder, detector, predictor, &observer)?
-publish_frame_artifacts(...)
+```rust
+let mut batch = extract_frames_observed(&spec, &extractor, &runner, &observer)?;
+let evaluation = evaluate_frames_observed(&batch, decoder, detector, predictor, &observer)?;
+if !evaluation.is_success() {
+    return quality_failure(&evaluation); // §13：从第一条异常挑错误码
+}
+let report = publish_frame_artifacts(&spec, &mut batch, &evaluation)?;
 ```
 
-拿到 `FrameEvaluation` 后，若 `is_success()` 为假，直接从 `anomalies()` 里挑第一条决定错误码与摘要（§13），不走 `QualityRejected`。
+`publish_frame_artifacts` 的签名是 `(&FramePipelineSpec, &mut FrameBatch, &FrameEvaluation) -> Result<QualityReport, PipelineError>`，所以 `batch` 要按 `mut` 绑定；评估阶段只不可变借用它，借用在发布前结束。
+
+拿到 `FrameEvaluation` 后若 `is_success()` 为假，直接从 `anomalies()` 里挑第一条决定错误码与摘要（§13），不进入发布。
 
 ### 5.2 注入接缝
 
@@ -378,7 +397,7 @@ feathertalk extract-frames <PROJECT_DIR> <VIDEO>
 
 `Cancelled` 这一分支是完备性需要：运行时会先拦下取消并产生 `Cancelled` 结局，正常不会走到这里。
 
-质量失败不走 `QualityRejected`（那条只在 `run_frame_pipeline_with_runner` 里产生，本切片不用它）。worker 从第一条异常挑码：
+质量失败不走 `QualityRejected`。这个变体由 `publish_frame_artifacts` 在 `anomalies` 非空时产生（`publish.rs:33-37`），而 worker 按 §5.1 先检查 `is_success()`，有异常就直接失败，不会带着异常进入发布——所以它在本命令路径上不可达，上表里的 `WORKER_CRASHED` 只是完备性兜底。worker 从第一条异常挑码：
 
 | `AnomalyCode` | 错误码 |
 | --- | --- |
@@ -395,7 +414,8 @@ feathertalk extract-frames <PROJECT_DIR> <VIDEO>
 
 frame-pipeline：
 
-- `format_timestamp` 的边界：帧 0、24、25、26、49、50、1510，覆盖整秒与秒内相位；`tests/commands.rs:57` 的 `"1.01"` 改为 `"1.040"`。
+- `format_timestamp` 的边界：帧 0、24、25、26、49、50、1510，覆盖整秒与秒内相位；`tests/commands.rs:57` 的 `"1.01"` 改为 `"1.040"`，`:27` 的 `frame_command` 调用改用新的五参数签名并断言 `-start_number`、`-frames:v` 与 `%06d.jpg` 模板。
+- 6 个既有假 runner 按 §2.5 迁移，它们覆盖的现有断言（产物内容、符号链接拒绝、发布、端到端管线）保持不变。
 - 块切分：1511 帧切成 250×6 + 11，断言每次命令的 `-ss`、`-frames:v`、`-start_number`。
 - 观察者：`Extracting` 事件 7 次且 `completed` 单调递增到 1511；`Evaluating` 事件 1511 次。
 - 取消：观察者在第 2 块、第 3 帧返回 `is_cancelled() == true`，断言得到 `PipelineError::Cancelled` 且暂存目录已被清理。
