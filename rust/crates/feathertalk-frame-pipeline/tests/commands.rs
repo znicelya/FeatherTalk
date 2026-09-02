@@ -1,6 +1,10 @@
+mod support;
+
 use std::{path::PathBuf, time::Duration};
 
 use feathertalk_frame_pipeline::{FrameExtractor, FramePipelineSpec, frame_command};
+
+use support::flag_value;
 
 fn extractor() -> FrameExtractor {
     FrameExtractor::new(
@@ -54,5 +58,25 @@ fn frame_command_uses_fixed_flags_and_native_path_arguments() {
             .arguments()
             .contains(&value.video_path().as_os_str().to_owned())
     );
-    assert!(command.arguments().contains(&"1.01".into()));
+    assert_eq!(flag_value(&command, "-ss"), "1.040");
+}
+
+#[test]
+fn frame_timestamps_keep_millisecond_precision() {
+    let value = spec();
+    let tool = extractor();
+    // 25 frames per second divide 1000 ms exactly, so every index lands on a
+    // whole millisecond and no case needs rounding.
+    for (index, expected) in [
+        (0_u64, "0.000"),
+        (24, "0.960"),
+        (25, "1.000"),
+        (26, "1.040"),
+        (49, "1.960"),
+        (50, "2.000"),
+        (1510, "60.400"),
+    ] {
+        let command = frame_command(&tool, value.video_path(), index, &value.frame_path(index));
+        assert_eq!(flag_value(&command, "-ss"), expected, "frame {index}");
+    }
 }

@@ -36,6 +36,16 @@ impl CommandSpec {
     }
 }
 
+/// The frame rate the extraction pipeline pins ffmpeg to.
+///
+/// `-vf fps=25` stays a literal in the argument list: it is filter syntax, and
+/// spelling it out keeps the command readable next to ffmpeg documentation.
+const FRAME_RATE: u64 = 25;
+
+/// Milliseconds one frame occupies. 25 divides 1000 exactly, so every frame
+/// index maps onto a whole number of milliseconds and `-ss` never rounds.
+const MILLIS_PER_FRAME: u64 = 1_000 / FRAME_RATE;
+
 pub fn frame_command(
     extractor: &FrameExtractor,
     source: &Path,
@@ -73,9 +83,9 @@ pub fn frame_command(
 }
 
 fn format_timestamp(index: u64) -> OsString {
-    let seconds = index / 25;
-    let remainder = index % 25;
-    format!("{seconds}.{remainder:02}").into()
+    let seconds = index / FRAME_RATE;
+    let millis = (index % FRAME_RATE) * MILLIS_PER_FRAME;
+    format!("{seconds}.{millis:03}").into()
 }
 
 fn args<const N: usize>(values: [&str; N]) -> Vec<OsString> {
