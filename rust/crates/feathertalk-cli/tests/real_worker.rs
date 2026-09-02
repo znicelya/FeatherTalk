@@ -253,3 +253,144 @@ fn real_tool(suffix: &str) -> Option<PathBuf> {
     let path = PathBuf::from(std::env::var(format!("FEATHERTALK_WORKER_{suffix}")).ok()?);
     path.is_file().then_some(path)
 }
+
+/// The whole extraction, and only when the real toolchain, the imported models,
+/// and the demo clip are all present. Neither this repository nor CI ships
+/// ffmpeg or the model artifacts, so anything missing is a skip rather than a
+/// failure: a test that fails for reasons unrelated to the code under test
+/// teaches nothing.
+#[test]
+fn a_real_second_is_extracted_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_second_is_extracted_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(ffprobe), Some(scrfd), Some(pfld), Some(demo)) = (
+        real_tool("FFMPEG"),
+        real_tool("FFPROBE"),
+        real_dir("SCRFD_DIR"),
+        real_dir("PFLD_DIR"),
+        demo_clip(),
+    ) else {
+        println!(
+            "skipping a_real_second_is_extracted_end_to_end: it needs \
+             FEATHERTALK_WORKER_FFMPEG, FEATHERTALK_WORKER_FFPROBE, \
+             FEATHERTALK_WORKER_SCRFD_DIR, FEATHERTALK_WORKER_PFLD_DIR, and \
+             demo/feathertalk_demo_latest_188.mp4"
+        );
+        return;
+    };
+    let project = TempDir::new().expect("a temporary directory is available");
+    let assets = project.path().join("assets");
+    std::fs::create_dir_all(&assets).expect("the assets directory is writable");
+    // Admission only asks that the manifest exists; reading it is
+    // `validate-project`'s job, and this command runs before a project has the
+    // assets that validation demands.
+    std::fs::write(project.path().join("project.json"), "{}")
+        .expect("the temporary manifest is writable");
+    let video = assets.join("video_25fps.mp4");
+    cut_one_second(&ffmpeg, &demo, &video);
+
+    let project_arg = project.path().to_string_lossy().into_owned();
+    let video_arg = video.to_string_lossy().into_owned();
+    let ffmpeg_arg = ffmpeg.to_string_lossy().into_owned();
+    let ffprobe_arg = ffprobe.to_string_lossy().into_owned();
+    let scrfd_arg = scrfd.to_string_lossy().into_owned();
+    let pfld_arg = pfld.to_string_lossy().into_owned();
+    let output = run(
+        &worker,
+        &["extract-frames", &project_arg, &video_arg],
+        &[
+            ("FEATHERTALK_WORKER_FFMPEG", ffmpeg_arg.as_str()),
+            ("FEATHERTALK_WORKER_FFPROBE", ffprobe_arg.as_str()),
+            ("FEATHERTALK_WORKER_SCRFD_DIR", scrfd_arg.as_str()),
+            ("FEATHERTALK_WORKER_PFLD_DIR", pfld_arg.as_str()),
+        ],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(result["output_dir"], assets.display().to_string());
+    assert_eq!(result["frame_count"], 25);
+    assert_eq!(result["frame_width"], 1280);
+    assert_eq!(result["frame_height"], 720);
+
+    assert_eq!(file_count(&assets.join("frames")), 25);
+    assert_eq!(file_count(&assets.join("landmarks")), 25);
+    assert!(assets.join("frames").join("000000.jpg").is_file());
+    assert!(assets.join("landmarks").join("000000.lms").is_file());
+
+    let report =
+        std::fs::read_to_string(assets.join("quality.json")).expect("the report is readable");
+    let report: serde_json::Value = serde_json::from_str(&report).expect("the report is JSON");
+    assert_eq!(report["frame_count"], 25);
+    assert_eq!(report["accepted_count"], 25);
+    assert!(
+        report["anomalies"]
+            .as_array()
+            .expect("anomalies is an array")
+            .is_empty(),
+        "{report}"
+    );
+
+    let narration = stderr(&output);
+    assert!(narration.contains("正在提取视频帧"), "{narration}");
+    assert!(narration.contains("正在检测人脸"), "{narration}");
+    assert!(narration.contains("进度 25/25"), "{narration}");
+}
+
+/// A model directory from the environment, only if it is an existing directory.
+fn real_dir(suffix: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var(format!("FEATHERTALK_WORKER_{suffix}")).ok()?);
+    path.is_dir().then_some(path)
+}
+
+/// The demo video this repository ships, resolved from this crate's directory.
+fn demo_clip() -> Option<PathBuf> {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../demo/feathertalk_demo_latest_188.mp4");
+    path.is_file().then_some(path)
+}
+
+/// One second of the demo video, re-encoded at 25 fps into the project's
+/// `assets/` under the name the pipeline expects. The offset is 30 s because the
+/// committed `demo_frame_v1` fixture records a 0.8108 face score and a 776.03
+/// blur variance for that frame, well clear of the 0.50 and 20.0 thresholds; if
+/// a neighbouring frame is ever rejected, `quality.json` names its index and the
+/// offset can move.
+fn cut_one_second(ffmpeg: &Path, demo: &Path, video: &Path) {
+    let output = Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-ss", "30.000"])
+        .arg("-i")
+        .arg(demo)
+        .args([
+            "-frames:v",
+            "25",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "25",
+        ])
+        .arg(video)
+        .output()
+        .expect("ffmpeg runs");
+    assert!(
+        output.status.success(),
+        "ffmpeg could not cut the clip: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The number of regular files directly inside `dir`.
+fn file_count(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("{} is readable: {error}", dir.display()))
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .count()
+}
