@@ -79,4 +79,7 @@ pub enum PipelineError {
         primary: String,
         rollback: String,
     },
+    /// The observer asked the pipeline to stop.
+    #[error("frame pipeline cancelled during {operation}")]
+    Cancelled { operation: &'static str },
 }

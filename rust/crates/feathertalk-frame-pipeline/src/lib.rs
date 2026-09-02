@@ -3,6 +3,7 @@ mod error;
 mod evaluate;
 mod extraction;
 mod model;
+mod observe;
 mod process;
 mod publish;
 
@@ -14,12 +15,14 @@ pub use evaluate::{
     NMS_IOU_THRESHOLD, evaluate_frames_with_models,
 };
 pub use extraction::{
-    ExtractedFrame, FRAME_CHUNK, FrameBatch, extract_frames, extract_frames_with_runner,
+    ExtractedFrame, FRAME_CHUNK, FrameBatch, extract_frames, extract_frames_observed,
+    extract_frames_with_runner,
 };
 pub use model::{
     AnomalyCode, FaceDetection, FrameAnomaly, FramePipelineSpec, FrameQuality, QualityReport,
     RecoveryAction,
 };
+pub use observe::{NoObserver, PipelineObserver, PipelinePhase};
 pub use process::{
     FrameExtractor, MAX_CAPTURE_BYTES, MAX_FRAME_BYTES, ProcessOutput, ProcessRunner,
     SystemProcessRunner,

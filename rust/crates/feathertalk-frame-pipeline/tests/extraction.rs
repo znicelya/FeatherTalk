@@ -9,11 +9,11 @@ use std::{
 };
 
 use feathertalk_frame_pipeline::{
-    CommandSpec, FRAME_CHUNK, FrameExtractor, FramePipelineSpec, PipelineError, ProcessOutput,
-    ProcessRunner, extract_frames_with_runner,
+    CommandSpec, FRAME_CHUNK, FrameExtractor, FramePipelineSpec, PipelineError, PipelinePhase,
+    ProcessOutput, ProcessRunner, extract_frames_observed, extract_frames_with_runner,
 };
 
-use support::{chunk_outputs, flag_number, flag_value};
+use support::{Recorder, chunk_outputs, flag_number, flag_value};
 
 struct FakeRunner {
     outputs: Mutex<VecDeque<Result<ProcessOutput, PipelineError>>>,
@@ -193,6 +193,59 @@ fn frames_are_extracted_in_chunks_with_a_short_tail() {
         // 250 frames are exactly 10 s, so every chunk starts on a whole second.
         assert_eq!(flag_value(command, "-ss"), format!("{}.000", position * 10));
     }
+}
+
+#[test]
+fn extraction_reports_one_phase_per_finished_chunk() {
+    let total = FRAME_CHUNK * 2 + 5;
+    let (_root, spec, extractor) = setup(total);
+    let runner = FakeRunner::new(ok_outputs(3), WriteMode::Bytes);
+    let observer = Recorder::new(None);
+
+    let batch = extract_frames_observed(&spec, &extractor, &runner, &observer).unwrap();
+
+    assert_eq!(batch.frames().len() as u64, total);
+    // The last phase carries the exact frame count, so the worker never has
+    // to invent a final 100 % event.
+    assert_eq!(
+        observer.phases(),
+        vec![
+            PipelinePhase::Extracting {
+                completed: FRAME_CHUNK,
+                total
+            },
+            PipelinePhase::Extracting {
+                completed: FRAME_CHUNK * 2,
+                total
+            },
+            PipelinePhase::Extracting {
+                completed: total,
+                total
+            },
+        ]
+    );
+}
+
+#[test]
+fn cancellation_stops_extraction_at_the_next_chunk_boundary() {
+    let (_root, spec, extractor) = setup(FRAME_CHUNK * 2);
+    let runner = FakeRunner::new(ok_outputs(2), WriteMode::Bytes);
+    // Cancelled as soon as the first chunk has been reported.
+    let observer = Recorder::new(Some(1));
+
+    let error = extract_frames_observed(&spec, &extractor, &runner, &observer).unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            PipelineError::Cancelled {
+                operation: "extract_frames"
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(runner.commands.lock().unwrap().len(), 1);
+    assert!(staging_dirs(spec.output_root()).is_empty());
 }
 
 #[cfg(windows)]

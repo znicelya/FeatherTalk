@@ -3,9 +3,10 @@
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
-use feathertalk_frame_pipeline::CommandSpec;
+use feathertalk_frame_pipeline::{CommandSpec, PipelineObserver, PipelinePhase};
 
 /// The value ffmpeg receives after `flag`, as text.
 pub fn flag_value(command: &CommandSpec, flag: &str) -> String {
@@ -50,4 +51,37 @@ pub fn chunk_outputs(command: &CommandSpec) -> Vec<(u64, PathBuf)> {
     (first..first + count)
         .map(|index| (index, directory.join(format!("{index:06}.jpg"))))
         .collect()
+}
+
+/// Records every phase a pipeline stage reports, and flips to cancelled once
+/// `cancel_after` phases have arrived.
+pub struct Recorder {
+    phases: Mutex<Vec<PipelinePhase>>,
+    cancel_after: Option<usize>,
+}
+
+impl Recorder {
+    pub fn new(cancel_after: Option<usize>) -> Self {
+        Self {
+            phases: Mutex::new(Vec::new()),
+            cancel_after,
+        }
+    }
+
+    pub fn phases(&self) -> Vec<PipelinePhase> {
+        self.phases.lock().unwrap().clone()
+    }
+}
+
+impl PipelineObserver for Recorder {
+    fn phase(&self, phase: PipelinePhase) {
+        self.phases.lock().unwrap().push(phase);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        match self.cancel_after {
+            Some(limit) => self.phases.lock().unwrap().len() >= limit,
+            None => false,
+        }
+    }
 }

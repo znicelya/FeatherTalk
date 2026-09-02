@@ -7,8 +7,8 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CommandSpec, FramePipelineSpec, PipelineError, ProcessOutput, ProcessRunner,
-    SystemProcessRunner,
+    CommandSpec, FramePipelineSpec, NoObserver, PipelineError, PipelineObserver, PipelinePhase,
+    ProcessOutput, ProcessRunner, SystemProcessRunner,
     commands::frame_command,
     process::{FrameExtractor, MAX_CAPTURE_BYTES, MAX_FRAME_BYTES, next_id},
 };
@@ -89,10 +89,22 @@ pub fn extract_frames(
     extract_frames_with_runner(spec, extractor, &SystemProcessRunner)
 }
 
+/// Extracts every frame with the given runner and no observer.
 pub fn extract_frames_with_runner<R: ProcessRunner + ?Sized>(
     spec: &FramePipelineSpec,
     extractor: &FrameExtractor,
     runner: &R,
+) -> Result<FrameBatch, PipelineError> {
+    extract_frames_observed(spec, extractor, runner, &NoObserver)
+}
+
+/// Extracts every frame, reporting one phase per finished chunk and stopping
+/// at the next chunk boundary once the observer reports cancellation.
+pub fn extract_frames_observed<R: ProcessRunner + ?Sized>(
+    spec: &FramePipelineSpec,
+    extractor: &FrameExtractor,
+    runner: &R,
+    observer: &dyn PipelineObserver,
 ) -> Result<FrameBatch, PipelineError> {
     reject_final_destinations(spec)?;
     fs::create_dir_all(spec.output_root())
@@ -110,6 +122,14 @@ pub fn extract_frames_with_runner<R: ProcessRunner + ?Sized>(
     let pattern = frames_dir.join("%06d.jpg");
     let mut first_index = 0;
     while first_index < spec.frame_count() {
+        if observer.is_cancelled() {
+            // Staging is disposable: a cancelled run leaves the previous
+            // outputs, if any, exactly as they were.
+            let _ = fs::remove_dir_all(&staging);
+            return Err(PipelineError::Cancelled {
+                operation: "extract_frames",
+            });
+        }
         let count = FRAME_CHUNK.min(spec.frame_count() - first_index);
         let command = frame_command(extractor, spec.video_path(), first_index, count, &pattern);
         if let Err(error) = run_frame(runner, &command, extractor.timeout()) {
@@ -129,6 +149,10 @@ pub fn extract_frames_with_runner<R: ProcessRunner + ?Sized>(
             }
         }
         first_index += count;
+        observer.phase(PipelinePhase::Extracting {
+            completed: first_index,
+            total: spec.frame_count(),
+        });
     }
     Ok(FrameBatch {
         staging_dir: staging,
