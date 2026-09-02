@@ -62,3 +62,18 @@ pub(crate) fn expected_len(width: u32, height: u32, channels: usize) -> Result<u
         .and_then(|pixels| pixels.checked_mul(channels))
         .ok_or(ImageError::InvalidDimensions { width, height })
 }
+
+/// Byte length of a validated resize target.
+///
+/// The bounds are the same as `expected_len`, but a bad target is a caller
+/// mistake rather than a corrupt buffer, so it reports `InvalidTargetSize`.
+pub(crate) fn check_target(width: u32, height: u32, channels: usize) -> Result<usize, ImageError> {
+    if width == 0 || height == 0 || width > MAX_EDGE || height > MAX_EDGE {
+        return Err(ImageError::InvalidTargetSize {
+            width,
+            height,
+            max_dimension: MAX_EDGE,
+        });
+    }
+    expected_len(width, height, channels)
+}

@@ -7,8 +7,10 @@ mod error;
 mod image;
 mod jpeg;
 mod laplacian;
+mod resize;
 
 pub use error::ImageError;
 pub use image::{BgrImage, GrayImage, to_gray};
 pub use jpeg::decode_jpeg;
 pub use laplacian::{laplacian_response, laplacian_variance};
+pub use resize::resize_area;

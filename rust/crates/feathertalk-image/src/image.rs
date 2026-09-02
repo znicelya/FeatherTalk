@@ -51,6 +51,13 @@ impl BgrImage {
         let base = (y as usize * self.width as usize + x as usize) * 3;
         Ok([self.bgr[base], self.bgr[base + 1], self.bgr[base + 2]])
     }
+
+    /// Row `y`, exactly `width * 3` bytes, which the resize kernels index directly.
+    pub(crate) fn row(&self, y: u32) -> &[u8] {
+        let stride = self.width as usize * 3;
+        let start = y as usize * stride;
+        &self.bgr[start..start + stride]
+    }
 }
 
 /// Row-major, single-channel 8-bit image.
