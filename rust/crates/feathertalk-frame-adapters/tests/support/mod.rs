@@ -1021,3 +1021,515 @@ fn stream_hash(path: &Path) -> Result<(u64, String), String> {
     }
     Ok((bytes, hex::encode(digest.finalize())))
 }
+
+// ---------------------------------------------------------------------------
+// demo_frame_v1: the real video frame Tasks 12, 14 and 15 evaluate.
+// ---------------------------------------------------------------------------
+
+/// Re-exported so the contract test can size the landmark array without
+/// naming `feathertalk-pfld` itself.
+pub use feathertalk_pfld::PFLD_LANDMARK_COUNT;
+
+pub const DEMO_CASE: &str = "demo_frame_v1";
+
+/// The tracked demo clip, relative to the repository root.
+pub const DEMO_VIDEO: &str = "demo/feathertalk_demo_latest_188.mp4";
+
+pub const DEMO_VIDEO_SHA256: &str =
+    "9353ad796089aa104765d651ca99f158349cfd203644923b2fa72f68b44e9ac1";
+
+/// The zero based frame the fixture was cut from.
+pub const DEMO_FRAME_INDEX: u64 = 750;
+
+/// Committed JPEG payloads, in manifest key order.
+pub const DEMO_BLOBS: [&str; 2] = ["frame.jpg", "frame_blurred.jpg"];
+
+/// The two evaluated frames, in manifest key order.
+pub const DEMO_FRAMES: [&str; 2] = ["blurred", "sharp"];
+
+#[derive(Debug, Clone, Copy)]
+pub struct DemoDetection {
+    pub score: f32,
+    /// `[x, y, width, height]` in source pixels.
+    pub bbox: [f32; 4],
+    pub keypoints: [[f32; 2]; 5],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DemoCrop {
+    pub size: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    /// `[left, top, right, bottom]`.
+    pub padding: [u32; 4],
+    /// `[x, y, width, height]` of the clipped source rectangle.
+    pub source: [i64; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct DemoFrame {
+    pub path: PathBuf,
+    pub laplacian_variance: f64,
+    pub level_max_scores: Vec<f32>,
+    pub detection: DemoDetection,
+    pub crop: DemoCrop,
+    pub landmarks: Vec<[i32; 2]>,
+}
+
+pub fn demo_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/demo_frame_v1")
+}
+
+/// The tracked clip lives at the repository root, three levels above
+/// `rust/crates/feathertalk-frame-adapters`.
+pub fn demo_video_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(DEMO_VIDEO)
+}
+
+pub fn load_and_verify_demo_fixture() -> Result<VerifiedFixture, String> {
+    let root = demo_fixture_dir();
+    let manifest_path = root.join("fixture.json");
+    let label = manifest_path.display().to_string();
+    let bytes = std::fs::read(&manifest_path).map_err(|error| format!("{label}: {error}"))?;
+    let manifest = verify_demo_manifest(&label, &bytes)?;
+
+    let mut actual_names = std::fs::read_dir(&root)
+        .map_err(|error| format!("{}: {error}", root.display()))?
+        .map(|entry| {
+            entry
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .map_err(|error| format!("{}: {error}", root.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    actual_names.sort();
+    let mut expected_names = DEMO_BLOBS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<Vec<_>>();
+    expected_names.push("fixture.json".to_owned());
+    expected_names.sort();
+    if actual_names != expected_names {
+        return Err(format!(
+            "{}: expected files {expected_names:?}, got {actual_names:?}",
+            root.display()
+        ));
+    }
+
+    for name in DEMO_BLOBS {
+        require_recorded_bytes(&root.join(name), &manifest["blobs"][name])?;
+    }
+
+    Ok(VerifiedFixture { root, manifest })
+}
+
+/// Validate every manifest field without touching the filesystem.
+///
+/// The `detection_config` values are only range checked here; the contract test
+/// is what compares them against the pipeline constants, so this module needs no
+/// `feathertalk-frame-pipeline` import.
+pub fn verify_demo_manifest(label: &str, bytes: &[u8]) -> Result<Value, String> {
+    let manifest: Value =
+        serde_json::from_slice(bytes).map_err(|error| format!("{label}: {error}"))?;
+    let root = object(label, "manifest", &manifest)?;
+    require_keys(
+        label,
+        "manifest",
+        root,
+        &[
+            "blobs",
+            "blur",
+            "case",
+            "detection_config",
+            "frames",
+            "generator",
+            "jpeg",
+            "schema_version",
+            "source",
+        ],
+    )?;
+    require_eq(
+        label,
+        "schema_version",
+        number(label, "schema_version", &manifest["schema_version"])?,
+        1,
+    )?;
+    require_eq(
+        label,
+        "case",
+        text(label, "case", &manifest["case"])?,
+        DEMO_CASE,
+    )?;
+
+    verify_demo_source(label, &manifest)?;
+    verify_generator(label, &manifest)?;
+    verify_jpeg(label, &manifest)?;
+    verify_demo_blur(label, &manifest)?;
+    verify_demo_detection_config(label, &manifest)?;
+    verify_demo_blobs(label, &manifest)?;
+    verify_demo_frames(label, &manifest)?;
+
+    Ok(manifest)
+}
+
+pub fn demo_frame(fixture: &VerifiedFixture, name: &str) -> DemoFrame {
+    let entry = &fixture.manifest["frames"][name];
+    assert!(entry.is_object(), "unknown demo frame {name}");
+
+    let detection = &entry["detection"];
+    let mut keypoints = [[0.0_f32; 2]; 5];
+    for (slot, point) in keypoints
+        .iter_mut()
+        .zip(detection["keypoints"].as_array().expect("verified above"))
+    {
+        *slot = floats::<2>(point);
+    }
+
+    let crop = &entry["crop"];
+    let mut padding = [0_u32; 4];
+    for (slot, value) in padding
+        .iter_mut()
+        .zip(crop["padding"].as_array().expect("verified above"))
+    {
+        *slot = value
+            .as_u64()
+            .expect("verified above")
+            .try_into()
+            .unwrap_or_else(|_| panic!("padding does not fit in u32: {value}"));
+    }
+    let mut source = [0_i64; 4];
+    for (slot, value) in source
+        .iter_mut()
+        .zip(crop["source"].as_array().expect("verified above"))
+    {
+        *slot = value.as_i64().expect("verified above");
+    }
+
+    DemoFrame {
+        path: fixture
+            .root
+            .join(entry["blob"].as_str().expect("verified above")),
+        laplacian_variance: entry["laplacian_variance"]
+            .as_f64()
+            .expect("verified above"),
+        level_max_scores: floats::<3>(&entry["level_max_scores"]).to_vec(),
+        detection: DemoDetection {
+            score: detection["score"].as_f64().expect("verified above") as f32,
+            bbox: floats::<4>(&detection["bbox"]),
+            keypoints,
+        },
+        crop: DemoCrop {
+            size: unsigned_field(crop, "size"),
+            origin_x: signed_field(crop, "origin_x"),
+            origin_y: signed_field(crop, "origin_y"),
+            padding,
+            source,
+        },
+        landmarks: entry["landmarks"]
+            .as_array()
+            .expect("verified above")
+            .iter()
+            .map(|point| {
+                let pair = point.as_array().expect("verified above");
+                [
+                    signed_field_at(pair, 0, "landmark"),
+                    signed_field_at(pair, 1, "landmark"),
+                ]
+            })
+            .collect(),
+    }
+}
+
+fn verify_demo_source(label: &str, manifest: &Value) -> Result<(), String> {
+    let source = object(label, "source", &manifest["source"])?;
+    require_keys(
+        label,
+        "source",
+        source,
+        &[
+            "extraction",
+            "fps",
+            "frame_count",
+            "frame_index",
+            "height",
+            "kind",
+            "raw_bgr_sha256",
+            "sha256",
+            "video",
+            "width",
+        ],
+    )?;
+    for (field, expected) in [
+        ("kind", "video_frame"),
+        ("video", DEMO_VIDEO),
+        ("sha256", DEMO_VIDEO_SHA256),
+    ] {
+        let qualified = format!("source.{field}");
+        let value = text(label, &qualified, &manifest["source"][field])?;
+        require_eq(label, &qualified, value, expected)?;
+    }
+    for (field, expected) in [
+        ("width", 1280),
+        ("height", 720),
+        ("frame_count", 1511),
+        ("frame_index", DEMO_FRAME_INDEX),
+    ] {
+        let qualified = format!("source.{field}");
+        let value = number(label, &qualified, &manifest["source"][field])?;
+        require_eq(label, &qualified, value, expected)?;
+    }
+    let fps = manifest["source"]["fps"]
+        .as_f64()
+        .ok_or_else(|| format!("{label}: source.fps must be a number"))?;
+    require_eq(label, "source.fps", fps, 25.0)?;
+
+    // `require_hash` looks for a field named `sha256`, so the raw frame digest
+    // is shape checked here instead.
+    let raw = text(
+        label,
+        "source.raw_bgr_sha256",
+        &manifest["source"]["raw_bgr_sha256"],
+    )?;
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{label}: source.raw_bgr_sha256 is not a 64 digit hex string"
+        ));
+    }
+
+    let extraction = object(
+        label,
+        "source.extraction",
+        &manifest["source"]["extraction"],
+    )?;
+    require_keys(
+        label,
+        "source.extraction",
+        extraction,
+        &["arguments", "tool"],
+    )?;
+    require_eq(
+        label,
+        "source.extraction.tool",
+        text(
+            label,
+            "source.extraction.tool",
+            &manifest["source"]["extraction"]["tool"],
+        )?,
+        "ffmpeg",
+    )?;
+    let arguments = manifest["source"]["extraction"]["arguments"]
+        .as_array()
+        .filter(|arguments| !arguments.is_empty())
+        .ok_or_else(|| format!("{label}: source.extraction.arguments must be a non-empty array"))?;
+    let selector = format!("eq(n\\,{DEMO_FRAME_INDEX})");
+    let mut selects_the_frame = false;
+    for (index, entry) in arguments.iter().enumerate() {
+        let argument = text(
+            label,
+            &format!("source.extraction.arguments[{index}]"),
+            entry,
+        )?;
+        if argument.contains(&selector) {
+            selects_the_frame = true;
+        }
+    }
+    if !selects_the_frame {
+        return Err(format!(
+            "{label}: source.extraction.arguments must contain {selector}"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_demo_blur(label: &str, manifest: &Value) -> Result<(), String> {
+    let blur = object(label, "blur", &manifest["blur"])?;
+    require_keys(label, "blur", blur, &["kernel", "sigma"])?;
+    // OpenCV only accepts odd Gaussian kernels; 19 is the pinned value.
+    require_eq(
+        label,
+        "blur.kernel",
+        number(label, "blur.kernel", &manifest["blur"]["kernel"])?,
+        19,
+    )?;
+    let sigma = manifest["blur"]["sigma"]
+        .as_f64()
+        .ok_or_else(|| format!("{label}: blur.sigma must be a number"))?;
+    require_eq(label, "blur.sigma", sigma, 3.0)
+}
+
+fn verify_demo_detection_config(label: &str, manifest: &Value) -> Result<(), String> {
+    let config = object(label, "detection_config", &manifest["detection_config"])?;
+    require_keys(
+        label,
+        "detection_config",
+        config,
+        &["confidence_threshold", "nms_iou_threshold"],
+    )?;
+    for field in ["confidence_threshold", "nms_iou_threshold"] {
+        let qualified = format!("detection_config.{field}");
+        if !manifest["detection_config"][field]
+            .as_f64()
+            .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+        {
+            return Err(format!("{label}: {qualified} must be a number in 0..=1"));
+        }
+    }
+    Ok(())
+}
+
+fn verify_demo_blobs(label: &str, manifest: &Value) -> Result<(), String> {
+    let blobs = object(label, "blobs", &manifest["blobs"])?;
+    require_keys(label, "blobs", blobs, &DEMO_BLOBS)?;
+    for name in DEMO_BLOBS {
+        let qualified = format!("blobs.{name}");
+        let descriptor = object(label, &qualified, &manifest["blobs"][name])?;
+        require_keys(label, &qualified, descriptor, &["bytes", "sha256"])?;
+        require_size_and_hash(label, &qualified, &manifest["blobs"][name])?;
+    }
+    Ok(())
+}
+
+fn verify_demo_frames(label: &str, manifest: &Value) -> Result<(), String> {
+    let frames = object(label, "frames", &manifest["frames"])?;
+    require_keys(label, "frames", frames, &DEMO_FRAMES)?;
+    for name in DEMO_FRAMES {
+        let qualified = format!("frames.{name}");
+        let entry = object(label, &qualified, &manifest["frames"][name])?;
+        require_keys(
+            label,
+            &qualified,
+            entry,
+            &[
+                "blob",
+                "crop",
+                "detection",
+                "landmarks",
+                "laplacian_variance",
+                "level_max_scores",
+            ],
+        )?;
+
+        let blob = text(
+            label,
+            &format!("{qualified}.blob"),
+            &manifest["frames"][name]["blob"],
+        )?;
+        if !DEMO_BLOBS.contains(&blob) {
+            return Err(format!(
+                "{label}: {qualified}.blob must name a committed payload, got {blob}"
+            ));
+        }
+
+        if !manifest["frames"][name]["laplacian_variance"]
+            .as_f64()
+            .is_some_and(|variance| variance.is_finite() && variance > 0.0)
+        {
+            return Err(format!(
+                "{label}: {qualified}.laplacian_variance must be a positive number"
+            ));
+        }
+
+        let scores = reals(
+            label,
+            &format!("{qualified}.level_max_scores"),
+            &manifest["frames"][name]["level_max_scores"],
+            3,
+        )?;
+        if scores.iter().any(|score| !(0.0..=1.0).contains(score)) {
+            return Err(format!(
+                "{label}: {qualified}.level_max_scores must lie in 0..=1, got {scores:?}"
+            ));
+        }
+
+        verify_demo_detection(label, &qualified, &manifest["frames"][name]["detection"])?;
+        verify_demo_crop(label, &qualified, &manifest["frames"][name]["crop"])?;
+        verify_demo_landmarks(label, &qualified, &manifest["frames"][name]["landmarks"])?;
+    }
+    Ok(())
+}
+
+fn verify_demo_detection(label: &str, frame: &str, value: &Value) -> Result<(), String> {
+    let qualified = format!("{frame}.detection");
+    let detection = object(label, &qualified, value)?;
+    require_keys(
+        label,
+        &qualified,
+        detection,
+        &["bbox", "keypoints", "score"],
+    )?;
+    if !value["score"]
+        .as_f64()
+        .is_some_and(|score| score.is_finite() && (0.0..=1.0).contains(&score))
+    {
+        return Err(format!(
+            "{label}: {qualified}.score must be a number in 0..=1"
+        ));
+    }
+    let bbox = reals(label, &format!("{qualified}.bbox"), &value["bbox"], 4)?;
+    if bbox[2] <= 0.0 || bbox[3] <= 0.0 {
+        return Err(format!(
+            "{label}: {qualified}.bbox must have positive extent, got {bbox:?}"
+        ));
+    }
+    let keypoints = value["keypoints"]
+        .as_array()
+        .filter(|points| points.len() == 5)
+        .ok_or_else(|| format!("{label}: {qualified}.keypoints must hold 5 points"))?;
+    for (index, point) in keypoints.iter().enumerate() {
+        reals(label, &format!("{qualified}.keypoints[{index}]"), point, 2)?;
+    }
+    Ok(())
+}
+
+fn verify_demo_crop(label: &str, frame: &str, value: &Value) -> Result<(), String> {
+    let qualified = format!("{frame}.crop");
+    let crop = object(label, &qualified, value)?;
+    require_keys(
+        label,
+        &qualified,
+        crop,
+        &["origin_x", "origin_y", "padding", "size", "source"],
+    )?;
+    let size = number(label, &format!("{qualified}.size"), &value["size"])?;
+    if size == 0 {
+        return Err(format!("{label}: {qualified}.size must be positive"));
+    }
+    signed(label, &format!("{qualified}.origin_x"), &value["origin_x"])?;
+    signed(label, &format!("{qualified}.origin_y"), &value["origin_y"])?;
+    integers(label, &format!("{qualified}.padding"), &value["padding"], 4)?;
+    let source = value["source"]
+        .as_array()
+        .filter(|source| source.len() == 4)
+        .ok_or_else(|| format!("{label}: {qualified}.source must hold 4 integers"))?;
+    for (index, entry) in source.iter().enumerate() {
+        signed(label, &format!("{qualified}.source[{index}]"), entry)?;
+    }
+    Ok(())
+}
+
+fn verify_demo_landmarks(label: &str, frame: &str, value: &Value) -> Result<(), String> {
+    let qualified = format!("{frame}.landmarks");
+    let points = value
+        .as_array()
+        .filter(|points| points.len() == PFLD_LANDMARK_COUNT)
+        .ok_or_else(|| format!("{label}: {qualified} must hold {PFLD_LANDMARK_COUNT} points"))?;
+    for (index, point) in points.iter().enumerate() {
+        let pair = point
+            .as_array()
+            .filter(|pair| pair.len() == 2)
+            .ok_or_else(|| format!("{label}: {qualified}[{index}] must be a pair"))?;
+        for entry in pair {
+            signed(label, &format!("{qualified}[{index}]"), entry)?;
+        }
+    }
+    Ok(())
+}
+
+fn signed_field_at(pair: &[Value], index: usize, name: &str) -> i32 {
+    pair[index]
+        .as_i64()
+        .unwrap_or_else(|| panic!("{name}[{index}] must be an integer"))
+        .try_into()
+        .unwrap_or_else(|_| panic!("{name}[{index}] does not fit in i32"))
+}
