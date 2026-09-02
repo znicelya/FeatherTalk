@@ -1,6 +1,7 @@
 use std::io;
 
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskError, TaskStage};
+use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError};
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
 
@@ -8,6 +9,10 @@ use feathertalk_project::ProjectError;
 /// pipeline stage exists, so every failure is reported as happening while the
 /// task was being prepared. `TaskError.stage` must never be terminal.
 const FAILURE_STAGE: TaskStage = TaskStage::Preparing;
+
+/// How many rejected frames the detail names before it stops. Enough to see a
+/// pattern, short enough to stay inside `MAX_DETAIL_CHARS`.
+const MAX_REPORTED_ANOMALIES: usize = 3;
 
 pub fn project_task_error(error: &ProjectError) -> TaskError {
     let code = project_error_code(error);
@@ -31,6 +36,45 @@ pub fn media_task_error(error: &MediaError) -> TaskError {
 
 pub fn is_media_cancellation(error: &MediaError) -> bool {
     matches!(error, MediaError::ToolCancelled { .. })
+}
+
+pub fn pipeline_task_error(error: &PipelineError) -> TaskError {
+    let code = pipeline_error_code(error);
+    TaskError::new(
+        code,
+        pipeline_summary(error),
+        &clamp(&error.to_string()),
+        FAILURE_STAGE,
+    )
+}
+
+pub fn is_pipeline_cancellation(error: &PipelineError) -> bool {
+    matches!(error, PipelineError::Cancelled { .. })
+}
+
+/// Maps a quality report the pipeline accepted but the caller must reject.
+///
+/// The first anomaly decides the code and the summary: it is the earliest frame
+/// the user has to fix, and mixing codes would leave the CLI without a single
+/// recovery hint.
+pub fn quality_task_error(anomalies: &[FrameAnomaly]) -> TaskError {
+    let first = anomalies.first();
+    let code = first.map_or(ErrorCode::MediaInvalid, |anomaly| {
+        anomaly_error_code(anomaly.code())
+    });
+    let summary = first.map_or("抽帧质检未通过", |anomaly| {
+        anomaly_summary(anomaly.code())
+    });
+    let mut detail = format!("{} frame(s) rejected", anomalies.len());
+    for anomaly in anomalies.iter().take(MAX_REPORTED_ANOMALIES) {
+        detail.push_str(&format!(
+            "; frame {} {:?}: {}",
+            anomaly.frame_index(),
+            anomaly.code(),
+            anomaly.summary()
+        ));
+    }
+    TaskError::new(code, summary, &clamp(&detail), FAILURE_STAGE)
 }
 
 fn project_error_code(error: &ProjectError) -> ErrorCode {
@@ -123,6 +167,86 @@ fn media_summary(error: &MediaError) -> &'static str {
         MediaError::NormalizationVerificationFailed { .. } => "媒体规范化结果校验失败",
         MediaError::OutputCommitFailed { .. } => "写入输出文件失败",
         MediaError::OutputRollbackFailed { .. } => "写入失败后回滚也失败",
+    }
+}
+
+fn pipeline_error_code(error: &PipelineError) -> ErrorCode {
+    match error {
+        // Bad input or an output directory the user has to clear: the media,
+        // not the worker, is what has to change.
+        PipelineError::InvalidField { .. }
+        | PipelineError::InvalidReport { .. }
+        | PipelineError::OutputDestinationExists { .. }
+        | PipelineError::FrameMissing { .. }
+        | PipelineError::FrameNotRegular { .. }
+        | PipelineError::FrameEmpty { .. }
+        | PipelineError::FrameTooLarge { .. } => ErrorCode::MediaInvalid,
+        PipelineError::Io { source, .. } => io_error_code(source),
+        PipelineError::Adapter { .. } => ErrorCode::ModelIncompatible,
+        PipelineError::Cancelled { .. } => ErrorCode::TaskCancelled,
+        // Everything left is the worker's own machinery misbehaving.
+        PipelineError::ToolFailed { .. }
+        | PipelineError::ToolTimedOut { .. }
+        | PipelineError::ToolOutputTooLarge { .. }
+        | PipelineError::ToolSpawn { .. }
+        | PipelineError::ReportJson { .. }
+        | PipelineError::ReportNotRegular { .. }
+        | PipelineError::ReportTooLarge { .. }
+        | PipelineError::PublishFailed { .. }
+        | PipelineError::PublishRollbackFailed { .. }
+        | PipelineError::QualityRejected { .. } => ErrorCode::WorkerCrashed,
+    }
+}
+
+fn pipeline_summary(error: &PipelineError) -> &'static str {
+    match error {
+        PipelineError::InvalidField { .. } | PipelineError::InvalidReport { .. } => {
+            "抽帧参数不合法"
+        }
+        PipelineError::OutputDestinationExists { .. } => "素材目录已存在抽帧结果",
+        PipelineError::FrameMissing { .. }
+        | PipelineError::FrameNotRegular { .. }
+        | PipelineError::FrameEmpty { .. }
+        | PipelineError::FrameTooLarge { .. } => "抽出的帧不可用",
+        PipelineError::Io { source, .. } => io_summary(source),
+        PipelineError::Adapter { .. } => "模型推理失败",
+        PipelineError::Cancelled { .. } => "任务已取消",
+        PipelineError::ToolFailed { .. } | PipelineError::ToolSpawn { .. } => "ffmpeg 抽帧失败",
+        PipelineError::ToolTimedOut { .. } => "ffmpeg 抽帧超时",
+        PipelineError::ToolOutputTooLarge { .. } => "ffmpeg 输出过大",
+        PipelineError::ReportJson { .. }
+        | PipelineError::ReportNotRegular { .. }
+        | PipelineError::ReportTooLarge { .. } => "质检报告写入失败",
+        PipelineError::PublishFailed { .. } | PipelineError::PublishRollbackFailed { .. } => {
+            "抽帧结果发布失败"
+        }
+        PipelineError::QualityRejected { .. } => "抽帧质检未通过",
+    }
+}
+
+fn anomaly_error_code(code: AnomalyCode) -> ErrorCode {
+    match code {
+        AnomalyCode::FaceNotFound | AnomalyCode::MultipleFaces | AnomalyCode::BboxOutOfBounds => {
+            ErrorCode::FaceNotFound
+        }
+        AnomalyCode::LandmarkInvalid => ErrorCode::LandmarkInvalid,
+        AnomalyCode::BlurredFrame
+        | AnomalyCode::FrameDecodeFailed
+        | AnomalyCode::FrameWriteFailed => ErrorCode::MediaInvalid,
+        AnomalyCode::ModelFailed => ErrorCode::ModelIncompatible,
+    }
+}
+
+fn anomaly_summary(code: AnomalyCode) -> &'static str {
+    match code {
+        AnomalyCode::FaceNotFound => "有帧未检测到人脸",
+        AnomalyCode::MultipleFaces => "有帧检测到多张人脸",
+        AnomalyCode::BboxOutOfBounds => "人脸框超出画面范围",
+        AnomalyCode::LandmarkInvalid => "关键点不合法",
+        AnomalyCode::BlurredFrame => "有帧过于模糊",
+        AnomalyCode::FrameDecodeFailed => "有帧无法解码",
+        AnomalyCode::FrameWriteFailed => "有帧写入失败",
+        AnomalyCode::ModelFailed => "模型推理失败",
     }
 }
 

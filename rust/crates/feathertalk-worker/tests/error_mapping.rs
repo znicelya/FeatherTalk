@@ -1,9 +1,13 @@
 use std::{io, path::PathBuf};
 
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskStage};
+use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError, RecoveryAction};
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
-use feathertalk_worker::{is_media_cancellation, media_task_error, project_task_error};
+use feathertalk_worker::{
+    is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
+    project_task_error, quality_task_error,
+};
 
 fn io_error(kind: io::ErrorKind) -> io::Error {
     io::Error::new(kind, "synthetic")
@@ -299,4 +303,123 @@ fn only_tool_cancelled_counts_as_cancellation() {
     assert!(!is_media_cancellation(&MediaError::InputMissing {
         path: path()
     }));
+}
+
+fn anomaly(index: u64, code: AnomalyCode) -> FrameAnomaly {
+    FrameAnomaly::new(index, code, "摘要", "detail", RecoveryAction::ExcludeFrame).unwrap()
+}
+
+#[test]
+fn every_pipeline_error_maps_to_a_code_and_a_valid_payload() {
+    let cases = vec![
+        (
+            PipelineError::InvalidField {
+                field: "frame_count",
+                message: "must be greater than zero".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            PipelineError::OutputDestinationExists { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            PipelineError::FrameMissing { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            PipelineError::Io {
+                operation: "create_dir",
+                path: path(),
+                source: io_error(io::ErrorKind::StorageFull),
+            },
+            ErrorCode::DiskSpaceLow,
+        ),
+        (
+            PipelineError::Io {
+                operation: "create_dir",
+                path: path(),
+                source: io_error(io::ErrorKind::PermissionDenied),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            PipelineError::Adapter {
+                component: "scrfd",
+                message: "device lost".to_owned(),
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            PipelineError::Cancelled {
+                operation: "extract_frames",
+            },
+            ErrorCode::TaskCancelled,
+        ),
+        (
+            PipelineError::ToolTimedOut {
+                operation: "extract_frames",
+                timeout_ms: 300_000,
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            PipelineError::QualityRejected { count: 4 },
+            ErrorCode::WorkerCrashed,
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let mapped = pipeline_task_error(&error);
+        assert_eq!(mapped.code, expected, "{error:?}");
+        assert_eq!(mapped.stage, TaskStage::Preparing, "{error:?}");
+        assert_eq!(mapped.recovery, expected.default_recovery(), "{error:?}");
+        assert!(!mapped.summary.trim().is_empty(), "{error:?}");
+        assert!(!mapped.detail.is_empty(), "{error:?}");
+        mapped.validate().unwrap();
+    }
+}
+
+#[test]
+fn only_cancellation_is_reported_as_cancellation() {
+    assert!(is_pipeline_cancellation(&PipelineError::Cancelled {
+        operation: "evaluate_frames"
+    }));
+    assert!(!is_pipeline_cancellation(&PipelineError::QualityRejected {
+        count: 1
+    }));
+}
+
+#[test]
+fn a_rejected_quality_report_reports_the_first_anomaly() {
+    let anomalies = vec![
+        anomaly(7, AnomalyCode::LandmarkInvalid),
+        anomaly(8, AnomalyCode::FaceNotFound),
+        anomaly(9, AnomalyCode::BlurredFrame),
+        anomaly(10, AnomalyCode::ModelFailed),
+    ];
+
+    let mapped = quality_task_error(&anomalies);
+
+    assert_eq!(mapped.code, ErrorCode::LandmarkInvalid);
+    assert_eq!(mapped.stage, TaskStage::Preparing);
+    assert!(
+        mapped.detail.contains("4 frame(s) rejected"),
+        "{}",
+        mapped.detail
+    );
+    // Only the first three are named, so a run with thousands of bad frames
+    // still produces a readable detail.
+    assert!(mapped.detail.contains("frame 7"), "{}", mapped.detail);
+    assert!(mapped.detail.contains("frame 9"), "{}", mapped.detail);
+    assert!(!mapped.detail.contains("frame 10"), "{}", mapped.detail);
+    mapped.validate().unwrap();
+}
+
+#[test]
+fn an_empty_anomaly_list_still_produces_a_valid_error() {
+    let mapped = quality_task_error(&[]);
+
+    assert_eq!(mapped.code, ErrorCode::MediaInvalid);
+    mapped.validate().unwrap();
 }

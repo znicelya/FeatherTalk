@@ -21,7 +21,10 @@ pub use config::{
     DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFMPEG, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, ENV_PFLD_DIR,
     ENV_SCRFD_DIR, ModelToolchain, WorkerConfig,
 };
-pub use error_map::{is_media_cancellation, media_task_error, project_task_error};
+pub use error_map::{
+    is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
+    project_task_error, quality_task_error,
+};
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
