@@ -1,5 +1,8 @@
-use feathertalk_face::{ImageSize, ResizeTransform, resize_with_padding};
-use feathertalk_frame_pipeline::PipelineError;
+use feathertalk_face::{
+    Detection, DetectionConfig, FaceError, ImageSize, ResizeTransform, decode_level,
+    generate_anchor_centers, non_max_suppression, resize_with_padding,
+};
+use feathertalk_frame_pipeline::{FaceDetection, PipelineError};
 use feathertalk_image::{BgrImage, resize_area};
 
 /// SCRFD's fixed square input edge, the canvas `resize_with_padding` targets.
@@ -82,4 +85,116 @@ pub fn scrfd_input(image: &BgrImage) -> Result<ScrfdInput, PipelineError> {
     }
 
     Ok(ScrfdInput { transform, data })
+}
+
+/// SCRFD emits two anchors per feature-map location at every stride.
+const ANCHORS_PER_LOCATION: u32 = 2;
+
+/// One SCRFD output level copied back to host memory.
+///
+/// `bbox_distances` and `keypoint_distances` are the raw regression outputs, in
+/// stride units; `decode_level` applies the stride and the letterbox.
+#[derive(Debug, Clone)]
+pub struct LevelHostData {
+    /// Index into `SCRFD_STRIDES`, used only in error messages.
+    pub level: usize,
+    pub stride: u32,
+    /// One score per anchor: 12 800, 3 200 and 800 for strides 8, 16 and 32.
+    pub scores: Vec<f32>,
+    pub bbox_distances: Vec<[f32; 4]>,
+    pub keypoint_distances: Vec<[f32; 10]>,
+}
+
+/// Decode three SCRFD levels and reduce them with non-maximum suppression.
+///
+/// The port of `detect_face.py`'s postprocessing loop. Anchors below
+/// `config.confidence_threshold` are skipped before decoding, exactly as the
+/// reference does, and boxes that clamp to nothing are dropped rather than
+/// failing the frame.
+pub fn scrfd_detections(
+    levels: &[LevelHostData; 3],
+    transform: &ResizeTransform,
+    config: &DetectionConfig,
+) -> Result<Vec<FaceDetection>, PipelineError> {
+    let mut candidates: Vec<Detection> = Vec::new();
+
+    for level in levels {
+        let anchors = generate_anchor_centers(transform.model, level.stride, ANCHORS_PER_LOCATION)
+            .map_err(|error| level_error(level.level, None, &error))?;
+
+        // `decode_level` checks these too, but it is called with one-anchor
+        // slices below, so its check can never see a truncated buffer.
+        for (field, actual) in [
+            ("scores", level.scores.len()),
+            ("bbox_distances", level.bbox_distances.len()),
+            ("keypoint_distances", level.keypoint_distances.len()),
+        ] {
+            if actual != anchors.len() {
+                return Err(PipelineError::Adapter {
+                    component: "scrfd",
+                    message: format!(
+                        "level {} {field} holds {actual} entries, expected {}",
+                        level.level,
+                        anchors.len()
+                    ),
+                });
+            }
+        }
+
+        for (index, score) in level.scores.iter().enumerate() {
+            // The reference filters before decoding, so a sub-threshold anchor
+            // is allowed to hold geometry that would be rejected below.
+            if *score < config.confidence_threshold {
+                continue;
+            }
+            let window = index..index + 1;
+            match decode_level(
+                level.level,
+                level.stride,
+                &anchors[window.clone()],
+                &level.scores[window.clone()],
+                &level.bbox_distances[window.clone()],
+                &level.keypoint_distances[window],
+                transform,
+            ) {
+                Ok(decoded) => candidates.extend(decoded),
+                // A box that clamps to zero area is not an error: upstream
+                // never emits it, and the frame may still hold a real face.
+                Err(FaceError::InvalidDetectionGeometry { .. }) => continue,
+                Err(error) => return Err(level_error(level.level, Some(index), &error)),
+            }
+        }
+    }
+
+    let kept =
+        non_max_suppression(&candidates, config).map_err(|error| PipelineError::Adapter {
+            component: "scrfd",
+            message: error.to_string(),
+        })?;
+
+    Ok(kept
+        .into_iter()
+        .map(|index| {
+            let candidate = candidates[index];
+            FaceDetection {
+                bbox: candidate.bbox,
+                score: candidate.score,
+                keypoints: candidate.keypoints,
+            }
+        })
+        .collect())
+}
+
+/// Attach the level, and where known the anchor, to a `feathertalk-face`
+/// failure. `decode_level` reports index 0 for a one-anchor slice, so its own
+/// message cannot identify the anchor.
+fn level_error(level: usize, anchor: Option<usize>, error: &FaceError) -> PipelineError {
+    let message = match anchor {
+        Some(anchor) => format!("level {level} anchor {anchor}: {error}"),
+        None => format!("level {level}: {error}"),
+    };
+    PipelineError::Adapter {
+        component: "scrfd",
+        message,
+    }
 }
