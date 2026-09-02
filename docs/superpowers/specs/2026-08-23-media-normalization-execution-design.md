@@ -73,9 +73,12 @@ pub fn normalize_media(
 ```
 
 The crate also exposes `CommandSpec`, `ProcessOutput`, `ProcessRunner`, and
-`SystemProcessRunner`. `probe_media_with_runner` and
+`SystemProcessRunner`. `probe_media_with_runner`, `probe_video_with_runner`, and
 `normalize_media_with_runner` accept a caller-supplied runner. These are test
 and future worker seams; they cannot change fixed command arguments.
+`probe_video_with_runner` runs the same argv but expects one video stream and no
+audio, which is the shape of the `video_25fps.mp4` this crate writes; frame
+extraction consumes that artifact and cannot use the audio/video entry point.
 
 ## 5. Probe Contract
 

@@ -21,6 +21,10 @@ struct MediaRunner {
 
 impl MediaRunner {
     fn new(frame_count: u64, frame_rate: &str) -> Self {
+        // A normalized video carries no audio: `normalize_media` writes the
+        // sound to `audio_16k_mono.wav` and verifies `video_25fps.mp4` as
+        // video-only. The fixture has to have the same shape, or these tests
+        // pass against a file the command can never be given.
         let probe = serde_json::json!({
             "format": { "format_name": "mov,mp4", "duration": "2.0" },
             "streams": [
@@ -32,14 +36,6 @@ impl MediaRunner {
                     "height": 480,
                     "avg_frame_rate": frame_rate,
                     "nb_read_frames": frame_count.to_string(),
-                    "duration": "2.0"
-                },
-                {
-                    "codec_type": "audio",
-                    "codec_name": "aac",
-                    "sample_fmt": "fltp",
-                    "sample_rate": "48000",
-                    "channels": 2,
                     "duration": "2.0"
                 }
             ]

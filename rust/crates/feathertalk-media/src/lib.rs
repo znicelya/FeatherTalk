@@ -12,7 +12,7 @@ pub use commands::{
     CommandSpec, audio_normalization_command, probe_command, video_normalization_command,
 };
 pub use error::MediaError;
-pub use execution::{probe_media, probe_media_with_runner};
+pub use execution::{probe_media, probe_media_with_runner, probe_video_with_runner};
 pub use model::{
     AudioMetadata, FrameRate, MediaArtifact, MediaInput, MediaProbe, MediaToolchain,
     NormalizationSpec, NormalizedMedia, NormalizedMediaLayout, ProbeFormat, ValidatedInput,

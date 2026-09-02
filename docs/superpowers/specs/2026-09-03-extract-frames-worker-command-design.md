@@ -250,7 +250,9 @@ where
 
 两个 runner 是两个 crate 的不同 trait：ffprobe 探测走 `feathertalk-media`，抽帧走 `feathertalk-frame-pipeline`。`?Sized` 加上三个模型 trait 的对象安全性，让测试传 `&dyn` 不产生额外成本。
 
-`execute_with_runner` 的 `Request::ExtractFrames` 分支负责默认装配：用 media runner 跑一次 `probe_media_with_runner`，构造 `SystemProcessRunner`，加载三个适配器，然后转调 `execute_extract_frames`。现有 worker 测试大多注入假件、不加载权重，这一层拆分让它们不受影响。
+`execute_with_runner` 的 `Request::ExtractFrames` 分支负责默认装配：用 media runner 跑一次 `probe_video_with_runner`，构造 `SystemProcessRunner`，加载三个适配器，然后转调 `execute_extract_frames`。现有 worker 测试大多注入假件、不加载权重，这一层拆分让它们不受影响。
+
+探测入口是 `probe_video_with_runner` 而不是 `probe_media_with_runner`：本命令读的是 `normalize_media` 写出的 `video_25fps.mp4`，声音在 `audio_16k_mono.wav` 里，`normalize_media` 自己也按 video-only 校验这个文件。要求音视频双流的入口会直接拒掉本命令唯一的合法输入。
 
 ### 5.3 JobExecutor 改为传 &WorkerConfig
 
@@ -279,7 +281,7 @@ pub type JobExecutor = Box<
 
 ### 6.2 帧数与尺寸来自 ffprobe
 
-`frame_count`、`image_width`、`image_height` 全部取自同一次 `probe_media_with_runner` 返回的 `MediaProbe.video`，绝不从请求里取。请求里只有 `project_dir` 和 `video` 两个字段，本来也没有地方放它们；更重要的是，帧数决定了要抽多少帧，让调用方提供等于把一致性责任推给客户端。
+`frame_count`、`image_width`、`image_height` 全部取自同一次 `probe_video_with_runner` 返回的 `MediaProbe.video`，绝不从请求里取。请求里只有 `project_dir` 和 `video` 两个字段，本来也没有地方放它们；更重要的是，帧数决定了要抽多少帧，让调用方提供等于把一致性责任推给客户端。
 
 ### 6.3 quality.json 与既有产物重跑
 

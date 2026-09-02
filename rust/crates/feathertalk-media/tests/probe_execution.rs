@@ -2,7 +2,7 @@ use std::{collections::VecDeque, sync::Mutex, time::Duration};
 
 use feathertalk_media::{
     CommandSpec, MediaError, MediaInput, MediaToolchain, ProcessOutput, ProcessRunner,
-    probe_media_with_runner, validate_input,
+    probe_media_with_runner, probe_video_with_runner, validate_input,
 };
 
 struct FakeRunner {
@@ -50,6 +50,19 @@ fn valid_probe() -> Vec<u8> {
       "streams":[
         {"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":640,"height":480,"avg_frame_rate":"25/1","nb_read_frames":"50","duration":"2.0"},
         {"codec_type":"audio","codec_name":"aac","sample_fmt":"fltp","sample_rate":"48000","channels":2,"duration":"2.0"}
+      ]
+    }"#
+    .to_vec()
+}
+
+/// What `normalize_media` writes as `video_25fps.mp4`: one video stream and no
+/// audio, which is also the shape `normalize_media` verifies its own output
+/// against. This is the report `extract_frames` has to be able to read.
+fn video_only_probe() -> Vec<u8> {
+    br#"{
+      "format":{"format_name":"mov,mp4","duration":"1.0"},
+      "streams":[
+        {"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":1280,"height":720,"avg_frame_rate":"25/1","nb_read_frames":"25","duration":"1.0"}
       ]
     }"#
     .to_vec()
@@ -133,6 +146,46 @@ fn a_cancelled_probe_surfaces_as_tool_cancelled() {
         .expect_err("a cancelled probe must not report success");
     assert!(
         matches!(error, MediaError::ToolCancelled { operation: "probe" }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn the_video_probe_accepts_a_report_without_audio() {
+    let (_temp, input) = input();
+    let runner = FakeRunner::new(vec![Ok(ProcessOutput::new(
+        Some(0),
+        video_only_probe(),
+        Vec::new(),
+    ))]);
+    let probe = probe_video_with_runner(&input, &toolchain(), &runner).unwrap();
+    assert_eq!(probe.video().unwrap().frame_count(), 25);
+    assert!(probe.audio().is_none());
+    // The audio/video probe cannot read that same report at all, which is the
+    // whole reason this second entry point exists.
+    let runner = FakeRunner::new(vec![Ok(ProcessOutput::new(
+        Some(0),
+        video_only_probe(),
+        Vec::new(),
+    ))]);
+    assert!(matches!(
+        probe_media_with_runner(&input, &toolchain(), &runner),
+        Err(MediaError::MissingStream { stream: "audio" })
+    ));
+}
+
+#[test]
+fn the_video_probe_refuses_a_report_carrying_audio() {
+    let (_temp, input) = input();
+    let runner = FakeRunner::new(vec![Ok(ProcessOutput::new(
+        Some(0),
+        valid_probe(),
+        Vec::new(),
+    ))]);
+    let error = probe_video_with_runner(&input, &toolchain(), &runner)
+        .expect_err("a normalized video carries no audio stream");
+    assert!(
+        matches!(error, MediaError::ProbeContract { ref field, .. } if field == "streams.audio"),
         "{error:?}"
     );
 }

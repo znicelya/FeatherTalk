@@ -9,7 +9,7 @@ use feathertalk_frame_pipeline::{
     extract_frames_observed, publish_frame_artifacts,
 };
 use feathertalk_media::{
-    CancellationToken, MediaInput, MediaToolchain, probe_media_with_runner, validate_input,
+    CancellationToken, MediaInput, MediaToolchain, probe_video_with_runner, validate_input,
 };
 
 use crate::{
@@ -134,8 +134,11 @@ where
         source: params.video.clone(),
     })
     .map_err(|error| media_failure(&error))?;
+    // A video-only probe, because that is what `normalize_media` produces: the
+    // audio lives in `audio_16k_mono.wav`, and the audio/video probe would
+    // refuse the very artifact this command exists to read.
     let probe =
-        probe_media_with_runner(&input, media, runner).map_err(|error| media_failure(&error))?;
+        probe_video_with_runner(&input, media, runner).map_err(|error| media_failure(&error))?;
     let Some(video) = probe.video() else {
         return Err(CommandOutcome::Failed(invalid_request(
             "输入文件不含视频流",
