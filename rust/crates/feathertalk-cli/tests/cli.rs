@@ -167,3 +167,15 @@ fn an_empty_path_argument_is_refused() {
         stderr(&output)
     );
 }
+
+#[test]
+fn an_unsupported_extract_frames_names_the_model_variables() {
+    // The fake worker advertises `validate_project` alone, so the client's
+    // capability gate answers before any task starts.
+    let output = run("only-validate", &["extract-frames", "project", "clip.mp4"]);
+    assert_eq!(code(&output), 3);
+    let text = stderr(&output);
+    assert!(text.contains("extract_frames"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_SCRFD_DIR"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_PFLD_DIR"), "{text}");
+}

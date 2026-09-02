@@ -7,7 +7,7 @@ use feathertalk_client::{
     generate_task_id,
 };
 use feathertalk_domain::{
-    NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, Request, TaskId,
+    ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, Request, TaskId,
 };
 
 use crate::cli::{Cli, Command};
@@ -87,6 +87,14 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
             Ok(Some(Request::NormalizeMedia(NormalizeMediaParams {
                 input: input.clone(),
                 output_dir: output_dir.clone(),
+            })))
+        }
+        Command::ExtractFrames { project_dir, video } => {
+            reject_empty(project_dir, "工程目录")?;
+            reject_empty(video, "输入文件")?;
+            Ok(Some(Request::ExtractFrames(ExtractFramesParams {
+                project_dir: project_dir.clone(),
+                video: video.clone(),
             })))
         }
     }
@@ -206,6 +214,41 @@ mod tests {
         })
         .expect_err("an empty output directory is refused");
         assert_eq!(error, "输出目录不能为空。");
+    }
+
+    #[test]
+    fn extract_frames_refuses_empty_arguments() {
+        let error = build_request(&Command::ExtractFrames {
+            project_dir: PathBuf::new(),
+            video: PathBuf::from("project/assets/video_25fps.mp4"),
+        })
+        .expect_err("an empty project directory is refused");
+        assert_eq!(error, "工程目录不能为空。");
+
+        let error = build_request(&Command::ExtractFrames {
+            project_dir: PathBuf::from("project"),
+            video: PathBuf::new(),
+        })
+        .expect_err("an empty video is refused");
+        assert_eq!(error, "输入文件不能为空。");
+    }
+
+    #[test]
+    fn extract_frames_carries_both_paths() {
+        let request = build_request(&Command::ExtractFrames {
+            project_dir: PathBuf::from("project"),
+            video: PathBuf::from("project/assets/video_25fps.mp4"),
+        })
+        .expect("both paths are accepted")
+        .expect("extract-frames needs a task");
+        let Request::ExtractFrames(params) = request else {
+            panic!("extract-frames must build an ExtractFrames request");
+        };
+        assert_eq!(params.project_dir, PathBuf::from("project"));
+        assert_eq!(
+            params.video,
+            PathBuf::from("project/assets/video_25fps.mp4")
+        );
     }
 
     #[test]

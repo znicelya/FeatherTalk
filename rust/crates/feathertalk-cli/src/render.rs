@@ -15,6 +15,12 @@ use feathertalk_domain::{
 const ENV_WORKER_FFPROBE: &str = "FEATHERTALK_WORKER_FFPROBE";
 const ENV_WORKER_FFMPEG: &str = "FEATHERTALK_WORKER_FFMPEG";
 
+/// The worker's variables for the two model directories, literals for the same
+/// reason: `feathertalk-worker`'s `ENV_SCRFD_DIR` and `ENV_PFLD_DIR` are the
+/// source of truth for these names.
+const ENV_WORKER_SCRFD_DIR: &str = "FEATHERTALK_WORKER_SCRFD_DIR";
+const ENV_WORKER_PFLD_DIR: &str = "FEATHERTALK_WORKER_PFLD_DIR";
+
 /// The Chinese name of every stage.
 ///
 /// No `_` arm on purpose: adding a stage to the protocol must break this match.
@@ -272,6 +278,12 @@ pub fn render_client_error(error: &ClientError) -> String {
                 text.push_str(&format!(
                     "\n{requested} 需要可用的 ffprobe 与 ffmpeg。请安装 ffmpeg，或用环境变量 \
                      {ENV_WORKER_FFPROBE} 与 {ENV_WORKER_FFMPEG} 指定它们的完整路径。"
+                ));
+            } else if *requested == "extract_frames" {
+                text.push_str(&format!(
+                    "\n{requested} 需要媒体工具与人脸模型。请用环境变量 {ENV_WORKER_FFPROBE}、\
+                     {ENV_WORKER_FFMPEG}、{ENV_WORKER_SCRFD_DIR}、{ENV_WORKER_PFLD_DIR} \
+                     指定它们的完整路径。"
                 ));
             }
             text

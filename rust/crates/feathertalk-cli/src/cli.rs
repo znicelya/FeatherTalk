@@ -34,7 +34,7 @@ pub struct Cli {
 }
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
-/// `normalize-media`, `capabilities`.
+/// `normalize-media`, `extract-frames`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -53,6 +53,13 @@ pub enum Command {
         input: PathBuf,
         /// 输出目录，归一化后的视频与音频写入其中
         output_dir: PathBuf,
+    },
+    /// 抽取视频帧并检测人脸关键点
+    ExtractFrames {
+        /// 工程目录
+        project_dir: PathBuf,
+        /// 已归一化的 25fps 视频，位于工程目录的 assets 下
+        video: PathBuf,
     },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,
