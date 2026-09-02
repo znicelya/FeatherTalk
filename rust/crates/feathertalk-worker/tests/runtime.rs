@@ -11,10 +11,10 @@ use std::{
 };
 
 use feathertalk_domain::{
-    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, NormalizeMediaParams,
-    PROTOCOL_VERSION, ProbeMediaParams, Progress, ProjectDirParams, Request, ServerFrame,
-    ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage, TrainParams, TrainingMode, UnetVariant,
-    decode_line, encode_line,
+    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, ExtractFramesParams,
+    NormalizeMediaParams, PROTOCOL_VERSION, ProbeMediaParams, Progress, ProjectDirParams, Request,
+    ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage, TrainParams, TrainingMode,
+    UnetVariant, decode_line, encode_line,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_worker::{
@@ -226,6 +226,13 @@ fn train_request() -> Request {
     })
 }
 
+fn extract_frames_request() -> Request {
+    Request::ExtractFrames(ExtractFramesParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+        video: PathBuf::from("C:/tmp/project/assets/video_25fps.mp4"),
+    })
+}
+
 fn absolute(name: &str) -> String {
     std::env::current_dir()
         .unwrap()
@@ -255,6 +262,17 @@ fn bare_config() -> WorkerConfig {
 /// carries a rejection reason.
 fn broken_config() -> WorkerConfig {
     WorkerConfig::from_values(Some("ffprobe".to_owned()), Some("ffmpeg".to_owned()), None)
+}
+
+/// Media and models both resolve, so `extract_frames` reaches the executor.
+fn full_config() -> WorkerConfig {
+    WorkerConfig::from_values_with_models(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+    )
 }
 
 fn instant_executor() -> JobExecutor {
@@ -894,5 +912,72 @@ fn the_noop_reporter_emits_nothing() {
             completed: 1,
             total: None,
         }),
+    );
+}
+
+#[test]
+fn a_fully_configured_worker_enables_extract_frames_in_the_handshake() {
+    let frames = Harness::start(full_config(), instant_executor()).finish();
+
+    let ServerFrame::Ready(ready) = &frames[0] else {
+        panic!("the first frame must be ready: {frames:?}");
+    };
+    assert_eq!(
+        ready.supported_commands,
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia,
+            TaskKind::ExtractFrames
+        ]
+    );
+}
+
+#[test]
+fn extract_frames_reaches_the_executor_once_the_models_resolve() {
+    let harness = Harness::start(full_config(), instant_executor());
+    harness.send(&start(&task("0000002c"), extract_frames_request()));
+    let frames = harness.finish();
+
+    assert!(rejections(&frames).is_empty(), "{frames:?}");
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000002c", "preparing"),
+            ("1787900000000-0000002c", "completed"),
+        ]
+    );
+}
+
+#[test]
+fn extract_frames_is_rejected_when_the_models_are_unavailable() {
+    let harness = Harness::start(media_config(), instant_executor());
+    harness.send(&start(&task("0000002d"), extract_frames_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("extract_frames"), "{}", reasons[0]);
+    // The reason has to name the variable an operator can fix.
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_SCRFD_DIR"),
+        "{}",
+        reasons[0]
+    );
+    assert!(events(&frames).is_empty());
+}
+
+#[test]
+fn extract_frames_names_the_media_toolchain_before_the_models() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    harness.send(&start(&task("0000002e"), extract_frames_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_FFPROBE"),
+        "{}",
+        reasons[0]
     );
 }

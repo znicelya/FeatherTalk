@@ -14,7 +14,8 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     AdapterLockError, AdapterLocks, CPU_ADAPTER_ID, CommandOutcome, ENV_FFMPEG, ENV_FFPROBE,
-    TaskReporter, WorkerConfig, execute, ready_frame, supported_commands,
+    ENV_PFLD_DIR, ENV_SCRFD_DIR, TaskReporter, WorkerConfig, execute, ready_frame,
+    supported_commands,
 };
 
 /// How the runtime reaches command execution.
@@ -390,14 +391,11 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
     match request.kind() {
         // Both media commands need the same two binaries, so they share the
         // reason that names what to fix.
-        TaskKind::ProbeMedia | TaskKind::NormalizeMedia => match config.media_rejection() {
-            Some(rejection) => format!(
-                "命令 {slug} 需要可用的媒体工具链，当前配置被拒绝：{rejection}。修正后重启 worker。"
-            ),
-            None => format!(
-                "命令 {slug} 需要媒体工具链，请设置 {ENV_FFPROBE} 与 {ENV_FFMPEG} 后重启 worker。"
-            ),
-        },
+        TaskKind::ProbeMedia | TaskKind::NormalizeMedia => media_reason(slug, config),
+        // Extraction needs both halves. Media first: it probes the video before
+        // it loads a model, so that is the wall an operator would hit next.
+        TaskKind::ExtractFrames if config.media().is_none() => media_reason(slug, config),
+        TaskKind::ExtractFrames => model_reason(slug, config),
         // Listing `supported_commands` instead of a hard-coded set keeps this
         // message correct as later commands land.
         _ => format!(
@@ -408,6 +406,28 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
                 .map(TaskKind::as_slug)
                 .collect::<Vec<_>>()
                 .join("、")
+        ),
+    }
+}
+
+fn media_reason(slug: &str, config: &WorkerConfig) -> String {
+    match config.media_rejection() {
+        Some(rejection) => format!(
+            "命令 {slug} 需要可用的媒体工具链，当前配置被拒绝：{rejection}。修正后重启 worker。"
+        ),
+        None => format!(
+            "命令 {slug} 需要媒体工具链，请设置 {ENV_FFPROBE} 与 {ENV_FFMPEG} 后重启 worker。"
+        ),
+    }
+}
+
+fn model_reason(slug: &str, config: &WorkerConfig) -> String {
+    match config.model_rejection() {
+        Some(rejection) => format!(
+            "命令 {slug} 需要可用的模型目录，当前配置被拒绝：{rejection}。修正后重启 worker。"
+        ),
+        None => format!(
+            "命令 {slug} 需要人脸与关键点模型，请设置 {ENV_SCRFD_DIR} 与 {ENV_PFLD_DIR} 后重启 worker。"
         ),
     }
 }

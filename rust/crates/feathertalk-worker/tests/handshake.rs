@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use feathertalk_domain::{AdapterKind, Backend, TaskKind};
 use feathertalk_worker::{
-    CPU_ADAPTER_ID, DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, WorkerConfig,
-    ready_frame, supported_commands,
+    CPU_ADAPTER_ID, DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, ENV_SCRFD_DIR,
+    WorkerConfig, ready_frame, supported_commands,
 };
 
 fn absolute(name: &str) -> String {
@@ -122,4 +122,60 @@ fn the_default_media_timeout_is_five_minutes() {
         explicit.media().unwrap().timeout(),
         Duration::from_millis(1500)
     );
+}
+
+/// Media and models both resolve, so every command in this slice is offered.
+fn fully_configured() -> WorkerConfig {
+    WorkerConfig::from_values_with_models(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+    )
+}
+
+#[test]
+fn a_fully_configured_worker_offers_extract_frames() {
+    let config = fully_configured();
+    assert_eq!(config.model_rejection(), None);
+    let frame = ready_frame(&config);
+    frame.validate().unwrap();
+    assert_eq!(
+        frame.supported_commands,
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia,
+            TaskKind::ExtractFrames
+        ]
+    );
+    // Protocol version 2 has no model capability flag, so nothing here moves.
+    assert!(frame.capabilities.ffmpeg);
+    assert!(!frame.capabilities.training);
+}
+
+#[test]
+fn a_media_only_worker_leaves_extract_frames_out() {
+    let config = configured();
+    assert!(config.models().is_none());
+    assert!(
+        config
+            .model_rejection()
+            .is_some_and(|reason| reason.contains(ENV_SCRFD_DIR))
+    );
+    assert!(!supported_commands(&config).contains(&TaskKind::ExtractFrames));
+}
+
+#[test]
+fn models_without_a_media_toolchain_offer_nothing_new() {
+    let config = WorkerConfig::from_values_with_models(
+        None,
+        None,
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+    );
+    assert!(config.models().is_some());
+    assert_eq!(supported_commands(&config), vec![TaskKind::ValidateProject]);
 }

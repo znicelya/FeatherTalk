@@ -26,6 +26,10 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
     if config.media().is_some() {
         commands.push(TaskKind::ProbeMedia);
         commands.push(TaskKind::NormalizeMedia);
+        // Extraction needs the media toolchain *and* both model directories.
+        if config.models().is_some() {
+            commands.push(TaskKind::ExtractFrames);
+        }
     }
     commands
 }
