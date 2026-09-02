@@ -2,14 +2,15 @@
 //!
 //! The numerical work lives in free functions so that parity can be tested
 //! without loading weights; the adapters themselves only build tensors, call
-//! `forward`, and copy results back to the host. Tasks 10 to 14 add the `scrfd`
-//! and `pfld` modules alongside these two.
+//! `forward`, and copy results back to the host.
 
 mod cache;
 mod decoder;
+mod scrfd;
 
 pub use cache::FrameImageCache;
 pub use decoder::JpegFrameDecoder;
+pub use scrfd::{ScrfdInput, scrfd_input};
 
 /// Per-frame pixel budget, the same value as `feathertalk_inference`'s frame
 /// reader uses.
