@@ -41,6 +41,7 @@ FaceDetection 必须包含 bbox、score、5 个 SCRFD keypoints；组合层按 s
 - NMS IoU：0.40；
 - 主脸数量必须恰好 1；
 - bbox 必须为有限正值，且与图像相交面积/图像面积至少 0.10；
+  - 勘误（2026-09-02）：分母应为 bbox 自身面积，即「bbox 至少 10% 落在图像内」。按图像面积计算会变成隐含的最小人脸尺寸门槛，实测会拒掉 demo 视频的全部帧。修正记录见 `2026-09-02-frame-model-adapters-design.md` §5。
 - 110 个 PFLD 点必须有限，位于图像范围内；
 - 模糊判定使用确定性 Laplacian 方差输入接口；默认阈值 20.0，低于阈值分类为 blurred_frame。
 

@@ -7,7 +7,7 @@
 
 `feathertalk-frame-pipeline` 已经实现固定编号抽帧、质量策略编排、异常分类和原子发布，但三个模型接缝在 `2026-08-24-frame-face-pipeline-design.md` §8 中被显式推迟，目前只有 fake decoder 覆盖组合契约。本切片补齐生产实现，使 `evaluate_frames_with_models` 能在真实 JPEG 帧上执行 SCRFD 人脸筛选、PFLD 关键点解码和 Laplacian 模糊判定。
 
-新增两个 crate，`feathertalk-frame-pipeline` 不做任何修改（trait 签名、阈值常量、异常代码、原子发布语义全部保持现状）：
+新增两个 crate，并对 `feathertalk-frame-pipeline` 做唯一一处纠正性改动——`intersection_ratio` 的分母（§5）。trait 签名、阈值常量的名字与取值、异常代码、原子发布语义全部保持现状：
 
 - `feathertalk-image`：不依赖 Burn 的像素内核，提供 JPEG 解码，以及与 OpenCV 数值语义一致的 resize、灰度转换和 Laplacian 方差；
 - `feathertalk-frame-adapters`：把像素内核与既有 `feathertalk-scrfd` / `feathertalk-pfld` Burn runtime 和 `feathertalk-face` 几何函数组合成 `JpegFrameDecoder`、`ScrfdFaceDetector<B>`、`PfldLandmarkPredictor<B>`。
@@ -125,7 +125,7 @@ out = clamp((acc + 2) >> 2, 0, 255)
 - 缩小与等尺寸：逐字节一致；
 - 放大：残留 ±1 偏差，比例 ≤ 0.3%。实测 `150×150 -> 192×192` 为 151/110592，`61×47 -> 192×192` 为 289/110592，`5×4 -> 9×7` 为 3/189。
 
-已排除的成因：IPP 分派、系数独立舍入、以及所有其他垂直方向舍入公式组合。因此放大路径接受一个固化的 ≤1 容差，而不是继续追平：PFLD 预处理随后除以 255，1/255 ≈ 0.004 的输入扰动远小于该模型对输入的敏感度（§8 给出实测的端到端影响）。缩小路径不给容差，必须逐字节一致。
+已排除的成因：IPP 分派、系数独立舍入、以及所有其他垂直方向舍入公式组合。因此放大路径接受一个固化的 ≤1 容差，而不是继续追平：PFLD 预处理随后除以 255，1/255 ≈ 0.004 的输入扰动远小于该模型对输入的敏感度（§9 给出实测的端到端影响）。缩小路径不给容差，必须逐字节一致。
 
 ### 3.5 to_gray 与 laplacian_variance
 
@@ -259,6 +259,8 @@ ScrfdModel::forward -> 每个 level：
 
 逐 anchor 调用与整批调用数值等价：`decode_level` 对每个下标独立计算，无跨下标状态。预筛选阈值与 NMS、`choose_primary` 用的是同一个常量，重复应用是幂等的，不会引入第二套规则。
 
+预筛选与 Python 参考一致，不是本设计新增的行为：`detect_face.py:82` 用 `pos_inds = np.where(scores >= self.confThreshold)[0]` 先取存活下标，再只对这些下标解码。逐 anchor 丢弃才是 Rust 侧独有的要求，来源是 §9 记录的钳制语义差异。
+
 `non_max_suppression` 返回存活下标，适配器按该顺序把 `feathertalk_face::Detection` 逐字段搬进 `FaceDetection`：`bbox`、`score`、`keypoints` 的语义和字段序完全相同，无需换算。
 
 `detect` 的契约是「NMS 存活者」，顺序即 `non_max_suppression` 返回的顺序。适配器不再排序、不截断、不做数量判定：`choose_primary` 会自己按 score 排序、再应用 0.50 阈值并判定「恰好一张脸」。
@@ -288,7 +290,54 @@ compute_face_crop_geometry(ImageSize, face.bbox)      # size = trunc(max(w,h) * 
 - PFLD 消费 **BGR**：`get_landmark.py` 没有 `cvtColor`，直接把 `cv2.imread` 的 BGR crop 归一化后送入网络；
 - SCRFD 消费 **RGB**：`blobFromImage(..., swapRB=True)`。
 
-## 5. 错误模型
+## 5. 相交比闸门修正（管线内唯一改动）
+
+`evaluate_frames_with_models` 在 `choose_primary` 之后有一道闸门（`evaluate.rs:210`）：`intersection_ratio(primary.bbox, frame.width(), frame.height()) < MIN_BBOX_INTERSECTION_RATIO`（`= 0.10`）时产出 `AnomalyCode::BboxOutOfBounds`、消息 "Face bounding box is outside the frame"、`RecoveryAction::RerunFrame`。而 `intersection_ratio`（`evaluate.rs:359`）的分母是整帧面积：
+
+```rust
+((x2 - x1) * (y2 - y1)) / (width as f32 * height as f32)
+```
+
+`feathertalk-face::decode_level` 已经把框钳制进图像范围，因此分子恒等于框自身面积，这道闸门的实际语义是「人脸必须覆盖至少 10% 的帧面积」（720p 下约 304×304 像素），与异常代码、消息文本、恢复动作所描述的「框在帧外」无关。真正的「框完全不与图像相交」判定已经由 `choose_primary` 的 `PrimaryDecision::InvalidBbox` 分支承担。Python 参考实现没有这项检查。
+
+实测（cv2 5.0.0 加 `data_utils/scrfd_2.5g_kps.onnx`，conf 0.50 / NMS 0.40，在 `demo/feathertalk_demo_latest_188.mp4` 上按 n = 0, 150, …, 1500 采样 11 帧）：
+
+| 量 | 结果 |
+| --- | --- |
+| 每帧检测数 | 11 帧全部恰好 1 张脸 |
+| score | 0.753 – 0.811 |
+| bbox 尺寸 | 约 155×209 像素 |
+| 框面积 / 帧面积 | 0.03368 – 0.03584（均值 0.03513） |
+| 现有闸门判定 | **11/11 被拒为 `bbox_out_of_bounds`** |
+
+第 750 帧与 §8.2 的实测吻合（score 0.81110，xywh `[551.90, 79.09, 155.00, 204.07]`，比值 0.03432）。即接入生产适配器后，管线在这段 demo 视频上无法接受任何一帧，这是本切片必须先修掉的阻塞缺陷。
+
+修正只改分母，使比值表示「框有多大比例落在帧内」：
+
+```rust
+let area = bbox[2] * bbox[3];
+if area <= 0.0 {
+    0.0
+} else {
+    ((x2 - x1) * (y2 - y1)) / area
+}
+```
+
+`area <= 0.0` 的分支是防御性的（非正宽高在到达这里之前已被 `non_max_suppression` 拒绝），同时避免除零。
+
+保留 `MIN_BBOX_INTERSECTION_RATIO = 0.10` 的名字与取值，也保留异常代码、消息文本和 `RecoveryAction::RerunFrame`：新语义下 0.10 读作「框至少 10% 落在帧内」，与常量名和消息文本自洽，是一道防御性不变量而非尺寸门槛。不借这次修正引入「人脸最小尺寸」策略——最小尺寸的取值需要在更多素材上统计，属于后续切片（§10）。
+
+修正后，经生产适配器进入闸门的框比值恒为 1.0（`decode_level` 已钳制），该分支在生产链路上不可达，继续由 stub 检测器覆盖（§8.3）。
+
+`MIN_BBOX_INTERSECTION_RATIO` 目前是一个没有文档注释的 `pub` 常量，分母歧义正是本次缺陷的来源，因此同时给它和 `intersection_ratio` 补注释，写明分母是 bbox 自身面积、闸门读作「框至少 10% 落在帧内」。常量取值不变，工作区内除 `evaluate.rs` 外没有其他引用。
+
+测试改动（都在 `feathertalk-frame-pipeline`）：
+
+- **必须改**：`tests/evaluation.rs` 的 `classifies_bbox_landmark_and_blur_contract_failures` 现在用 `detection(0.9, [0.0, 0.0, 10.0, 10.0])`（640×480 帧内的 10×10 框）触发 `bbox_out_of_bounds`，依赖的正是错误语义；改成真正大部分越界的框，例如 `[-95.0, 10.0, 100.0, 100.0]`（比值 0.05）。
+- **新增单元测试**：`intersection_ratio` 是私有函数，用 `evaluate.rs` 内的 `#[cfg(test)] mod tests`（`publish.rs` 已有同样先例）覆盖四种情形——框完全在帧内 -> `1.0`；右侧越界一半 -> `0.5`；完全在帧外 -> `0.0`；宽或高为 0 的退化框 -> `0.0`。
+- **新增集成测试**：stub 检测器返回完全在帧内、只占帧面积 3.5%（与 demo 帧同量级）的框时不再被拒，走完 accepted 路径。这条是对本次缺陷的回归锁定。
+
+## 6. 错误模型
 
 不新增错误类型，不修改 `PipelineError`：
 
@@ -299,7 +348,7 @@ compute_face_crop_geometry(ImageSize, face.bbox)      # size = trunc(max(w,h) * 
 
 不重复做非有限值校验：`decode_level`、`non_max_suppression`、`decode_landmarks`、两个 `forward` 都已经拒绝 NaN 和无穷值。
 
-## 6. 可测试接缝
+## 7. 可测试接缝
 
 把预处理和后处理暴露为不需要权重的纯函数，使数值一致性可以在毫秒级测试中验证：
 
@@ -333,9 +382,9 @@ pub fn pfld_input(
 
 `LevelHostData` 只是把一个 level 的输出从张量搬回主机后的普通 `Vec`，`N` 按 stride 依次为 12800 / 3200 / 800。`scrfd_detections` 承担 §4.4 的全部后处理规则：anchor 生成、按 `config.confidence_threshold` 预筛选、逐 anchor 解码与退化框丢弃、NMS、类型搬运。`detect` 和 `predict` 因此只负责建张量、调 `forward`、搬回主机，数值逻辑全部落在这三个纯函数里。
 
-## 7. fixture 策略
+## 8. fixture 策略
 
-### 7.1 合成 fixture：opencv_cpu_v1
+### 8.1 合成 fixture：opencv_cpu_v1
 
 目录 `rust/crates/feathertalk-frame-adapters/tests/fixtures/opencv_cpu_v1/`，生成器 `rust/tools/frame-adapters-parity/python/generate_fixture.py`。
 
@@ -355,7 +404,7 @@ pub fn pfld_input(
 
 生成器必须复刻 Rust 侧的顺序和钳制规则：先按阈值筛选 anchor，再把 bbox 和 keypoints 钳制到 `[0, W] × [0, H]`，再丢弃 `x2 > x1 && y2 > y1` 不成立的框，最后做 NMS。Python 参考实现传入 `max_shape=None`、完全不钳制，因此直接照抄 `detect_face.py` 会在贴边框上产生假失败。0.02 阈值下这条规则是实测会触发的：既有 fixture 的 stride 32 在该阈值上有 33 个退化 anchor。
 
-### 7.2 真实帧 fixture：demo_frame_v1
+### 8.2 真实帧 fixture：demo_frame_v1
 
 合成 fixture 证明数值一致，但不能证明一张真实人脸能通过 0.50 阈值。本地已安装 ffmpeg（`D:\environment\ffmpeg\bin`，`2026-06-15-git-44d082edc8-full_build`），仓库内已跟踪 `demo/feathertalk_demo_latest_188.mp4`（7,442,868 字节，h264 1280×720，25 fps，1511 帧，SHA-256 `9353ad796089aa104765d651ca99f158349cfd203644923b2fa72f68b44e9ac1`），因此可以固化一个真实帧。
 
@@ -384,7 +433,7 @@ ffmpeg -v error -y -i demo/feathertalk_demo_latest_188.mp4 \
 | Laplacian 方差 | 756.684（阈值 20） |
 | 模糊版本方差 | 3.991（经 q90 JPEG 后 5.122），score 仍为 0.8064 |
 
-断言用行为加宽容差，逐字节一致性留在 §7.1 的 npy 路径上：
+断言用行为加宽容差，逐字节一致性留在 §8.1 的 npy 路径上：
 
 - 恰好 1 个检测；score ≥ 0.50 且 `|Δ| ≤ 0.01`；
 - bbox 与 keypoints `|Δ| ≤ 1.0` 像素；
@@ -393,29 +442,40 @@ ffmpeg -v error -y -i demo/feathertalk_demo_latest_188.mp4 \
 
 容差依据实测的扰动敏感度：q90 重编码使最大像素差达 47，但 Δscore 0.0003、Δbbox 0.122 像素、Δkps 0.119 像素、Δlandmark 1 像素，crop `size` 由 214 翻到 215；q95 的 Δbbox 为 0.098；ffmpeg `-q:v 2` 的 Δbbox 为 0.344；±1 均匀噪声的 Δscore 0.00014、Δbbox 0.058 像素、Δlandmark 1 像素。
 
-### 7.3 测试分层
+### 8.3 测试分层
 
 1. `feathertalk-image` 的 OpenCV fixture（§3.7），不加载模型；
-2. 纯函数 fixture（§7.1 的 blob 与 detections），不加载权重；
+2. 纯函数 fixture（§8.1 的 blob 与 detections），不加载权重；
 3. 真实权重加 `CpuBackend` 的 `detect()` / `predict()`；
-4. 管线集成：在 tempdir 中调用 `evaluate_frames_with_models`，三条全真实链路——`demo_frame_v1/frame.jpg` 判定为 accepted，`frame_blurred.jpg` 判定为 `blurred_frame`，`opencv_cpu_v1/frame.jpg`（合成图，无人脸）判定为 `face_not_found`；
+4. 管线集成：在 tempdir 中调用 `evaluate_frames_with_models`，三条全真实链路——`demo_frame_v1/frame.jpg` 判定为 accepted（该断言依赖 §5 的闸门修正，修正前这一帧会被判为 `bbox_out_of_bounds`），`frame_blurred.jpg` 判定为 `blurred_frame`，`opencv_cpu_v1/frame.jpg`（合成图，无人脸）判定为 `face_not_found`；
 5. `FrameImageCache` 单元测试：同路径只解码一次，路径变化使缓存失效。
 
-`multiple_faces` 和 `bbox_out_of_bounds` 继续用 stub 检测器覆盖——真实帧无法自然产生这两种异常。其余异常路径不再依赖 stub。
+`multiple_faces` 和 `bbox_out_of_bounds` 继续用 stub 检测器覆盖：真实帧不会自然产生多脸，而修正后的相交比在钳制过的框上恒为 1.0（§5）。其余异常路径不再依赖 stub。
 
 成本：fixture 增加约 257 KB；测试增加 2 次 SCRFD 与 2 次 PFLD CPU 前向，约 10 秒。
 
-## 8. 已知偏差与容差理由
+## 9. 已知偏差与容差理由
 
-`resize_linear` 放大路径：≤ 0.3% 像素存在 ±1 偏差（§3.4）。影响链路是 PFLD 输入除以 255，即 ≤ 0.004 的输入扰动；实测 ±1 均匀噪声只带来 1 像素的 landmark 变化，因此 §7.2 的 2 像素容差已覆盖。
+`resize_linear` 放大路径：≤ 0.3% 像素存在 ±1 偏差（§3.4）。影响链路是 PFLD 输入除以 255，即 ≤ 0.004 的输入扰动；实测 ±1 均匀噪声只带来 1 像素的 landmark 变化，因此 §8.2 的 2 像素容差已覆盖。
 
 JPEG 解码一致性尚未验证：`jpeg-decoder` 与 libjpeg-turbo 的 IDCT 实现不同，可能存在 ±1 级差异。风险已被隔离——所有 blob 断言都从 `frame_bgr.npy` 出发，不经过 JPEG；解码一致性只有一个独立用例。处理规则在实现第一步就地确定，不后延：先按逐字节一致写该用例，如果实测不一致，把实测的 `max_abs` 与不一致比例写入 fixture 并在测试注释中说明来源。
 
-OpenCV 版本分歧：新 fixture 用 cv2 5.0.0 生成并在 `fixture.json` 中记录；`feathertalk-scrfd` 的既有 fixture 由 cv2 4.12.0 生成，其生成器会硬失败于版本不匹配，本切片不改动它。5.0.0 的 dnn 使用新 graph engine（会打印 "Targets are not supported by the new graph engine for now"），由此产生的差异被 §7.2 的宽容差吸收。
+OpenCV 版本分歧：新 fixture 用 cv2 5.0.0 生成并在 `fixture.json` 中记录；`feathertalk-scrfd` 的既有 fixture 由 cv2 4.12.0 生成，其生成器会硬失败于版本不匹配，本切片不改动它。5.0.0 的 dnn 使用新 graph engine（会打印 "Targets are not supported by the new graph engine for now"），由此产生的差异被 §8.2 的宽容差吸收。
 
-钳制语义与 Python 参考不同：Rust 侧把框和关键点钳制到图像范围内，Python 不钳制。对通过 0.50 的真实人脸框实测无差异（demo 帧第 750 帧的存活框未被钳制改动）；差异只出现在低分背景 anchor 上，由 §7.1 的生成器规则对齐。
+钳制语义与 Python 参考不同：Rust 侧把框和关键点钳制到图像范围内，Python 不钳制。对通过 0.50 的真实人脸框实测无差异（demo 帧第 750 帧的存活框未被钳制改动）；差异只出现在低分背景 anchor 上，由 §8.1 的生成器规则对齐。
 
-## 9. 排除项
+与 Python 参考的逐环节差异汇总（`data_utils/detect_face.py`、`data_utils/get_landmark.py` 对比 Rust）：
+
+| 环节 | Python 参考 | Rust（本切片后） | 影响 |
+| --- | --- | --- | --- |
+| 分数预筛选 | `where(scores >= conf)`（`detect_face.py:82`） | 相同 | 无 |
+| 坐标钳制 | 不钳制（`max_shape=None`） | 钳到 `[0, W] × [0, H]`，退化框返回 `Err` | 贴边人脸的 crop 原点可能偏移 |
+| conf / NMS IoU | 0.1 / 0.5（`get_landmark.py` 构造参数） | 0.50 / 0.40 | demo 视频每帧 1 张脸且 score ≥ 0.75，实测无差异 |
+| 主脸选取 | 取最高分后 `break` | 必须恰好 1 张，否则 `multiple_faces` | 更严格，既定质量策略 |
+| 相交比闸门 | 无此检查 | 框内比例 ≥ 0.10（§5 修正后） | 修正前 demo 视频 100% 帧被拒 |
+| 模糊与关键点越界闸门 | 无此检查 | 有 | 既定质量策略 |
+
+## 10. 排除项
 
 - 抽帧 worker 命令与 CLI 子命令（下一切片）；
 - 模型工件路径解析与模型发现；
@@ -423,4 +483,5 @@ OpenCV 版本分歧：新 fixture 用 cv2 5.0.0 生成并在 `fixture.json` 中�
 - `evaluate_frames_with_models` 的并行化；
 - 合并 `BgrFrame` 与 `BgrImage`；
 - 统一旧 fixture 的 OpenCV 版本；
-- 修改 `feathertalk-frame-pipeline`、`feathertalk-face`、`feathertalk-scrfd`、`feathertalk-pfld` 的任何公开行为。
+- 「人脸最小尺寸」质量策略：§5 只把相交比闸门改回其名义语义，不引入尺寸门槛；
+- 除 §5 的 `intersection_ratio` 分母修正外，改动 `feathertalk-frame-pipeline`、`feathertalk-face`、`feathertalk-scrfd`、`feathertalk-pfld` 的任何公开行为。
