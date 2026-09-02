@@ -4,14 +4,14 @@ use feathertalk_domain::{
     ErrorCode, NormalizeMediaParams, ProbeMediaParams, Progress, ProjectDirParams, Request,
     TaskStage, TrainParams, TrainingMode, UnetVariant,
 };
-use feathertalk_media::{
-    CancellationToken, CommandSpec, MediaError, MediaToolchain, ProcessOutput, ProcessRunner,
-};
+use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_project::{
     AssetManifest, AssetPackageState, FeatureType, ModelSelection, ProjectManifest,
     TaskHistoryEntry, TaskHistoryStatus, lock_asset_package, write_project_manifest_atomic,
 };
-use feathertalk_worker::{CommandOutcome, NoReporter, TaskReporter, execute_with_runner};
+use feathertalk_worker::{
+    CommandOutcome, NoReporter, TaskReporter, WorkerConfig, execute_with_runner,
+};
 
 struct FakeRunner {
     outputs: Mutex<VecDeque<Result<ProcessOutput, MediaError>>>,
@@ -38,14 +38,17 @@ impl ProcessRunner for FakeRunner {
     }
 }
 
-fn toolchain() -> MediaToolchain {
+fn bare_config() -> WorkerConfig {
+    WorkerConfig::from_values(None, None, None)
+}
+
+fn media_config() -> WorkerConfig {
     let root = std::env::current_dir().unwrap();
-    MediaToolchain::new(
-        root.join("ffmpeg-test"),
-        root.join("ffprobe-test"),
-        Duration::from_secs(10),
+    WorkerConfig::from_values(
+        Some(root.join("ffprobe-test").display().to_string()),
+        Some(root.join("ffmpeg-test").display().to_string()),
+        Some("10000".to_owned()),
     )
-    .unwrap()
 }
 
 fn valid_probe() -> Vec<u8> {
@@ -129,7 +132,7 @@ fn validating_a_complete_project_completes_without_a_result() {
     let runner = FakeRunner::new(vec![]);
     let outcome = execute_with_runner(
         &request,
-        None,
+        &bare_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -150,7 +153,7 @@ fn validating_a_missing_project_fails_with_a_wire_error() {
     let runner = FakeRunner::new(vec![]);
     let CommandOutcome::Failed(error) = execute_with_runner(
         &request,
-        None,
+        &bare_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -169,10 +172,10 @@ fn probing_media_completes_with_the_probe_result() {
         valid_probe(),
         Vec::new(),
     ))]);
-    let toolchain = toolchain();
+    let config = media_config();
     let CommandOutcome::Completed(Some(result)) = execute_with_runner(
         &probe_request(source),
-        Some(&toolchain),
+        &config,
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -201,10 +204,10 @@ fn probing_media_completes_with_the_probe_result() {
 fn probing_a_missing_file_fails_before_the_tool_runs() {
     let temp = tempfile::tempdir().unwrap();
     let runner = FakeRunner::new(vec![]);
-    let toolchain = toolchain();
+    let config = media_config();
     let CommandOutcome::Failed(error) = execute_with_runner(
         &probe_request(temp.path().join("absent.mov")),
-        Some(&toolchain),
+        &config,
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -220,10 +223,10 @@ fn probing_a_missing_file_fails_before_the_tool_runs() {
 fn a_cancelled_tool_reports_cancellation_not_failure() {
     let (_temp, source) = media_file();
     let runner = FakeRunner::new(vec![Err(MediaError::ToolCancelled { operation: "probe" })]);
-    let toolchain = toolchain();
+    let config = media_config();
     let outcome = execute_with_runner(
         &probe_request(source),
-        Some(&toolchain),
+        &config,
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -235,12 +238,12 @@ fn a_cancelled_tool_reports_cancellation_not_failure() {
 fn an_already_cancelled_token_runs_nothing() {
     let (_temp, source) = media_file();
     let runner = FakeRunner::new(vec![]);
-    let toolchain = toolchain();
+    let config = media_config();
     let token = CancellationToken::new();
     token.cancel();
     let outcome = execute_with_runner(
         &probe_request(source),
-        Some(&toolchain),
+        &config,
         &token,
         &NoReporter,
         &runner,
@@ -255,7 +258,7 @@ fn probing_without_a_toolchain_is_refused() {
     let runner = FakeRunner::new(vec![]);
     let CommandOutcome::Failed(error) = execute_with_runner(
         &probe_request(source),
-        None,
+        &bare_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -278,7 +281,7 @@ fn an_unsupported_command_is_refused_with_its_slug() {
     let runner = FakeRunner::new(vec![]);
     let CommandOutcome::Failed(error) = execute_with_runner(
         &request,
-        None,
+        &bare_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -372,7 +375,7 @@ fn normalizing_media_reports_paths_sizes_and_hashes() {
 
     let CommandOutcome::Completed(Some(result)) = execute_with_runner(
         &normalize_request(source, output_dir.clone()),
-        Some(&toolchain()),
+        &media_config(),
         &CancellationToken::new(),
         &reporter,
         &runner,
@@ -413,7 +416,7 @@ fn normalizing_media_reports_three_progress_steps() {
 
     execute_with_runner(
         &normalize_request(source, output_dir),
-        Some(&toolchain()),
+        &media_config(),
         &CancellationToken::new(),
         &reporter,
         &runner,
@@ -453,7 +456,7 @@ fn normalizing_without_a_toolchain_is_unsupported() {
     let runner = NormalizeRunner::new(vec![]);
     let CommandOutcome::Failed(error) = execute_with_runner(
         &normalize_request(source, temp.path().join("assets")),
-        None,
+        &bare_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -476,7 +479,7 @@ fn a_source_without_audio_fails_before_any_output_is_written() {
     ))]);
     let CommandOutcome::Failed(error) = execute_with_runner(
         &normalize_request(source, output_dir.clone()),
-        Some(&toolchain()),
+        &media_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,
@@ -495,7 +498,7 @@ fn a_cancelled_normalization_reports_cancelled() {
     })]);
     let outcome = execute_with_runner(
         &normalize_request(source, temp.path().join("assets")),
-        Some(&toolchain()),
+        &media_config(),
         &CancellationToken::new(),
         &NoReporter,
         &runner,

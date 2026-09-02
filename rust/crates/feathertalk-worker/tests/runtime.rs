@@ -258,12 +258,12 @@ fn broken_config() -> WorkerConfig {
 }
 
 fn instant_executor() -> JobExecutor {
-    Box::new(|_request, _media, _token, _reporter| CommandOutcome::Completed(None))
+    Box::new(|_request, _config, _token, _reporter| CommandOutcome::Completed(None))
 }
 
 /// Reports that the job started, then runs until it is cancelled.
 fn blocking_executor(started: Sender<TaskId>) -> JobExecutor {
-    Box::new(move |request, _media, token, _reporter| {
+    Box::new(move |request, _config, token, _reporter| {
         let _ = request;
         started.send(task("0000000f")).unwrap();
         while !token.is_cancelled() {
@@ -276,7 +276,7 @@ fn blocking_executor(started: Sender<TaskId>) -> JobExecutor {
 /// Reports that the job started, then waits for the test to release it. A
 /// dropped release channel or a cancelled token ends the job as cancelled.
 fn gated_executor(started: Sender<()>, release: Receiver<()>) -> JobExecutor {
-    Box::new(move |_request, _media, token, _reporter| {
+    Box::new(move |_request, _config, token, _reporter| {
         started.send(()).unwrap();
         if release.recv().is_err() || token.is_cancelled() {
             return CommandOutcome::Cancelled;
@@ -306,18 +306,18 @@ impl ProcessRunner for BlockingRunner {
 }
 
 fn blocking_probe_executor(started: Sender<()>) -> JobExecutor {
-    Box::new(move |request, media, token, reporter| {
+    Box::new(move |request, config, token, reporter| {
         let runner = BlockingRunner {
             started: Mutex::new(started.clone()),
             token: token.clone(),
         };
-        execute_with_runner(request, media, token, reporter, &runner)
+        execute_with_runner(request, config, token, reporter, &runner)
     })
 }
 
 /// Reports two progress events, then completes.
 fn reporting_executor() -> JobExecutor {
-    Box::new(|_request, _media, _token, reporter| {
+    Box::new(|_request, _config, _token, reporter| {
         reporter.report(
             TaskStage::ExtractingFrames,
             Some(Progress {
@@ -727,7 +727,7 @@ fn cancelling_an_unknown_or_finished_task_is_silently_accepted() {
 fn a_failing_command_reports_a_failed_event_with_its_error() {
     let harness = Harness::start(
         bare_config(),
-        Box::new(|_request, _media, _token, _reporter| {
+        Box::new(|_request, _config, _token, _reporter| {
             CommandOutcome::Failed(feathertalk_domain::TaskError::new(
                 ErrorCode::MediaInvalid,
                 "项目目录缺少必需文件",
@@ -853,7 +853,7 @@ fn reported_progress_reaches_the_wire_in_order() {
 fn a_cancelled_task_keeps_the_progress_it_already_reported() {
     let (started, started_rx) = mpsc::channel::<()>();
     // Reports one progress event, then waits to be cancelled.
-    let executor: JobExecutor = Box::new(move |_request, _media, token, reporter| {
+    let executor: JobExecutor = Box::new(move |_request, _config, token, reporter| {
         reporter.report(
             TaskStage::ExtractingFrames,
             Some(Progress {

@@ -9,7 +9,7 @@ use feathertalk_domain::{
     ClientFrame, DomainError, Event, FrameReader, FrameWriter, PROTOCOL_VERSION, Progress,
     RejectedFrame, Request, ServerFrame, TaskId, TaskKind, TaskLifecycle, TaskStage,
 };
-use feathertalk_media::{CancellationToken, MediaToolchain};
+use feathertalk_media::CancellationToken;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
@@ -23,12 +23,7 @@ use crate::{
 /// pass a closure so queueing, cancellation, and shutdown can be observed
 /// without a real external tool.
 pub type JobExecutor = Box<
-    dyn Fn(
-            &Request,
-            Option<&MediaToolchain>,
-            &CancellationToken,
-            &dyn TaskReporter,
-        ) -> CommandOutcome
+    dyn Fn(&Request, &WorkerConfig, &CancellationToken, &dyn TaskReporter) -> CommandOutcome
         + Send
         + 'static,
 >;
@@ -112,8 +107,12 @@ where
     let _ = thread::spawn(move || read_input(input, &input_tx));
 
     let execution_tx = control_tx;
-    let media = config.media().cloned();
-    let execution = thread::spawn(move || run_jobs(&job_rx, &execution_tx, media, executor));
+    // The executor thread needs the whole configuration, and `WorkerConfig` is
+    // a handful of small fields, so it gets its own clone instead of a shared
+    // borrow.
+    let execution_config = config.clone();
+    let execution =
+        thread::spawn(move || run_jobs(&job_rx, &execution_tx, execution_config, executor));
 
     let result = control_loop(&control_rx, &mut writer, &job_tx, config);
 
@@ -151,7 +150,7 @@ fn read_input<R: BufRead>(input: R, control_tx: &Sender<ControlMessage>) {
 fn run_jobs(
     job_rx: &Receiver<Job>,
     control_tx: &Sender<ControlMessage>,
-    media: Option<MediaToolchain>,
+    config: WorkerConfig,
     executor: JobExecutor,
 ) {
     while let Ok(job) = job_rx.recv() {
@@ -159,7 +158,7 @@ fn run_jobs(
             task_id: job.task_id.clone(),
             control_tx: control_tx.clone(),
         };
-        let event = match executor(&job.request, media.as_ref(), &job.token, &reporter) {
+        let event = match executor(&job.request, &config, &job.token, &reporter) {
             CommandOutcome::Completed(result) => {
                 let mut event =
                     Event::new(job.task_id.clone(), &now_rfc3339(), TaskStage::Completed);

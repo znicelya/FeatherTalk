@@ -1,14 +1,14 @@
 use feathertalk_domain::{ErrorCode, Progress, Request, TaskError, TaskKind, TaskStage};
 use feathertalk_media::{
-    CancellableProcessRunner, CancellationToken, MediaError, MediaInput, MediaToolchain,
-    NormalizationSpec, NormalizePhase, ProcessRunner, normalize_media_observed,
-    probe_media_with_runner, validate_input,
+    CancellableProcessRunner, CancellationToken, MediaError, MediaInput, NormalizationSpec,
+    NormalizePhase, ProcessRunner, normalize_media_observed, probe_media_with_runner,
+    validate_input,
 };
 use feathertalk_project::validate_project_dir;
 
 use crate::{
-    TaskReporter, is_media_cancellation, media_task_error, normalize_to_json, probe_to_json,
-    project_task_error,
+    TaskReporter, WorkerConfig, is_media_cancellation, media_task_error, normalize_to_json,
+    probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -26,17 +26,17 @@ pub enum CommandOutcome {
 
 pub fn execute(
     request: &Request,
-    media: Option<&MediaToolchain>,
+    config: &WorkerConfig,
     token: &CancellationToken,
     reporter: &dyn TaskReporter,
 ) -> CommandOutcome {
     let runner = CancellableProcessRunner::new(token.clone());
-    execute_with_runner(request, media, token, reporter, &runner)
+    execute_with_runner(request, config, token, reporter, &runner)
 }
 
 pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
     request: &Request,
-    media: Option<&MediaToolchain>,
+    config: &WorkerConfig,
     token: &CancellationToken,
     reporter: &dyn TaskReporter,
     runner: &R,
@@ -54,7 +54,7 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
             Err(error) => CommandOutcome::Failed(project_task_error(&error)),
         },
         Request::ProbeMedia(params) => {
-            let Some(toolchain) = media else {
+            let Some(toolchain) = config.media() else {
                 // Unreachable through the runtime, which rejects `probe_media`
                 // when no toolchain is configured. Kept so a direct caller
                 // cannot get a panic instead of an error.
@@ -72,7 +72,7 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
             }
         }
         Request::NormalizeMedia(params) => {
-            let Some(toolchain) = media else {
+            let Some(toolchain) = config.media() else {
                 return CommandOutcome::Failed(unsupported(request.kind()));
             };
             let input = match validate_input(&MediaInput {
