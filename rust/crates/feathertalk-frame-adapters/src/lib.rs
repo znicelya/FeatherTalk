@@ -10,7 +10,7 @@ mod scrfd;
 
 pub use cache::FrameImageCache;
 pub use decoder::JpegFrameDecoder;
-pub use scrfd::{LevelHostData, ScrfdInput, scrfd_detections, scrfd_input};
+pub use scrfd::{LevelHostData, ScrfdFaceDetector, ScrfdInput, scrfd_detections, scrfd_input};
 
 /// Per-frame pixel budget, the same value as `feathertalk_inference`'s frame
 /// reader uses.

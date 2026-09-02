@@ -1,9 +1,18 @@
+use std::{fmt, sync::Arc};
+
+use burn::tensor::{Tensor, TensorData, backend::Backend};
 use feathertalk_face::{
     Detection, DetectionConfig, FaceError, ImageSize, ResizeTransform, decode_level,
     generate_anchor_centers, non_max_suppression, resize_with_padding,
 };
-use feathertalk_frame_pipeline::{FaceDetection, PipelineError};
+use feathertalk_frame_pipeline::{
+    DecodedFrame, FACE_CONFIDENCE_THRESHOLD, FaceDetection, FaceDetector, NMS_IOU_THRESHOLD,
+    PipelineError,
+};
 use feathertalk_image::{BgrImage, resize_area};
+use feathertalk_scrfd::{SCRFD_INPUT_SHAPE, ScrfdArtifactPaths, ScrfdLevelOutput, ScrfdModel};
+
+use crate::cache::FrameImageCache;
 
 /// SCRFD's fixed square input edge, the canvas `resize_with_padding` targets.
 const SCRFD_EDGE: u32 = 640;
@@ -197,4 +206,148 @@ fn level_error(level: usize, anchor: Option<usize>, error: &FaceError) -> Pipeli
         component: "scrfd",
         message,
     }
+}
+
+/// `FaceDetector` backed by the SCRFD 2.5G model.
+///
+/// Holds the weights, the device and the shared decode cache. `detect` takes
+/// `&self` and allocates only the input blob and the host copies of the three
+/// levels, so a single detector can serve every worker.
+pub struct ScrfdFaceDetector<B: Backend> {
+    model: ScrfdModel<B>,
+    device: B::Device,
+    cache: Arc<FrameImageCache>,
+    config: DetectionConfig,
+}
+
+impl<B: Backend> ScrfdFaceDetector<B> {
+    /// Load the artifact pair and share `cache` with the decoder.
+    ///
+    /// `ScrfdError` is flattened into an adapter message: the pipeline reports
+    /// artifact problems as `ModelFailed`, and the path is already in the text.
+    pub fn load(
+        paths: &ScrfdArtifactPaths,
+        device: B::Device,
+        cache: Arc<FrameImageCache>,
+    ) -> Result<Self, PipelineError> {
+        let model = ScrfdModel::load(paths, &device).map_err(|error| PipelineError::Adapter {
+            component: "scrfd",
+            message: error.to_string(),
+        })?;
+        Ok(Self::from_model(model, device, cache))
+    }
+
+    /// Wrap weights that are already in memory, at the production thresholds.
+    pub fn from_model(
+        model: ScrfdModel<B>,
+        device: B::Device,
+        cache: Arc<FrameImageCache>,
+    ) -> Self {
+        Self {
+            model,
+            device,
+            cache,
+            config: DetectionConfig {
+                confidence_threshold: FACE_CONFIDENCE_THRESHOLD,
+                nms_iou_threshold: NMS_IOU_THRESHOLD,
+            },
+        }
+    }
+
+    /// Override the thresholds. The pipeline never calls this; it exists so a
+    /// caller sweeping thresholds does not have to re-read the weights.
+    #[must_use]
+    pub fn with_detection_config(mut self, config: DetectionConfig) -> Self {
+        self.config = config;
+        self
+    }
+}
+
+/// `ScrfdModel` does not implement `Debug` and design §10 freezes the public
+/// surface of `feathertalk-scrfd`, so this prints the thresholds and stops.
+impl<B: Backend> fmt::Debug for ScrfdFaceDetector<B> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScrfdFaceDetector")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<B: Backend> FaceDetector for ScrfdFaceDetector<B> {
+    fn detect(&self, frame: &DecodedFrame) -> Result<Vec<FaceDetection>, PipelineError> {
+        let image = self.cache.load(frame.path())?;
+        let ScrfdInput { transform, data } = scrfd_input(&image)?;
+        let input = Tensor::<B, 4>::from_data(
+            TensorData::new(data, SCRFD_INPUT_SHAPE.to_vec()),
+            &self.device,
+        );
+        let output = self
+            .model
+            .forward(input)
+            .map_err(|error| PipelineError::Adapter {
+                component: "scrfd",
+                message: error.to_string(),
+            })?;
+
+        let [first, second, third] = output.levels;
+        let levels = [
+            host_level(0, first)?,
+            host_level(1, second)?,
+            host_level(2, third)?,
+        ];
+
+        scrfd_detections(&levels, &transform, &self.config)
+    }
+}
+
+/// Copy one level back to host memory and reshape it for `scrfd_detections`.
+///
+/// `chunks_exact` silently drops a trailing partial group, which would produce
+/// a short `Vec` rather than a panic; `scrfd_detections` compares every length
+/// against `anchors.len()`, so a truncated buffer still surfaces as an adapter
+/// error naming the level and the field.
+fn host_level<B: Backend>(
+    level: usize,
+    output: ScrfdLevelOutput<B>,
+) -> Result<LevelHostData, PipelineError> {
+    let scores = host_floats(level, "scores", output.scores)?;
+    let bbox_distances = host_floats(level, "bbox_deltas", output.bbox_deltas)?
+        .chunks_exact(4)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
+        .collect();
+    let keypoint_distances = host_floats(level, "keypoint_deltas", output.keypoint_deltas)?
+        .chunks_exact(10)
+        .map(|chunk| {
+            let mut values = [0.0_f32; 10];
+            values.copy_from_slice(chunk);
+            values
+        })
+        .collect();
+
+    Ok(LevelHostData {
+        level,
+        stride: output.stride,
+        scores,
+        bbox_distances,
+        keypoint_distances,
+    })
+}
+
+/// `into_vec::<f32>` requires the backend's float element type to be exactly
+/// `f32`, which both `CpuBackend` and `GpuBackend` satisfy. A backend built on
+/// `f16` would fail here rather than silently losing precision, and the
+/// mismatch arrives as an adapter error naming the level and the field.
+fn host_floats<B: Backend, const D: usize>(
+    level: usize,
+    field: &'static str,
+    tensor: Tensor<B, D>,
+) -> Result<Vec<f32>, PipelineError> {
+    tensor
+        .into_data()
+        .into_vec::<f32>()
+        .map_err(|error| PipelineError::Adapter {
+            component: "scrfd",
+            message: format!("level {level} {field}: {error}"),
+        })
 }
