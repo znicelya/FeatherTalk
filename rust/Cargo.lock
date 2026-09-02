@@ -2489,6 +2489,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-image"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "jpeg-decoder",
+ "ndarray 0.17.2",
+ "ndarray-npy",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "feathertalk-inference"
 version = "0.1.0"
 dependencies = [

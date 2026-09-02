@@ -15,6 +15,7 @@ members = [
   "crates/feathertalk-pfld",
   "crates/feathertalk-scrfd",
   "crates/feathertalk-frame-pipeline",
+  "crates/feathertalk-image",
   "crates/feathertalk-audio",
   "crates/feathertalk-training",
   "crates/feathertalk-inference",
