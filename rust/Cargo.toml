@@ -16,6 +16,7 @@ members = [
   "crates/feathertalk-scrfd",
   "crates/feathertalk-frame-pipeline",
   "crates/feathertalk-image",
+  "crates/feathertalk-frame-adapters",
   "crates/feathertalk-audio",
   "crates/feathertalk-training",
   "crates/feathertalk-inference",
@@ -30,7 +31,7 @@ exclude = ["tools/scrfd-import"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.94"
 license = "Apache-2.0"
 
 [workspace.dependencies]
