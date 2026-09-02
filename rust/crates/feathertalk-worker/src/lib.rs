@@ -10,6 +10,7 @@ mod commands;
 mod config;
 mod error_map;
 mod handshake;
+mod models;
 mod normalize_result;
 mod probe_result;
 mod quality_result;
@@ -27,6 +28,7 @@ pub use error_map::{
     project_task_error, quality_task_error,
 };
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
+pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;

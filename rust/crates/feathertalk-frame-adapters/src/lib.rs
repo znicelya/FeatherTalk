@@ -11,6 +11,9 @@ mod scrfd;
 
 pub use cache::FrameImageCache;
 pub use decoder::JpegFrameDecoder;
+/// Re-exported because it appears in `ScrfdFaceDetector::load`'s signature.
+/// Without it the function is public but uncallable from another crate.
+pub use feathertalk_scrfd::ScrfdArtifactPaths;
 pub use pfld::{PfldLandmarkPredictor, pfld_input};
 pub use scrfd::{LevelHostData, ScrfdFaceDetector, ScrfdInput, scrfd_detections, scrfd_input};
 

@@ -2738,8 +2738,10 @@ name = "feathertalk-worker"
 version = "0.1.0"
 dependencies = [
  "feathertalk-domain",
+ "feathertalk-frame-adapters",
  "feathertalk-frame-pipeline",
  "feathertalk-media",
+ "feathertalk-models",
  "feathertalk-project",
  "serde_json",
  "tempfile",

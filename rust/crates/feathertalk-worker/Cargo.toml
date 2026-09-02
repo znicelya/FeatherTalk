@@ -7,8 +7,10 @@ license.workspace = true
 
 [dependencies]
 feathertalk-domain = { path = "../feathertalk-domain" }
+feathertalk-frame-adapters = { path = "../feathertalk-frame-adapters" }
 feathertalk-frame-pipeline = { path = "../feathertalk-frame-pipeline" }
 feathertalk-media = { path = "../feathertalk-media" }
+feathertalk-models = { path = "../feathertalk-models" }
 feathertalk-project = { path = "../feathertalk-project" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
