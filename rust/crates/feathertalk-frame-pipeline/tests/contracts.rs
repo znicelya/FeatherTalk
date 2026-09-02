@@ -134,3 +134,21 @@ fn output_root_rejects_only_the_paths_the_pipeline_owns() {
         );
     }
 }
+
+#[test]
+fn valid_spec_exposes_the_two_artifact_directories() {
+    let value = spec();
+    assert_eq!(
+        value.frames_dir(),
+        PathBuf::from(r"C:\project\assets\frames")
+    );
+    assert_eq!(
+        value.landmarks_dir(),
+        PathBuf::from(r"C:\project\assets\landmarks")
+    );
+    assert_eq!(value.frames_dir().join("000000.jpg"), value.frame_path(0));
+    assert_eq!(
+        value.landmarks_dir().join("000002.lms"),
+        value.landmark_path(2)
+    );
+}

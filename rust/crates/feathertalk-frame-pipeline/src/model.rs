@@ -82,16 +82,20 @@ impl FramePipelineSpec {
         self.image_height
     }
 
+    pub fn frames_dir(&self) -> PathBuf {
+        self.output_root.join("frames")
+    }
+
+    pub fn landmarks_dir(&self) -> PathBuf {
+        self.output_root.join("landmarks")
+    }
+
     pub fn frame_path(&self, index: u64) -> PathBuf {
-        self.output_root
-            .join("frames")
-            .join(format!("{index:06}.jpg"))
+        self.frames_dir().join(format!("{index:06}.jpg"))
     }
 
     pub fn landmark_path(&self, index: u64) -> PathBuf {
-        self.output_root
-            .join("landmarks")
-            .join(format!("{index:06}.lms"))
+        self.landmarks_dir().join(format!("{index:06}.lms"))
     }
 
     pub fn quality_path(&self) -> PathBuf {

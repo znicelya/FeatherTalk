@@ -12,6 +12,7 @@ mod error_map;
 mod handshake;
 mod normalize_result;
 mod probe_result;
+mod quality_result;
 mod reporter;
 mod runtime;
 
@@ -28,5 +29,6 @@ pub use error_map::{
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
+pub use quality_result::quality_to_json;
 pub use reporter::{NoReporter, TaskReporter};
 pub use runtime::{JobExecutor, serve, serve_with_executor};
