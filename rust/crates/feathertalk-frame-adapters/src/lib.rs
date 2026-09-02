@@ -6,10 +6,12 @@
 
 mod cache;
 mod decoder;
+mod pfld;
 mod scrfd;
 
 pub use cache::FrameImageCache;
 pub use decoder::JpegFrameDecoder;
+pub use pfld::pfld_input;
 pub use scrfd::{LevelHostData, ScrfdFaceDetector, ScrfdInput, scrfd_detections, scrfd_input};
 
 /// Per-frame pixel budget, the same value as `feathertalk_inference`'s frame
