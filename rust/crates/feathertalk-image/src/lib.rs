@@ -6,7 +6,9 @@
 mod error;
 mod image;
 mod jpeg;
+mod laplacian;
 
 pub use error::ImageError;
-pub use image::BgrImage;
+pub use image::{BgrImage, GrayImage, to_gray};
 pub use jpeg::decode_jpeg;
+pub use laplacian::{laplacian_response, laplacian_variance};
