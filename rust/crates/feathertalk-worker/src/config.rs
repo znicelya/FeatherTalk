@@ -1,4 +1,7 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use feathertalk_media::MediaToolchain;
 
@@ -6,6 +9,29 @@ pub const ENV_FFPROBE: &str = "FEATHERTALK_WORKER_FFPROBE";
 pub const ENV_FFMPEG: &str = "FEATHERTALK_WORKER_FFMPEG";
 pub const ENV_MEDIA_TIMEOUT_MS: &str = "FEATHERTALK_WORKER_MEDIA_TIMEOUT_MS";
 pub const DEFAULT_MEDIA_TIMEOUT_MS: u64 = 300_000;
+pub const ENV_SCRFD_DIR: &str = "FEATHERTALK_WORKER_SCRFD_DIR";
+pub const ENV_PFLD_DIR: &str = "FEATHERTALK_WORKER_PFLD_DIR";
+
+/// Where the worker finds the two model artifact directories.
+///
+/// Only the shape of the paths is checked here. Whether the directories hold a
+/// loadable manifest and weights is discovered when the first job loads them,
+/// because a directory can disappear between startup and the first job.
+#[derive(Debug, Clone)]
+pub struct ModelToolchain {
+    scrfd_dir: PathBuf,
+    pfld_dir: PathBuf,
+}
+
+impl ModelToolchain {
+    pub fn scrfd_dir(&self) -> &Path {
+        &self.scrfd_dir
+    }
+
+    pub fn pfld_dir(&self) -> &Path {
+        &self.pfld_dir
+    }
+}
 
 /// Everything the worker learns from its environment at startup.
 ///
@@ -17,23 +43,43 @@ pub struct WorkerConfig {
     worker_version: String,
     media: Option<MediaToolchain>,
     media_rejection: Option<String>,
+    models: Option<ModelToolchain>,
+    model_rejection: Option<String>,
 }
 
 impl WorkerConfig {
     pub fn from_env() -> Self {
-        Self::from_values(
+        Self::from_values_with_models(
             std::env::var(ENV_FFPROBE).ok(),
             std::env::var(ENV_FFMPEG).ok(),
             std::env::var(ENV_MEDIA_TIMEOUT_MS).ok(),
+            std::env::var(ENV_SCRFD_DIR).ok(),
+            std::env::var(ENV_PFLD_DIR).ok(),
         )
     }
 
+    /// The media-only form: no model directories, so `extract_frames` stays
+    /// unsupported.
     pub fn from_values(
         ffprobe: Option<String>,
         ffmpeg: Option<String>,
         timeout_ms: Option<String>,
     ) -> Self {
+        Self::from_values_with_models(ffprobe, ffmpeg, timeout_ms, None, None)
+    }
+
+    pub fn from_values_with_models(
+        ffprobe: Option<String>,
+        ffmpeg: Option<String>,
+        timeout_ms: Option<String>,
+        scrfd_dir: Option<String>,
+        pfld_dir: Option<String>,
+    ) -> Self {
         let (media, media_rejection) = match media_toolchain(ffprobe, ffmpeg, timeout_ms) {
+            Ok(toolchain) => (Some(toolchain), None),
+            Err(reason) => (None, Some(reason)),
+        };
+        let (models, model_rejection) = match model_toolchain(scrfd_dir, pfld_dir) {
             Ok(toolchain) => (Some(toolchain), None),
             Err(reason) => (None, Some(reason)),
         };
@@ -41,6 +87,8 @@ impl WorkerConfig {
             worker_version: env!("CARGO_PKG_VERSION").to_owned(),
             media,
             media_rejection,
+            models,
+            model_rejection,
         }
     }
 
@@ -54,6 +102,14 @@ impl WorkerConfig {
 
     pub fn media_rejection(&self) -> Option<&str> {
         self.media_rejection.as_deref()
+    }
+
+    pub fn models(&self) -> Option<&ModelToolchain> {
+        self.models.as_ref()
+    }
+
+    pub fn model_rejection(&self) -> Option<&str> {
+        self.model_rejection.as_deref()
     }
 }
 
@@ -75,6 +131,18 @@ fn media_toolchain(
     }
     MediaToolchain::new(ffmpeg, ffprobe, Duration::from_millis(timeout_ms))
         .map_err(|error| error.to_string())
+}
+
+fn model_toolchain(
+    scrfd_dir: Option<String>,
+    pfld_dir: Option<String>,
+) -> Result<ModelToolchain, String> {
+    let scrfd_dir = required_path(scrfd_dir, ENV_SCRFD_DIR)?;
+    let pfld_dir = required_path(pfld_dir, ENV_PFLD_DIR)?;
+    Ok(ModelToolchain {
+        scrfd_dir,
+        pfld_dir,
+    })
 }
 
 fn required_path(value: Option<String>, variable: &str) -> Result<PathBuf, String> {
