@@ -323,7 +323,7 @@ fn rejects_invalid_normalized_audio_contracts_without_touching_destinations() {
 }
 
 #[test]
-fn rejects_duration_delta_over_twenty_milliseconds() {
+fn rejects_a_duration_delta_no_intact_container_would_carry() {
     let (root, input, spec) = setup();
     let layout = validate_normalization(&input, &spec).unwrap();
     seed_old_outputs(&layout);
@@ -334,7 +334,7 @@ fn rejects_duration_delta_over_twenty_milliseconds() {
         Ok(ProcessOutput::new(Some(0), video_probe(), Vec::new())),
         Ok(ProcessOutput::new(
             Some(0),
-            audio_probe_with("wav", "pcm_s16le", "s16", "16000", 1, "2.021"),
+            audio_probe_with("wav", "pcm_s16le", "s16", "16000", 1, "2.3"),
             Vec::new(),
         )),
     ]);
@@ -347,6 +347,31 @@ fn rejects_duration_delta_over_twenty_milliseconds() {
         })
     ));
     assert_old_outputs_and_no_staging(&layout, layout.output_dir());
+}
+
+/// The tolerance has to admit the alignment intact containers carry. The demo
+/// clip this repository ships probes 60.44 s of video against 60.48 s of audio,
+/// and normalization preserves each stream's duration, so the earlier 20 ms
+/// bound rejected the project's own input.
+#[test]
+fn accepts_the_duration_delta_an_intact_container_carries() {
+    let (root, input, spec) = setup();
+    let layout = validate_normalization(&input, &spec).unwrap();
+    let runner = FakeRunner::new(vec![
+        Ok(ProcessOutput::new(Some(0), source_probe(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), Vec::new(), Vec::new())),
+        Ok(ProcessOutput::new(Some(0), video_probe(), Vec::new())),
+        Ok(ProcessOutput::new(
+            Some(0),
+            audio_probe_with("wav", "pcm_s16le", "s16", "16000", 1, "2.04"),
+            Vec::new(),
+        )),
+    ]);
+
+    let result = normalize_media_with_runner(&input, &spec, &tools(root.path()), &runner).unwrap();
+    assert_eq!(result.layout().audio_path(), layout.audio_path());
+    assert_eq!(fs::read(layout.audio_path()).unwrap(), b"normalized-audio");
 }
 
 #[test]

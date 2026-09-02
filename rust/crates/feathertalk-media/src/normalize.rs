@@ -20,6 +20,24 @@ use crate::{
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// The largest video/audio duration difference the two normalized outputs may
+/// carry.
+///
+/// The bound guards against a truncated or mis-mapped stream, not against
+/// imperfectly aligned sources. A container reports a video duration that is a
+/// whole number of frame periods (40 ms at 25 fps) and an audio duration that is
+/// a whole number of codec frames (1024 samples for AAC, which is 128 ms at
+/// 8 kHz), so two streams covering the same recording routinely differ by more
+/// than a hundred milliseconds: this repository's own demo clip probes 60.44 s
+/// of video against 60.48 s of audio, and normalization preserves both. What
+/// this check exists to catch -- one output truncated while the other is whole
+/// -- is short by seconds, far outside the bound.
+///
+/// This is not the product's 20 ms audio/video *sync* budget. Sync is set by the
+/// two streams sharing a start time and by neither being resampled in time,
+/// which the per-stream contracts above already pin down; a tail that runs a
+/// frame longer than its partner shifts nothing.
+const MAX_DURATION_DELTA_SECONDS: f64 = 0.200;
 
 /// The phases of one normalization, in the order they run.
 ///
@@ -71,10 +89,10 @@ pub fn normalize_media_observed<R: ProcessRunner + ?Sized>(
     let video = verify_video_output(video_temp.path(), toolchain, runner)?;
     let audio = verify_audio_output(audio_temp.path(), toolchain, runner)?;
     let delta = (video.duration_seconds() - audio.duration_seconds()).abs();
-    if delta > 0.020 {
+    if delta > MAX_DURATION_DELTA_SECONDS {
         return Err(MediaError::NormalizationVerificationFailed {
             field: "duration_delta",
-            expected: "<= 0.020 seconds".to_owned(),
+            expected: format!("<= {MAX_DURATION_DELTA_SECONDS:.3} seconds"),
             actual: format!("{delta:.6} seconds"),
         });
     }

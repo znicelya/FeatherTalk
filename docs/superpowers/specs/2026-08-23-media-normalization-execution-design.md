@@ -143,8 +143,16 @@ FFmpeg run, the file is required to be regular, non-symlink, and non-empty;
   no audio;
 - audio: codec `pcm_s16le`, sample format `s16`, 16,000 Hz, one channel, no video.
 
-Video/audio duration difference must be <=20 ms. Both files are streamed for
-SHA-256 and byte counts. Existing destinations remain untouched until both pass.
+Video/audio duration difference must be <=200 ms. The bound catches one output
+truncated while the other is whole, which is short by seconds; it does not
+assert alignment, because a container reports whole frame periods for video
+(40 ms at 25 fps) and whole codec frames for audio (128 ms for AAC at 8 kHz), so
+an intact pair routinely differs by more than a hundred milliseconds. This is
+not the product's 20 ms audio/video sync budget: sync follows from a shared
+start time and from neither stream being resampled in time.
+
+Both files are streamed for SHA-256 and byte counts. Existing destinations
+remain untouched until both pass.
 The commit state machine backs up existing regular files, renames both new files,
 then deletes backups. Any failure reverses completed renames and reports primary
 and rollback errors. Guards remove only invocation-owned temporary/backup paths.
