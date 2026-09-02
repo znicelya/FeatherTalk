@@ -30,10 +30,27 @@ impl FramePipelineSpec {
         validate_positive_limit("frame_count", frame_count, MAX_FRAME_COUNT)?;
         validate_dimension("image_width", image_width)?;
         validate_dimension("image_height", image_height)?;
-        if video_path == output_root || video_path.starts_with(&output_root) {
+        // The source video may live beside the outputs -- that is the project
+        // layout -- but it must not be one of the three paths extraction and
+        // publication write.
+        if video_path == output_root {
             return Err(invalid(
                 "output_root",
-                "must not equal or contain the source video path",
+                "must not equal the source video path",
+            ));
+        }
+        if video_path.starts_with(&output_root)
+            && video_path.parent() != Some(output_root.as_path())
+        {
+            return Err(invalid(
+                "output_root",
+                "must not contain the source video path in a nested directory",
+            ));
+        }
+        if video_path == output_root.join("quality.json") {
+            return Err(invalid(
+                "output_root",
+                "must not equal the quality report path",
             ));
         }
         Ok(Self {

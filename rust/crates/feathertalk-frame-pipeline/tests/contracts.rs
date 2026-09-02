@@ -88,3 +88,49 @@ fn anomaly_and_report_round_trip_with_strict_schema() {
     )
     .is_err());
 }
+
+#[test]
+fn a_video_directly_under_the_output_root_is_accepted() {
+    // This is the real project layout: assets/video_25fps.mp4 next to the
+    // frames/ and landmarks/ directories the pipeline writes.
+    let value = FramePipelineSpec::new(
+        PathBuf::from(r"C:\project\assets\video_25fps.mp4"),
+        PathBuf::from(r"C:\project\assets"),
+        3,
+        640,
+        480,
+    )
+    .unwrap();
+    assert_eq!(
+        value.frame_path(0),
+        PathBuf::from(r"C:\project\assets\frames\000000.jpg")
+    );
+}
+
+#[test]
+fn output_root_rejects_only_the_paths_the_pipeline_owns() {
+    for source in [
+        r"C:\project\assets",
+        r"C:\project\assets\frames\000000.jpg",
+        r"C:\project\assets\landmarks\000000.lms",
+        r"C:\project\assets\quality.json",
+    ] {
+        let result = FramePipelineSpec::new(
+            PathBuf::from(source),
+            PathBuf::from(r"C:\project\assets"),
+            3,
+            640,
+            480,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(PipelineError::InvalidField {
+                    field: "output_root",
+                    ..
+                })
+            ),
+            "{source} must be rejected"
+        );
+    }
+}
