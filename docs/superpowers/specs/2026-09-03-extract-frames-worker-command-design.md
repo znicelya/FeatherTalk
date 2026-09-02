@@ -25,10 +25,10 @@
 `crates/feathertalk-frame-pipeline/src/commands.rs:75-79` 现在这样构造 `-ss` 参数：
 
 ```rust
-fn format_timestamp(index: u64) -> String {
-    let seconds = index / FRAME_RATE;
-    let remainder = index % FRAME_RATE;
-    format!("{seconds}.{remainder:02}")
+fn format_timestamp(index: u64) -> OsString {
+    let seconds = index / 25;
+    let remainder = index % 25;
+    format!("{seconds}.{remainder:02}").into()
 }
 ```
 
@@ -55,23 +55,29 @@ fn format_timestamp(index: u64) -> String {
 时间戳改为毫秒三位：
 
 ```rust
-fn format_timestamp(index: u64) -> String {
+const FRAME_RATE: u64 = 25;
+
+fn format_timestamp(index: u64) -> OsString {
     let seconds = index / FRAME_RATE;
     let millis = (index % FRAME_RATE) * 40;
-    format!("{seconds}.{millis:03}")
+    format!("{seconds}.{millis:03}").into()
 }
 ```
+
+顺手把散落的字面量 25 收成 `FRAME_RATE` 常量。`-vf fps=25` 的滤镜字符串仍是字面量，因为它是 ffmpeg 语法而不是数值参与运算。
 
 25 fps 下 `(index % 25) * 40` 恒为 40 的整数倍且小于 1000，三位十进制精确表示，不存在舍入。
 
 同时把「一次 ffmpeg 一帧」改成「一次 ffmpeg 一块」。`frame_command` 变为块命令，参数为 `(extractor, source, first_index, count, output_pattern)`，其中 `output_pattern` 是 `<staging>/frames/%06d.jpg`：
 
 ```
-ffmpeg -hide_banner -loglevel error -ss <ts(first_index)> -i <video>
+ffmpeg -hide_banner -nostdin -y -v error -ss <ts(first_index)> -i <video>
   -map 0:v:0 -an -sn -dn -map_metadata -1 -map_chapters -1
   -vf fps=25 -frames:v <count> -start_number <first_index>
   -q:v 2 -f image2 <staging>/frames/%06d.jpg
 ```
+
+除 `-frames:v`、`-start_number` 和末尾输出路径外，标志与现状逐字相同（`-v error` 就是实测里用的 `-loglevel error`）。变化只有三处：`-frames:v` 从固定的 `1` 变成块长，`-start_number` 从固定的 `0` 变成块起点，输出从具体路径变成 `%06d.jpg` 模板。
 
 `-start_number <first_index>` 配合 `%06d` 让 ffmpeg 直接写出最终文件名，与 `FramePipelineSpec::frame_path` 的 `frames/NNNNNN.jpg` 完全一致，所以 `publish` 阶段不需要任何改动。`-vf fps=25` 在 `-ss` 之后按输出帧率重采样，块内帧序号连续。
 
