@@ -1,3 +1,5 @@
+mod support;
+
 use std::{path::Path, sync::Arc};
 
 use feathertalk_frame_adapters::{DEFAULT_MAX_FRAME_PIXELS, FrameImageCache, JpegFrameDecoder};
@@ -133,4 +135,69 @@ fn the_decoder_is_a_frame_decoder_trait_object() {
         ),
         "{error}"
     );
+}
+
+#[test]
+fn a_repeated_path_reuses_the_cached_decode() {
+    let fixture = support::load_and_verify_fixture().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("frame_000750.jpg");
+    std::fs::copy(fixture.root.join("frame.jpg"), &path).unwrap();
+
+    let cache = FrameImageCache::new();
+    let first = cache.load(&path).unwrap();
+    let second = cache.load(&path).unwrap();
+
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "the second load must hand back the cached allocation"
+    );
+    assert_eq!(first.width(), 640);
+    assert_eq!(first.height(), 640);
+}
+
+#[test]
+fn a_new_path_replaces_the_cached_decode() {
+    let fixture = support::load_and_verify_fixture().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("frame_000001.jpg");
+    let second_path = directory.path().join("frame_000002.jpg");
+    std::fs::copy(fixture.root.join("frame.jpg"), &first_path).unwrap();
+    std::fs::copy(fixture.root.join("frame.jpg"), &second_path).unwrap();
+
+    let cache = FrameImageCache::new();
+    let first = cache.load(&first_path).unwrap();
+    let second = cache.load(&second_path).unwrap();
+
+    // The two files hold identical bytes, so a value comparison would pass
+    // either way; only the pointer identity shows the entry was replaced.
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "a new path must evict the entry"
+    );
+    assert_eq!(first.as_bytes(), second.as_bytes());
+
+    let reloaded = cache.load(&first_path).unwrap();
+    assert!(
+        !Arc::ptr_eq(&first, &reloaded),
+        "the first path must be decoded again after eviction"
+    );
+    assert_eq!(first.as_bytes(), reloaded.as_bytes());
+}
+
+#[test]
+fn a_real_frame_beyond_the_pixel_budget_is_rejected() {
+    let fixture = support::load_and_verify_fixture().unwrap();
+    // One pixel under 640 * 640, so the header check is what rejects it.
+    let error = FrameImageCache::with_max_pixels(409_599)
+        .load(&fixture.root.join("frame.jpg"))
+        .unwrap_err();
+    match error {
+        PipelineError::Adapter { component, message } => {
+            assert_eq!(component, "jpeg");
+            assert!(message.contains("409600 pixels"), "{message}");
+            assert!(message.contains("409599 pixel budget"), "{message}");
+        }
+        other => panic!("expected an Adapter error, got {other}"),
+    }
 }
