@@ -1,3 +1,5 @@
+mod support;
+
 use std::{collections::VecDeque, fs, path::Path, sync::Mutex, time::Duration};
 
 use feathertalk_frame_pipeline::{
@@ -7,6 +9,8 @@ use feathertalk_frame_pipeline::{
 };
 use feathertalk_pfld::{CropGeometry, PFLDLandmarks, decode_landmarks};
 
+use support::chunk_outputs;
+
 struct Runner;
 
 impl ProcessRunner for Runner {
@@ -15,7 +19,9 @@ impl ProcessRunner for Runner {
         command: &CommandSpec,
         _timeout: Duration,
     ) -> Result<ProcessOutput, PipelineError> {
-        fs::write(command.arguments().last().unwrap(), b"jpeg-frame").unwrap();
+        for (_, path) in chunk_outputs(command) {
+            fs::write(path, b"jpeg-frame").unwrap();
+        }
         Ok(ProcessOutput::new(Some(0), vec![], vec![]))
     }
 }

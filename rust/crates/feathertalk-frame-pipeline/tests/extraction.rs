@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     collections::VecDeque,
     fs,
@@ -7,9 +9,11 @@ use std::{
 };
 
 use feathertalk_frame_pipeline::{
-    CommandSpec, FrameExtractor, FramePipelineSpec, PipelineError, ProcessOutput, ProcessRunner,
-    extract_frames_with_runner,
+    CommandSpec, FRAME_CHUNK, FrameExtractor, FramePipelineSpec, PipelineError, ProcessOutput,
+    ProcessRunner, extract_frames_with_runner,
 };
+
+use support::{chunk_outputs, flag_number, flag_value};
 
 struct FakeRunner {
     outputs: Mutex<VecDeque<Result<ProcessOutput, PipelineError>>>,
@@ -41,23 +45,18 @@ impl ProcessRunner for FakeRunner {
         command: &CommandSpec,
         _timeout: Duration,
     ) -> Result<ProcessOutput, PipelineError> {
-        let command_number = {
-            let mut commands = self.commands.lock().unwrap();
-            commands.push(command.clone());
-            commands.len()
-        };
+        self.commands.lock().unwrap().push(command.clone());
         let output = self.outputs.lock().unwrap().pop_front().unwrap()?;
-        let path = Path::new(command.arguments().last().unwrap());
-        match self.writes {
-            WriteMode::Bytes => fs::write(path, format!("frame:{command_number}")).unwrap(),
-            WriteMode::Missing => {}
-            WriteMode::Empty => {
-                fs::write(path, []).unwrap();
-            }
-            WriteMode::Oversized => {
-                fs::write(path, b"x").unwrap();
-                let file = fs::OpenOptions::new().write(true).open(path).unwrap();
-                file.set_len(16 * 1024 * 1024 + 1).unwrap();
+        for (index, path) in chunk_outputs(command) {
+            match self.writes {
+                WriteMode::Bytes => fs::write(&path, format!("frame:{index}")).unwrap(),
+                WriteMode::Missing => {}
+                WriteMode::Empty => fs::write(&path, []).unwrap(),
+                WriteMode::Oversized => {
+                    fs::write(&path, b"x").unwrap();
+                    let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+                    file.set_len(16 * 1024 * 1024 + 1).unwrap();
+                }
             }
         }
         Ok(output)
@@ -96,7 +95,7 @@ fn staging_dirs(root: &Path) -> Vec<PathBuf> {
 #[test]
 fn extracts_exact_frame_count_and_records_hashes() {
     let (root, spec, extractor) = setup(3);
-    let runner = FakeRunner::new(ok_outputs(3), WriteMode::Bytes);
+    let runner = FakeRunner::new(ok_outputs(1), WriteMode::Bytes);
     let batch = extract_frames_with_runner(&spec, &extractor, &runner).unwrap();
     assert_eq!(batch.frames().len(), 3);
     assert_eq!(batch.frames()[0].index(), 0);
@@ -107,7 +106,7 @@ fn extracts_exact_frame_count_and_records_hashes() {
             .iter()
             .all(|frame| frame.bytes() > 0 && frame.sha256().len() == 64)
     );
-    assert_eq!(runner.commands.lock().unwrap().len(), 3);
+    assert_eq!(runner.commands.lock().unwrap().len(), 1);
     assert!(batch.staging_dir().starts_with(root.path()));
 }
 
@@ -162,7 +161,7 @@ fn injected_timeout_is_preserved() {
     let (_root, spec, extractor) = setup(1);
     let runner = FakeRunner::new(
         vec![Err(PipelineError::ToolTimedOut {
-            operation: "extract_frame",
+            operation: "extract_frames",
             timeout_ms: 10,
         })],
         WriteMode::Missing,
@@ -170,10 +169,30 @@ fn injected_timeout_is_preserved() {
     assert!(matches!(
         extract_frames_with_runner(&spec, &extractor, &runner),
         Err(PipelineError::ToolTimedOut {
-            operation: "extract_frame",
+            operation: "extract_frames",
             ..
         })
     ));
+}
+
+#[test]
+fn frames_are_extracted_in_chunks_with_a_short_tail() {
+    let (_root, spec, extractor) = setup(FRAME_CHUNK * 6 + 11);
+    let runner = FakeRunner::new(ok_outputs(7), WriteMode::Bytes);
+    let batch = extract_frames_with_runner(&spec, &extractor, &runner).unwrap();
+    assert_eq!(batch.frames().len() as u64, FRAME_CHUNK * 6 + 11);
+    let commands = runner.commands.lock().unwrap();
+    assert_eq!(commands.len(), 7);
+    for (position, command) in commands.iter().enumerate() {
+        let first = FRAME_CHUNK * position as u64;
+        assert_eq!(flag_number(command, "-start_number"), first);
+        assert_eq!(
+            flag_number(command, "-frames:v"),
+            if position == 6 { 11 } else { FRAME_CHUNK }
+        );
+        // 250 frames are exactly 10 s, so every chunk starts on a whole second.
+        assert_eq!(flag_value(command, "-ss"), format!("{}.000", position * 10));
+    }
 }
 
 #[cfg(windows)]
@@ -215,8 +234,9 @@ impl ProcessRunner for SymlinkRunner {
         command: &CommandSpec,
         _timeout: Duration,
     ) -> Result<ProcessOutput, PipelineError> {
-        std::os::windows::fs::symlink_file(&self.target, command.arguments().last().unwrap())
-            .unwrap();
+        for (_, path) in chunk_outputs(command) {
+            std::os::windows::fs::symlink_file(&self.target, &path).unwrap();
+        }
         Ok(ProcessOutput::new(Some(0), vec![], vec![]))
     }
 }

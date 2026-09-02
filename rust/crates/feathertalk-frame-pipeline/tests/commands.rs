@@ -4,7 +4,7 @@ use std::{path::PathBuf, time::Duration};
 
 use feathertalk_frame_pipeline::{FrameExtractor, FramePipelineSpec, frame_command};
 
-use support::flag_value;
+use support::{flag_number, flag_value};
 
 fn extractor() -> FrameExtractor {
     FrameExtractor::new(
@@ -25,11 +25,15 @@ fn spec() -> FramePipelineSpec {
     .unwrap()
 }
 
+fn pattern() -> PathBuf {
+    PathBuf::from(r"C:\project\assets\.feathertalk-frame-build-1-1\frames\%06d.jpg")
+}
+
 #[test]
 fn frame_command_uses_fixed_flags_and_native_path_arguments() {
     let value = spec();
-    let command = frame_command(&extractor(), value.video_path(), 26, &value.frame_path(26));
-    assert_eq!(command.operation(), "extract_frame");
+    let command = frame_command(&extractor(), value.video_path(), 26, 250, &pattern());
+    assert_eq!(command.operation(), "extract_frames");
     assert_eq!(command.executable(), PathBuf::from(r"C:\bundle\ffmpeg.exe"));
     assert!(
         command
@@ -37,28 +41,18 @@ fn frame_command_uses_fixed_flags_and_native_path_arguments() {
             .windows(2)
             .any(|pair| pair == ["-vf", "fps=25"])
     );
-    assert!(
-        command
-            .arguments()
-            .windows(2)
-            .any(|pair| pair == ["-frames:v", "1"])
-    );
-    assert!(
-        command
-            .arguments()
-            .windows(2)
-            .any(|pair| pair == ["-start_number", "0"])
-    );
+    assert_eq!(flag_number(&command, "-frames:v"), 250);
+    assert_eq!(flag_number(&command, "-start_number"), 26);
+    assert_eq!(flag_value(&command, "-ss"), "1.040");
     assert_eq!(
         command.arguments().last(),
-        Some(&value.frame_path(26).into_os_string())
+        Some(&pattern().into_os_string())
     );
     assert!(
         command
             .arguments()
             .contains(&value.video_path().as_os_str().to_owned())
     );
-    assert_eq!(flag_value(&command, "-ss"), "1.040");
 }
 
 #[test]
@@ -76,7 +70,7 @@ fn frame_timestamps_keep_millisecond_precision() {
         (50, "2.000"),
         (1510, "60.400"),
     ] {
-        let command = frame_command(&tool, value.video_path(), index, &value.frame_path(index));
+        let command = frame_command(&tool, value.video_path(), index, 1, &pattern());
         assert_eq!(flag_value(&command, "-ss"), expected, "frame {index}");
     }
 }

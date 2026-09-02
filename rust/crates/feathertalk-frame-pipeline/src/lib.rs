@@ -13,7 +13,9 @@ pub use evaluate::{
     FrameDecoder, FrameEvaluation, LandmarkPredictor, MIN_BBOX_INTERSECTION_RATIO,
     NMS_IOU_THRESHOLD, evaluate_frames_with_models,
 };
-pub use extraction::{ExtractedFrame, FrameBatch, extract_frames, extract_frames_with_runner};
+pub use extraction::{
+    ExtractedFrame, FRAME_CHUNK, FrameBatch, extract_frames, extract_frames_with_runner,
+};
 pub use model::{
     AnomalyCode, FaceDetection, FrameAnomaly, FramePipelineSpec, FrameQuality, QualityReport,
     RecoveryAction,

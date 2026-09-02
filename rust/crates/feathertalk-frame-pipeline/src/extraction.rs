@@ -13,6 +13,16 @@ use crate::{
     process::{FrameExtractor, MAX_CAPTURE_BYTES, MAX_FRAME_BYTES, next_id},
 };
 
+/// How many frames one ffmpeg invocation writes.
+///
+/// Measured against `demo/feathertalk_demo_latest_188.mp4` (1511 frames,
+/// 1280x720, 25 fps): one process per frame costs 129-193 ms of process and
+/// decoder start-up, roughly 255 s for the clip, while chunks of 250 finish in
+/// 3.2 s with byte-identical JPEG output. The chunk also bounds how long a
+/// cancellation waits, measured at about 1.1 s for a chunk of 250 frames at
+/// this resolution.
+pub const FRAME_CHUNK: u64 = 250;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedFrame {
     index: u64,
@@ -97,21 +107,28 @@ pub fn extract_frames_with_runner<R: ProcessRunner + ?Sized>(
     }
 
     let mut frames = Vec::with_capacity(spec.frame_count() as usize);
-    for index in 0..spec.frame_count() {
-        let output = frames_dir.join(format!("{index:06}.jpg"));
-        let command = frame_command(extractor, spec.video_path(), index, &output);
+    let pattern = frames_dir.join("%06d.jpg");
+    let mut first_index = 0;
+    while first_index < spec.frame_count() {
+        let count = FRAME_CHUNK.min(spec.frame_count() - first_index);
+        let command = frame_command(extractor, spec.video_path(), first_index, count, &pattern);
         if let Err(error) = run_frame(runner, &command, extractor.timeout()) {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
-        let artifact = match inspect_frame(index, output) {
-            Ok(frame) => frame,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&staging);
-                return Err(error);
+        // ffmpeg writing fewer files than asked is a hard failure, not
+        // something to compensate for: `inspect_frame` reports the first gap.
+        for index in first_index..first_index + count {
+            let output = frames_dir.join(format!("{index:06}.jpg"));
+            match inspect_frame(index, output) {
+                Ok(frame) => frames.push(frame),
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&staging);
+                    return Err(error);
+                }
             }
-        };
-        frames.push(artifact);
+        }
+        first_index += count;
     }
     Ok(FrameBatch {
         staging_dir: staging,

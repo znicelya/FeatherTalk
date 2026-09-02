@@ -34,8 +34,8 @@ fn pfld_artifact_dir() -> PathBuf {
 }
 
 /// Stands in for ffmpeg. `extract_frames_with_runner` writes each frame to
-/// `<staging>/frames/{index:06}.jpg`, so the stem selects which committed JPEG
-/// this frame carries.
+/// `<staging>/frames/{index:06}.jpg`, so the frame index selects which
+/// committed JPEG this frame carries.
 struct FixtureRunner {
     payloads: Vec<Vec<u8>>,
 }
@@ -46,22 +46,13 @@ impl ProcessRunner for FixtureRunner {
         command: &CommandSpec,
         _timeout: Duration,
     ) -> Result<ProcessOutput, PipelineError> {
-        let output = Path::new(
-            command
-                .arguments()
-                .last()
-                .expect("the frame command ends with the output path"),
-        );
-        let index: usize = output
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .and_then(|stem| stem.parse().ok())
-            .unwrap_or_else(|| panic!("unexpected frame name {}", output.display()));
-        let payload = self
-            .payloads
-            .get(index)
-            .unwrap_or_else(|| panic!("no payload for frame {index}"));
-        fs::write(output, payload).expect("the staging directory is writable");
+        for (index, path) in support::chunk_outputs(command) {
+            let payload = self
+                .payloads
+                .get(index as usize)
+                .unwrap_or_else(|| panic!("no payload for frame {index}"));
+            fs::write(&path, payload).expect("the staging directory is writable");
+        }
         Ok(ProcessOutput::new(Some(0), vec![], vec![]))
     }
 }

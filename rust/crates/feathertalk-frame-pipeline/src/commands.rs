@@ -46,13 +46,19 @@ const FRAME_RATE: u64 = 25;
 /// index maps onto a whole number of milliseconds and `-ss` never rounds.
 const MILLIS_PER_FRAME: u64 = 1_000 / FRAME_RATE;
 
+/// One ffmpeg invocation that writes `count` frames starting at `first_index`.
+///
+/// `output_pattern` must be an `image2` pattern such as `frames/%06d.jpg`;
+/// ffmpeg expands it with `-start_number`, so the file names match
+/// `FramePipelineSpec::frame_path`.
 pub fn frame_command(
     extractor: &FrameExtractor,
     source: &Path,
-    index: u64,
-    output: &Path,
+    first_index: u64,
+    count: u64,
+    output_pattern: &Path,
 ) -> CommandSpec {
-    let timestamp = format_timestamp(index);
+    let timestamp = format_timestamp(first_index);
     let mut arguments = args(["-hide_banner", "-nostdin", "-y", "-v", "error", "-ss"]);
     arguments.push(timestamp);
     arguments.push("-i".into());
@@ -69,17 +75,14 @@ pub fn frame_command(
         "-1",
         "-vf",
         "fps=25",
-        "-frames:v",
-        "1",
-        "-start_number",
-        "0",
-        "-q:v",
-        "2",
-        "-f",
-        "image2",
     ]));
-    arguments.push(output.as_os_str().to_owned());
-    CommandSpec::new(extractor.ffmpeg().to_owned(), arguments, "extract_frame")
+    arguments.push("-frames:v".into());
+    arguments.push(count.to_string().into());
+    arguments.push("-start_number".into());
+    arguments.push(first_index.to_string().into());
+    arguments.extend(args(["-q:v", "2", "-f", "image2"]));
+    arguments.push(output_pattern.as_os_str().to_owned());
+    CommandSpec::new(extractor.ffmpeg().to_owned(), arguments, "extract_frames")
 }
 
 fn format_timestamp(index: u64) -> OsString {
