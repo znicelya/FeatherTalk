@@ -210,7 +210,7 @@ fn classifies_bbox_landmark_and_blur_contract_failures() {
             fail: false,
         },
         Detector {
-            detections: vec![detection(0.9, [0.0, 0.0, 10.0, 10.0])],
+            detections: vec![detection(0.9, [-95.0, 10.0, 100.0, 100.0])],
             fail: false,
         },
         predictor(0.5),
@@ -305,6 +305,35 @@ fn rejected_low_confidence_detection_counts_as_no_face() {
         predictor(0.5),
     );
     assert_eq!(anomaly.code(), AnomalyCode::FaceNotFound);
+}
+
+#[test]
+fn small_but_fully_inside_bbox_reaches_the_accepted_path() {
+    let (_root, batch) = batch();
+    let predictor = predictor(0.5);
+    let evaluation = evaluate_frames_with_models(
+        &batch,
+        &Decoder {
+            blur: 30.0,
+            fail: false,
+        },
+        &Detector {
+            detections: vec![detection(0.9, [240.0, 130.0, 100.0, 110.0])],
+            fail: false,
+        },
+        &predictor,
+    )
+    .unwrap();
+    assert!(
+        evaluation.anomalies().is_empty(),
+        "{:?}",
+        evaluation.anomalies()
+    );
+    assert_eq!(evaluation.accepted().len(), 1);
+    assert_eq!(
+        evaluation.accepted()[0].bbox(),
+        [240.0, 130.0, 100.0, 110.0]
+    );
 }
 
 #[allow(dead_code)]

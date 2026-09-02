@@ -7,6 +7,7 @@ use crate::{AnomalyCode, FaceDetection, FrameAnomaly, FrameBatch, PipelineError,
 
 pub const FACE_CONFIDENCE_THRESHOLD: f32 = 0.50;
 pub const NMS_IOU_THRESHOLD: f32 = 0.40;
+/// Minimum fraction of the detection box that must fall inside the frame.
 pub const MIN_BBOX_INTERSECTION_RATIO: f32 = 0.10;
 pub const BLUR_VARIANCE_THRESHOLD: f64 = 20.0;
 
@@ -356,16 +357,23 @@ fn choose_primary(
     Ok(PrimaryDecision::One(selected))
 }
 
+/// Fraction of the detection box that falls inside the frame.
+///
+/// The denominator is the box area, not the frame area, so the result answers
+/// "how much of this face did we actually capture?" independently of frame size.
 fn intersection_ratio(bbox: [f32; 4], width: u32, height: u32) -> f32 {
     let x1 = bbox[0].max(0.0);
     let y1 = bbox[1].max(0.0);
     let x2 = (bbox[0] + bbox[2]).min(width as f32);
     let y2 = (bbox[1] + bbox[3]).min(height as f32);
     if x2 <= x1 || y2 <= y1 {
-        0.0
-    } else {
-        ((x2 - x1) * (y2 - y1)) / (width as f32 * height as f32)
+        return 0.0;
     }
+    let area = bbox[2] * bbox[3];
+    if area <= 0.0 {
+        return 0.0;
+    }
+    ((x2 - x1) * (y2 - y1)) / area
 }
 
 fn serialize_landmarks(
@@ -390,4 +398,56 @@ fn serialize_landmarks(
         bytes.extend_from_slice(format!("{} {}\n", point.x, point.y).as_bytes());
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::intersection_ratio;
+
+    const WIDTH: u32 = 640;
+    const HEIGHT: u32 = 480;
+
+    #[test]
+    fn a_box_fully_inside_the_frame_is_entirely_visible() {
+        assert_eq!(
+            intersection_ratio([10.0, 10.0, 100.0, 100.0], WIDTH, HEIGHT),
+            1.0
+        );
+    }
+
+    #[test]
+    fn a_box_half_past_the_right_edge_is_half_visible() {
+        assert_eq!(
+            intersection_ratio([590.0, 10.0, 100.0, 100.0], WIDTH, HEIGHT),
+            0.5
+        );
+    }
+
+    #[test]
+    fn a_box_past_the_right_edge_is_invisible() {
+        assert_eq!(
+            intersection_ratio([700.0, 10.0, 100.0, 100.0], WIDTH, HEIGHT),
+            0.0
+        );
+    }
+
+    #[test]
+    fn a_box_past_the_left_edge_is_invisible() {
+        assert_eq!(
+            intersection_ratio([-100.0, 10.0, 100.0, 100.0], WIDTH, HEIGHT),
+            0.0
+        );
+    }
+
+    #[test]
+    fn a_degenerate_box_is_invisible() {
+        assert_eq!(
+            intersection_ratio([10.0, 10.0, 0.0, 100.0], WIDTH, HEIGHT),
+            0.0
+        );
+        assert_eq!(
+            intersection_ratio([10.0, 10.0, 100.0, 0.0], WIDTH, HEIGHT),
+            0.0
+        );
+    }
 }

@@ -9,8 +9,9 @@ mod publish;
 pub use commands::{CommandSpec, frame_command};
 pub use error::PipelineError;
 pub use evaluate::{
-    AcceptedFrame, DecodedFrame, FaceDetector, FrameDecoder, FrameEvaluation, LandmarkPredictor,
-    evaluate_frames_with_models,
+    AcceptedFrame, BLUR_VARIANCE_THRESHOLD, DecodedFrame, FACE_CONFIDENCE_THRESHOLD, FaceDetector,
+    FrameDecoder, FrameEvaluation, LandmarkPredictor, MIN_BBOX_INTERSECTION_RATIO,
+    NMS_IOU_THRESHOLD, evaluate_frames_with_models,
 };
 pub use extraction::{ExtractedFrame, FrameBatch, extract_frames, extract_frames_with_runner};
 pub use model::{
