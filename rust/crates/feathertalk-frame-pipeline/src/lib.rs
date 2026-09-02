@@ -12,7 +12,7 @@ pub use error::PipelineError;
 pub use evaluate::{
     AcceptedFrame, BLUR_VARIANCE_THRESHOLD, DecodedFrame, FACE_CONFIDENCE_THRESHOLD, FaceDetector,
     FrameDecoder, FrameEvaluation, LandmarkPredictor, MIN_BBOX_INTERSECTION_RATIO,
-    NMS_IOU_THRESHOLD, evaluate_frames_with_models,
+    NMS_IOU_THRESHOLD, evaluate_frames_observed, evaluate_frames_with_models,
 };
 pub use extraction::{
     ExtractedFrame, FRAME_CHUNK, FrameBatch, extract_frames, extract_frames_observed,

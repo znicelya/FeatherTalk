@@ -9,12 +9,13 @@ use std::{
 
 use feathertalk_frame_pipeline::{
     AnomalyCode, CommandSpec, DecodedFrame, FaceDetection, FaceDetector, FrameBatch, FrameDecoder,
-    FrameExtractor, FramePipelineSpec, LandmarkPredictor, PipelineError, ProcessOutput,
-    ProcessRunner, RecoveryAction, evaluate_frames_with_models, extract_frames_with_runner,
+    FrameExtractor, FramePipelineSpec, LandmarkPredictor, PipelineError, PipelinePhase,
+    ProcessOutput, ProcessRunner, RecoveryAction, evaluate_frames_observed,
+    evaluate_frames_with_models, extract_frames_with_runner,
 };
 use feathertalk_pfld::{CropGeometry, PFLDLandmarks, decode_landmarks};
 
-use support::chunk_outputs;
+use support::{Recorder, chunk_outputs};
 
 struct OneFrameRunner;
 
@@ -32,10 +33,15 @@ impl ProcessRunner for OneFrameRunner {
 }
 
 fn batch() -> (tempfile::TempDir, FrameBatch) {
+    batch_of(1)
+}
+
+fn batch_of(frame_count: u64) -> (tempfile::TempDir, FrameBatch) {
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("video_25fps.mp4");
     fs::write(&video, b"video").unwrap();
-    let spec = FramePipelineSpec::new(video, root.path().join("assets"), 1, 640, 480).unwrap();
+    let spec =
+        FramePipelineSpec::new(video, root.path().join("assets"), frame_count, 640, 480).unwrap();
     let extractor =
         FrameExtractor::new(root.path().join("ffmpeg"), Duration::from_secs(1)).unwrap();
     let batch = extract_frames_with_runner(&spec, &extractor, &OneFrameRunner).unwrap();
@@ -340,6 +346,74 @@ fn small_but_fully_inside_bbox_reaches_the_accepted_path() {
         evaluation.accepted()[0].bbox(),
         [240.0, 130.0, 100.0, 110.0]
     );
+}
+
+#[test]
+fn evaluation_reports_one_phase_before_each_frame() {
+    let (_root, batch) = batch_of(3);
+    // A failing decoder turns every frame into an anomaly, which keeps the
+    // test focused on the counter instead of on model plumbing.
+    let decoder = Decoder {
+        blur: 0.0,
+        fail: true,
+    };
+    let detector = Detector {
+        detections: Vec::new(),
+        fail: false,
+    };
+    let observer = Recorder::new(None);
+
+    let evaluation =
+        evaluate_frames_observed(&batch, &decoder, &detector, &predictor(0.5), &observer).unwrap();
+
+    assert_eq!(evaluation.anomalies().len(), 3);
+    assert_eq!(
+        observer.phases(),
+        vec![
+            PipelinePhase::Evaluating {
+                completed: 0,
+                total: 3
+            },
+            PipelinePhase::Evaluating {
+                completed: 1,
+                total: 3
+            },
+            PipelinePhase::Evaluating {
+                completed: 2,
+                total: 3
+            },
+        ]
+    );
+}
+
+#[test]
+fn cancellation_stops_evaluation_at_the_next_frame() {
+    let (_root, batch) = batch_of(4);
+    let decoder = Decoder {
+        blur: 0.0,
+        fail: true,
+    };
+    let detector = Detector {
+        detections: Vec::new(),
+        fail: false,
+    };
+    // Cancelled once two frames have been reported, so the third frame is
+    // where the run stops.
+    let observer = Recorder::new(Some(2));
+
+    let error = evaluate_frames_observed(&batch, &decoder, &detector, &predictor(0.5), &observer)
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            PipelineError::Cancelled {
+                operation: "evaluate_frames"
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(observer.phases().len(), 2);
 }
 
 #[allow(dead_code)]

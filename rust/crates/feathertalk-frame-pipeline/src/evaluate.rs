@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use feathertalk_face::{Detection, DetectionConfig, non_max_suppression};
 use feathertalk_pfld::PFLDLandmarks;
 
-use crate::{AnomalyCode, FaceDetection, FrameAnomaly, FrameBatch, PipelineError, RecoveryAction};
+use crate::{
+    AnomalyCode, FaceDetection, FrameAnomaly, FrameBatch, NoObserver, PipelineError,
+    PipelineObserver, PipelinePhase, RecoveryAction,
+};
 
 pub const FACE_CONFIDENCE_THRESHOLD: f32 = 0.50;
 pub const NMS_IOU_THRESHOLD: f32 = 0.40;
@@ -134,6 +137,7 @@ impl FrameEvaluation {
     }
 }
 
+/// Evaluates every extracted frame with no observer.
 pub fn evaluate_frames_with_models<D, F, L>(
     batch: &FrameBatch,
     decoder: &D,
@@ -145,9 +149,36 @@ where
     F: FaceDetector + ?Sized,
     L: LandmarkPredictor + ?Sized,
 {
+    evaluate_frames_observed(batch, decoder, detector, predictor, &NoObserver)
+}
+
+/// Evaluates every extracted frame, reporting one phase before each frame and
+/// stopping before the next frame once the observer reports cancellation.
+pub fn evaluate_frames_observed<D, F, L>(
+    batch: &FrameBatch,
+    decoder: &D,
+    detector: &F,
+    predictor: &L,
+    observer: &dyn PipelineObserver,
+) -> Result<FrameEvaluation, PipelineError>
+where
+    D: FrameDecoder + ?Sized,
+    F: FaceDetector + ?Sized,
+    L: LandmarkPredictor + ?Sized,
+{
     let mut accepted = Vec::new();
     let mut anomalies = Vec::new();
-    for extracted in batch.frames() {
+    let total = batch.frames().len() as u64;
+    for (completed, extracted) in batch.frames().iter().enumerate() {
+        if observer.is_cancelled() {
+            return Err(PipelineError::Cancelled {
+                operation: "evaluate_frames",
+            });
+        }
+        observer.phase(PipelinePhase::Evaluating {
+            completed: completed as u64,
+            total,
+        });
         let index = extracted.index();
         let frame = match decoder.decode(index, extracted.path()) {
             Ok(frame) => frame,
