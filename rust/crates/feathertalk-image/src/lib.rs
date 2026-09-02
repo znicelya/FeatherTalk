@@ -13,4 +13,4 @@ pub use error::ImageError;
 pub use image::{BgrImage, GrayImage, to_gray};
 pub use jpeg::decode_jpeg;
 pub use laplacian::{laplacian_response, laplacian_variance};
-pub use resize::resize_area;
+pub use resize::{resize_area, resize_linear};

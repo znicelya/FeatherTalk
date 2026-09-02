@@ -39,6 +39,19 @@ pub fn resize_area(image: &BgrImage, width: u32, height: u32) -> Result<BgrImage
     BgrImage::new(width, height, pixels)
 }
 
+/// `cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)`.
+///
+/// Always the two-tap resampler, in either direction. Shrinking and identical
+/// sizes are byte-identical to OpenCV; upscaling keeps a plus or minus one
+/// residual on a small fraction of samples, which the parity test bounds.
+pub fn resize_linear(image: &BgrImage, width: u32, height: u32) -> Result<BgrImage, ImageError> {
+    check_target(width, height, CHANNELS)?;
+    let scale_x = f64::from(image.width()) / f64::from(width);
+    let scale_y = f64::from(image.height()) / f64::from(height);
+    let pixels = two_tap(image, width, height, scale_x, scale_y, TapMode::Linear);
+    BgrImage::new(width, height, pixels)
+}
+
 /// OpenCV's `saturate_cast<uchar>`: round half to even, then clamp.
 pub(crate) fn saturate_u8(value: f32) -> u8 {
     let rounded = value.round_ties_even();
@@ -207,6 +220,7 @@ pub(crate) struct Tap {
 #[derive(Clone, Copy)]
 pub(crate) enum TapMode {
     Area,
+    Linear,
 }
 
 /// Port of the tap table OpenCV builds at the top of `resize`.
@@ -224,6 +238,11 @@ pub(crate) fn compute_taps(
     let mut taps = Vec::with_capacity(destination_size as usize);
     for d in 0..i64::from(destination_size) {
         let (mut s, mut fraction) = match mode {
+            TapMode::Linear => {
+                let value = ((d as f64 + 0.5) * scale - 0.5) as f32;
+                let floor = value.floor();
+                (floor as i64, value - floor)
+            }
             TapMode::Area => {
                 let s = (d as f64 * scale).floor() as i64;
                 let value = ((d as f64 + 1.0) - (s as f64 + 1.0) / scale) as f32;
