@@ -266,6 +266,6 @@ fn io_summary(source: &io::Error) -> &'static str {
 
 /// `TaskError::validate` counts characters, not bytes, so the detail is clamped
 /// on a character boundary.
-fn clamp(detail: &str) -> String {
+pub(crate) fn clamp(detail: &str) -> String {
     detail.chars().take(MAX_DETAIL_CHARS).collect()
 }

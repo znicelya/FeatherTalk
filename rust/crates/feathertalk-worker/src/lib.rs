@@ -1,14 +1,15 @@
 //! The FeatherTalk worker: a JSON Lines command server over stdin/stdout.
 //!
-//! This slice serves `validate_project`, `probe_media`, and `normalize_media`
-//! on the CPU. Every other command in [`feathertalk_domain::TaskKind`] is
-//! reported as unsupported in the handshake and rejected if a client asks for
-//! it anyway.
+//! This slice serves `validate_project`, `probe_media`, `normalize_media`, and
+//! `extract_frames` on the CPU. Every other command in
+//! [`feathertalk_domain::TaskKind`] is reported as unsupported in the handshake
+//! and rejected if a client asks for it anyway.
 
 mod adapters;
 mod commands;
 mod config;
 mod error_map;
+mod extract_frames;
 mod handshake;
 mod models;
 mod normalize_result;
@@ -27,6 +28,7 @@ pub use error_map::{
     is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
     project_task_error, quality_task_error,
 };
+pub use extract_frames::execute_extract_frames;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
 pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;

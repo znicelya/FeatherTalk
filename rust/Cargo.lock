@@ -2742,6 +2742,7 @@ dependencies = [
  "feathertalk-frame-pipeline",
  "feathertalk-media",
  "feathertalk-models",
+ "feathertalk-pfld",
  "feathertalk-project",
  "serde_json",
  "tempfile",

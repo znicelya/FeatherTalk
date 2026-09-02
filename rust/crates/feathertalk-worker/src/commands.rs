@@ -1,4 +1,5 @@
 use feathertalk_domain::{ErrorCode, Progress, Request, TaskError, TaskKind, TaskStage};
+use feathertalk_frame_pipeline::SystemProcessRunner as FrameProcessRunner;
 use feathertalk_media::{
     CancellableProcessRunner, CancellationToken, MediaError, MediaInput, NormalizationSpec,
     NormalizePhase, ProcessRunner, normalize_media_observed, probe_media_with_runner,
@@ -7,8 +8,8 @@ use feathertalk_media::{
 use feathertalk_project::validate_project_dir;
 
 use crate::{
-    TaskReporter, WorkerConfig, is_media_cancellation, media_task_error, normalize_to_json,
-    probe_to_json, project_task_error,
+    FrameModels, TaskReporter, WorkerConfig, execute_extract_frames, is_media_cancellation,
+    media_task_error, normalize_to_json, pipeline_task_error, probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -97,6 +98,29 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 Err(error) => media_failure(&error),
             }
         }
+        Request::ExtractFrames(params) => {
+            let Some(models) = config.models() else {
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            let models = match FrameModels::load(models) {
+                Ok(models) => models,
+                Err(error) => return CommandOutcome::Failed(pipeline_task_error(&error)),
+            };
+            // The frame runner does not have to be cancellable the way
+            // `execute`'s is: `extract_frames_observed` asks the observer
+            // between chunks, and `FrameExtractor`'s timeout bounds each call.
+            execute_extract_frames(
+                params,
+                config,
+                token,
+                reporter,
+                runner,
+                &FrameProcessRunner,
+                models.decoder(),
+                models.detector(),
+                models.predictor(),
+            )
+        }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
 }
@@ -123,7 +147,7 @@ fn report_phase(reporter: &dyn TaskReporter, phase: NormalizePhase) {
     );
 }
 
-fn media_failure(error: &MediaError) -> CommandOutcome {
+pub(crate) fn media_failure(error: &MediaError) -> CommandOutcome {
     if is_media_cancellation(error) {
         CommandOutcome::Cancelled
     } else {
@@ -131,7 +155,7 @@ fn media_failure(error: &MediaError) -> CommandOutcome {
     }
 }
 
-fn unsupported(kind: TaskKind) -> TaskError {
+pub(crate) fn unsupported(kind: TaskKind) -> TaskError {
     TaskError::new(
         ErrorCode::WorkerCrashed,
         "当前 worker 不支持该命令",

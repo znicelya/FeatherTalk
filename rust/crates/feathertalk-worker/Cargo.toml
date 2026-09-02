@@ -17,4 +17,5 @@ thiserror = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
+feathertalk-pfld = { path = "../feathertalk-pfld" }
 tempfile = { workspace = true }
