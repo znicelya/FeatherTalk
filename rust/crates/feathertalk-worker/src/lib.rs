@@ -7,6 +7,7 @@
 
 mod adapters;
 mod admission;
+mod asset_scan;
 mod commands;
 mod config;
 mod error_map;
