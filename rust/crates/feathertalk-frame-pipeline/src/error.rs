@@ -51,6 +51,21 @@ pub enum PipelineError {
         limit: u64,
         actual: u64,
     },
+    /// A frame file exists but its JPEG header cannot be read.
+    #[error("frame is not a decodable JPEG: {path} ({message})")]
+    FrameUndecodable {
+        path: std::path::PathBuf,
+        message: String,
+    },
+    /// A landmark file is a symlink, a directory, or another non-regular entry.
+    #[error("landmark file is not a regular non-symlink file: {path}")]
+    LandmarkNotRegular { path: std::path::PathBuf },
+    /// A landmark file's bytes are not what `serialize_landmarks` writes.
+    #[error("landmark file is malformed: {path} ({message})")]
+    InvalidLandmark {
+        path: std::path::PathBuf,
+        message: String,
+    },
     #[error("output destination already exists: {path}")]
     OutputDestinationExists { path: std::path::PathBuf },
     #[error("{component} adapter failed: {message}")]

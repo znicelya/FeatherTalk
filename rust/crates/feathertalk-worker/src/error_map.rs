@@ -213,7 +213,10 @@ fn pipeline_error_code(error: &PipelineError) -> ErrorCode {
         | PipelineError::FrameMissing { .. }
         | PipelineError::FrameNotRegular { .. }
         | PipelineError::FrameEmpty { .. }
-        | PipelineError::FrameTooLarge { .. } => ErrorCode::MediaInvalid,
+        | PipelineError::FrameTooLarge { .. }
+        | PipelineError::FrameUndecodable { .. }
+        | PipelineError::LandmarkNotRegular { .. }
+        | PipelineError::InvalidLandmark { .. } => ErrorCode::MediaInvalid,
         PipelineError::Io { source, .. } => io_error_code(source),
         PipelineError::Adapter { .. } => ErrorCode::ModelIncompatible,
         PipelineError::Cancelled { .. } => ErrorCode::TaskCancelled,
@@ -241,6 +244,10 @@ fn pipeline_summary(error: &PipelineError) -> &'static str {
         | PipelineError::FrameNotRegular { .. }
         | PipelineError::FrameEmpty { .. }
         | PipelineError::FrameTooLarge { .. } => "抽出的帧不可用",
+        PipelineError::FrameUndecodable { .. } => "素材帧无法解码",
+        PipelineError::LandmarkNotRegular { .. } | PipelineError::InvalidLandmark { .. } => {
+            "关键点文件不可用"
+        }
         PipelineError::Io { source, .. } => io_summary(source),
         PipelineError::Adapter { .. } => "模型推理失败",
         PipelineError::Cancelled { .. } => "任务已取消",

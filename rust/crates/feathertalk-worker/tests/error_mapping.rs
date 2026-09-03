@@ -370,6 +370,24 @@ fn every_pipeline_error_maps_to_a_code_and_a_valid_payload() {
             PipelineError::QualityRejected { count: 4 },
             ErrorCode::WorkerCrashed,
         ),
+        (
+            PipelineError::FrameUndecodable {
+                path: path(),
+                message: "no SOI marker".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            PipelineError::LandmarkNotRegular { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            PipelineError::InvalidLandmark {
+                path: path(),
+                message: "expected 110 lines, found 109".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
     ];
 
     for (error, expected) in cases {
@@ -391,6 +409,30 @@ fn only_cancellation_is_reported_as_cancellation() {
     assert!(!is_pipeline_cancellation(&PipelineError::QualityRejected {
         count: 1
     }));
+}
+
+#[test]
+fn the_asset_lock_failures_read_as_media_problems() {
+    let undecodable = pipeline_task_error(&PipelineError::FrameUndecodable {
+        path: path(),
+        message: "no SOI marker".to_owned(),
+    });
+    assert_eq!(undecodable.summary, "素材帧无法解码");
+    assert!(
+        undecodable.detail.contains("no SOI marker"),
+        "{}",
+        undecodable.detail
+    );
+
+    let not_regular = pipeline_task_error(&PipelineError::LandmarkNotRegular { path: path() });
+    assert_eq!(not_regular.summary, "关键点文件不可用");
+
+    let malformed = pipeline_task_error(&PipelineError::InvalidLandmark {
+        path: path(),
+        message: "expected 110 lines, found 109".to_owned(),
+    });
+    assert_eq!(malformed.summary, "关键点文件不可用");
+    malformed.validate().unwrap();
 }
 
 #[test]
