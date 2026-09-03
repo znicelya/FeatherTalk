@@ -18,6 +18,20 @@ const CLI: &str = env!("CARGO_BIN_EXE_feathertalk");
 /// The variable that makes a missing worker a failure instead of a skip.
 const REQUIRE_E2E: &str = "FEATHERTALK_REQUIRE_E2E";
 
+/// How many frames the locked package holds. Two seconds of audio become 98
+/// tokens (the extraction test above derives the number) and the lock demands
+/// two tokens per frame, so 49 is the only frame count that makes the fit a
+/// no-op.
+const LOCKED_FRAME_COUNT: u64 = 49;
+
+/// PFLD's digest, a compile-time constant in `feathertalk-pfld`, which this
+/// crate does not depend on.
+const PFLD_SHA256: &str = "e131dd764236fde54a27b2f7084906119f06c28b140bf127b459ec967e92915b";
+
+/// The per-frame digests the report carries. The lock verifies structure and
+/// never re-hashes a frame, so any 64-hex string does.
+const SHA256: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
 /// Locate `feathertalk-worker` next to the CLI binary under test.
 fn worker_path() -> Option<PathBuf> {
     let cli = PathBuf::from(CLI);
@@ -504,4 +518,149 @@ fn cut_audio(ffmpeg: &Path, demo: &Path, audio: &Path) {
         "ffmpeg could not cut the audio: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn a_real_package_is_locked_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_package_is_locked_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(hubert), Some(demo)) =
+        (real_tool("FFMPEG"), real_dir("HUBERT_DIR"), demo_clip())
+    else {
+        println!(
+            "skipping a_real_package_is_locked_end_to_end: it needs \
+             FEATHERTALK_WORKER_FFMPEG, FEATHERTALK_WORKER_HUBERT_DIR, and \
+             demo/feathertalk_demo_latest_188.mp4"
+        );
+        return;
+    };
+    let project = TempDir::new().expect("a temporary directory is available");
+    let assets = project.path().join("assets");
+    // `extract-features` creates `assets/features` itself, exactly as the
+    // extraction test above relies on; only the frame directories are ours.
+    for directory in ["frames", "landmarks"] {
+        std::fs::create_dir_all(assets.join(directory)).expect("the assets tree is writable");
+    }
+    std::fs::write(project.path().join("project.json"), "{}")
+        .expect("the temporary manifest is writable");
+    let audio = assets.join("audio_16k_mono.wav");
+    cut_audio(&ffmpeg, &demo, &audio);
+    // The lock only stats the video; nothing reads it. It is cut with the same
+    // helper the extraction test uses so the package keeps its real shape.
+    cut_one_second(&ffmpeg, &demo, &assets.join("video_25fps.mp4"));
+
+    let project_arg = project.path().to_string_lossy().into_owned();
+    let audio_arg = audio.to_string_lossy().into_owned();
+    let hubert_arg = hubert.to_string_lossy().into_owned();
+    let env = [("FEATHERTALK_WORKER_HUBERT_DIR", hubert_arg.as_str())];
+    let output = run(
+        &worker,
+        &["extract-features", &project_arg, &audio_arg],
+        &env,
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+
+    write_frame_fixtures(&assets, LOCKED_FRAME_COUNT);
+
+    let output = run(&worker, &["lock-asset-package", &project_arg], &env);
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+
+    let features_dir = assets.join("features");
+    let features = features_dir.join("feather_hubert.f32");
+    let manifest_file = assets.join("assets.json");
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(result["project_dir"], project.path().display().to_string());
+    assert_eq!(result["manifest_file"], manifest_file.display().to_string());
+    assert_eq!(result["feature_file"], features.display().to_string());
+    assert_eq!(result["frame_count"], 49);
+    assert_eq!(result["frame_width"], 1280);
+    assert_eq!(result["frame_height"], 720);
+    assert_eq!(result["tokens"], 98);
+    assert_eq!(result["dims"], 1024);
+    // The same 44 + 98 * 1024 * 4 bytes the extraction wrote: 49 frames need
+    // exactly the 98 tokens already in the file, so the fit changes nothing.
+    assert_eq!(result["bytes"], 401_452);
+    assert_eq!(result["token_adjustment"], 0);
+    assert_eq!(result["landmark_model_sha256"], PFLD_SHA256);
+    assert_eq!(result["sha256"].as_str().unwrap().len(), 64);
+    let package_manifest = std::fs::read_to_string(hubert.join("manifest.json"))
+        .expect("the package manifest is readable");
+    let package_manifest: serde_json::Value =
+        serde_json::from_str(&package_manifest).expect("the manifest is JSON");
+    assert_eq!(
+        result["feature_model_sha256"],
+        package_manifest["model"]["sha256"]
+    );
+
+    let written = std::fs::read(&manifest_file).expect("the locked manifest is readable");
+    let written: serde_json::Value =
+        serde_json::from_slice(&written).expect("the locked manifest is JSON");
+    assert_eq!(written["schema_version"], 1);
+    assert_eq!(written["state"], "locked");
+    assert_eq!(written["video_fps"], 25);
+    assert_eq!(written["audio_sample_rate"], 16_000);
+    assert_eq!(written["audio_channels"], 1);
+    assert_eq!(written["frame_count"], 49);
+    assert_eq!(written["frame_width"], 1280);
+    assert_eq!(written["frame_height"], 720);
+    assert_eq!(written["feature_type"], "feather_hubert");
+    assert_eq!(written["feature_shape"], serde_json::json!([49, 2, 1024]));
+    assert_eq!(written["landmark_model_sha256"], PFLD_SHA256);
+    // The commit rewrote the file in place at its original size.
+    assert_eq!(
+        std::fs::metadata(&features)
+            .expect("the feature file is readable")
+            .len(),
+        401_452
+    );
+    assert_eq!(file_count(&features_dir), 1);
+
+    let narration = stderr(&output);
+    assert!(narration.contains("准备中"), "{narration}");
+    assert!(narration.contains("进度 49/49"), "{narration}");
+}
+
+/// Stand in for `extract-frames`, which needs SCRFD and PFLD this repository
+/// does not ship. Copies the committed 1280x720 fixture `count` times, writes a
+/// matching landmark file next to each frame, and hand-writes the quality report
+/// the lock reads. The digests are placeholders: the lock verifies structure and
+/// never re-hashes a frame.
+fn write_frame_fixtures(assets: &Path, count: u64) {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../feathertalk-frame-adapters/tests/fixtures/demo_frame_v1/frame.jpg");
+    let frame_bytes = std::fs::read(&fixture).expect("the committed frame fixture is readable");
+    let mut landmarks = String::new();
+    for point in 0..110 {
+        landmarks.push_str(&format!("{point} {point}\n"));
+    }
+    let mut frames = Vec::new();
+    for index in 0..count {
+        let frame_file = format!("frames/{index:06}.jpg");
+        let landmark_file = format!("landmarks/{index:06}.lms");
+        std::fs::write(assets.join(&frame_file), &frame_bytes).expect("the frame is writable");
+        std::fs::write(assets.join(&landmark_file), &landmarks)
+            .expect("the landmark file is writable");
+        frames.push(serde_json::json!({
+            "index": index,
+            "frame_file": frame_file,
+            "landmark_file": landmark_file,
+            "frame_bytes": frame_bytes.len(),
+            "frame_sha256": SHA256,
+            "landmark_sha256": SHA256,
+            "face_score": 0.9,
+            "bbox": [0.0, 0.0, 64.0, 64.0],
+            "blur_variance": 120.0
+        }));
+    }
+    let report = serde_json::json!({
+        "schema_version": 1,
+        "frame_count": count,
+        "accepted_count": count,
+        "frames": frames,
+        "anomalies": []
+    });
+    let text = serde_json::to_string_pretty(&report).expect("the report serializes");
+    std::fs::write(assets.join("quality.json"), text).expect("the report is writable");
 }
