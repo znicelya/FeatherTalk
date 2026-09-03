@@ -14,7 +14,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     AdapterLockError, AdapterLocks, CPU_ADAPTER_ID, CommandOutcome, ENV_FFMPEG, ENV_FFPROBE,
-    ENV_PFLD_DIR, ENV_SCRFD_DIR, TaskReporter, WorkerConfig, execute, ready_frame,
+    ENV_HUBERT_DIR, ENV_PFLD_DIR, ENV_SCRFD_DIR, TaskReporter, WorkerConfig, execute, ready_frame,
     supported_commands,
 };
 
@@ -396,6 +396,9 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
         // it loads a model, so that is the wall an operator would hit next.
         TaskKind::ExtractFrames if config.media().is_none() => media_reason(slug, config),
         TaskKind::ExtractFrames => model_reason(slug, config),
+        // Feature extraction needs no media tools, so its only wall is the
+        // FeatherHuBERT directory.
+        TaskKind::ExtractFeatures => feature_reason(slug, config),
         // Listing `supported_commands` instead of a hard-coded set keeps this
         // message correct as later commands land.
         _ => format!(
@@ -428,6 +431,17 @@ fn model_reason(slug: &str, config: &WorkerConfig) -> String {
         ),
         None => format!(
             "命令 {slug} 需要人脸与关键点模型，请设置 {ENV_SCRFD_DIR} 与 {ENV_PFLD_DIR} 后重启 worker。"
+        ),
+    }
+}
+
+fn feature_reason(slug: &str, config: &WorkerConfig) -> String {
+    match config.feature_rejection() {
+        Some(rejection) => format!(
+            "命令 {slug} 需要可用的特征模型目录，当前配置被拒绝：{rejection}。修正后重启 worker。"
+        ),
+        None => format!(
+            "命令 {slug} 需要 FeatherHuBERT 特征模型，请设置 {ENV_HUBERT_DIR} 后重启 worker。"
         ),
     }
 }

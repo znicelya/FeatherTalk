@@ -11,10 +11,10 @@ use std::{
 };
 
 use feathertalk_domain::{
-    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, ExtractFramesParams,
-    NormalizeMediaParams, PROTOCOL_VERSION, ProbeMediaParams, Progress, ProjectDirParams, Request,
-    ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage, TrainParams, TrainingMode,
-    UnetVariant, decode_line, encode_line,
+    CancelFrame, ClientFrame, DomainError, ErrorCode, Event, ExtractFeaturesParams,
+    ExtractFramesParams, NormalizeMediaParams, PROTOCOL_VERSION, ProbeMediaParams, Progress,
+    ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage,
+    TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_worker::{
@@ -233,6 +233,13 @@ fn extract_frames_request() -> Request {
     })
 }
 
+fn extract_features_request() -> Request {
+    Request::ExtractFeatures(ExtractFeaturesParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+        audio: PathBuf::from("C:/tmp/project/assets/audio_16k_mono.wav"),
+    })
+}
+
 fn absolute(name: &str) -> String {
     std::env::current_dir()
         .unwrap()
@@ -272,6 +279,18 @@ fn full_config() -> WorkerConfig {
         None,
         Some(absolute("scrfd-test")),
         Some(absolute("pfld-test")),
+    )
+}
+
+/// Every toolchain resolves, so `extract_features` reaches the executor as well.
+fn every_toolchain_config() -> WorkerConfig {
+    WorkerConfig::from_values_with_toolchains(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+        Some(absolute("hubert-test")),
     )
 }
 
@@ -977,6 +996,59 @@ fn extract_frames_names_the_media_toolchain_before_the_models() {
     assert_eq!(reasons.len(), 1, "{frames:?}");
     assert!(
         reasons[0].contains("FEATHERTALK_WORKER_FFPROBE"),
+        "{}",
+        reasons[0]
+    );
+}
+
+#[test]
+fn extract_features_reaches_the_executor_once_the_model_directory_resolves() {
+    let harness = Harness::start(every_toolchain_config(), instant_executor());
+    harness.send(&start(&task("0000002f"), extract_features_request()));
+    let frames = harness.finish();
+
+    assert!(rejections(&frames).is_empty(), "{frames:?}");
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-0000002f", "preparing"),
+            ("1787900000000-0000002f", "completed"),
+        ]
+    );
+}
+
+#[test]
+fn extract_features_is_rejected_with_the_hubert_variable() {
+    let harness = Harness::start(full_config(), instant_executor());
+    harness.send(&start(&task("00000030"), extract_features_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("extract_features"), "{}", reasons[0]);
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        reasons[0]
+    );
+    assert!(events(&frames).is_empty());
+}
+
+#[test]
+fn extract_features_never_asks_for_the_media_toolchain() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    harness.send(&start(&task("00000031"), extract_features_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        reasons[0]
+    );
+    assert!(
+        !reasons[0].contains("FEATHERTALK_WORKER_FFPROBE"),
         "{}",
         reasons[0]
     );

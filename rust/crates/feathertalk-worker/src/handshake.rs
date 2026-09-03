@@ -31,6 +31,11 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
             commands.push(TaskKind::ExtractFrames);
         }
     }
+    // Feature extraction needs no media tools: it reads the wav the media
+    // commands already wrote, so its only requirement is the model directory.
+    if config.features().is_some() {
+        commands.push(TaskKind::ExtractFeatures);
+    }
     commands
 }
 

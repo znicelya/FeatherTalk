@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use feathertalk_domain::{AdapterKind, Backend, TaskKind};
 use feathertalk_worker::{
-    CPU_ADAPTER_ID, DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, ENV_SCRFD_DIR,
-    WorkerConfig, ready_frame, supported_commands,
+    CPU_ADAPTER_ID, DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFPROBE, ENV_HUBERT_DIR, ENV_MEDIA_TIMEOUT_MS,
+    ENV_SCRFD_DIR, WorkerConfig, ready_frame, supported_commands,
 };
 
 fn absolute(name: &str) -> String {
@@ -178,4 +178,64 @@ fn models_without_a_media_toolchain_offer_nothing_new() {
     );
     assert!(config.models().is_some());
     assert_eq!(supported_commands(&config), vec![TaskKind::ValidateProject]);
+}
+
+/// Media, models, and the FeatherHuBERT directory all resolve, so the handshake
+/// offers every command in this slice.
+fn every_toolchain() -> WorkerConfig {
+    WorkerConfig::from_values_with_toolchains(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+        Some(absolute("hubert-test")),
+    )
+}
+
+#[test]
+fn a_worker_with_a_feature_model_offers_extract_features() {
+    let config = every_toolchain();
+    assert_eq!(config.feature_rejection(), None);
+    let frame = ready_frame(&config);
+    frame.validate().unwrap();
+    assert_eq!(
+        frame.supported_commands,
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia,
+            TaskKind::ExtractFrames,
+            TaskKind::ExtractFeatures
+        ]
+    );
+}
+
+#[test]
+fn a_worker_without_a_feature_model_leaves_extract_features_out() {
+    let config = fully_configured();
+    assert!(config.features().is_none());
+    assert!(
+        config
+            .feature_rejection()
+            .is_some_and(|reason| reason.contains(ENV_HUBERT_DIR))
+    );
+    assert!(!supported_commands(&config).contains(&TaskKind::ExtractFeatures));
+}
+
+#[test]
+fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
+    let config = WorkerConfig::from_values_with_toolchains(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(absolute("hubert-test")),
+    );
+    assert!(config.media().is_none());
+    assert_eq!(
+        supported_commands(&config),
+        vec![TaskKind::ValidateProject, TaskKind::ExtractFeatures]
+    );
 }
