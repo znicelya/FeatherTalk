@@ -394,3 +394,114 @@ fn file_count(dir: &Path) -> usize {
         .filter(|entry| entry.path().is_file())
         .count()
 }
+
+/// The whole feature extraction, and only when the real ffmpeg, a built
+/// FeatherHuBERT package, and the demo clip are all present. Neither this
+/// repository nor CI ships ffmpeg or the model package, so anything missing is a
+/// skip rather than a failure, for the reason the two tests above give.
+#[test]
+fn real_audio_becomes_features_end_to_end() {
+    let Some(worker) = worker_or_skip("real_audio_becomes_features_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(hubert), Some(demo)) =
+        (real_tool("FFMPEG"), real_dir("HUBERT_DIR"), demo_clip())
+    else {
+        println!(
+            "skipping real_audio_becomes_features_end_to_end: it needs \
+             FEATHERTALK_WORKER_FFMPEG, FEATHERTALK_WORKER_HUBERT_DIR, and \
+             demo/feathertalk_demo_latest_188.mp4"
+        );
+        return;
+    };
+    let project = TempDir::new().expect("a temporary directory is available");
+    let assets = project.path().join("assets");
+    std::fs::create_dir_all(&assets).expect("the assets directory is writable");
+    // Admission only asks that the manifest exists; reading it is
+    // `validate-project`'s job, and this command runs before a project has the
+    // assets that validation demands.
+    std::fs::write(project.path().join("project.json"), "{}")
+        .expect("the temporary manifest is writable");
+    let audio = assets.join("audio_16k_mono.wav");
+    cut_audio(&ffmpeg, &demo, &audio);
+
+    let project_arg = project.path().to_string_lossy().into_owned();
+    let audio_arg = audio.to_string_lossy().into_owned();
+    let hubert_arg = hubert.to_string_lossy().into_owned();
+    let output = run(
+        &worker,
+        &["extract-features", &project_arg, &audio_arg],
+        &[("FEATHERTALK_WORKER_HUBERT_DIR", hubert_arg.as_str())],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+
+    // Two seconds at 16 kHz is 32 000 samples, which one chunk covers whole. The
+    // 400-sample kernel and the 320-sample stride turn them into
+    // `(32_000 - 80) / 320` = 99 frames, the odd-token trim drops one, and 98
+    // tokens of 1024 dimensions behind a 44-byte header make
+    // `44 + 98 * 1024 * 4` = 401_452 bytes. If a future resampler hands over a
+    // different sample count, recompute the four numbers the same way rather
+    // than adjusting them by hand.
+    let features_dir = assets.join("features");
+    let features = features_dir.join("feather_hubert.f32");
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(result["output_dir"], features_dir.display().to_string());
+    assert_eq!(result["feature_file"], features.display().to_string());
+    assert_eq!(result["tokens"], 98);
+    assert_eq!(result["dims"], 1024);
+    assert_eq!(result["frame_count"], 49);
+    assert_eq!(result["bytes"], 401_452);
+    assert_eq!(
+        std::fs::metadata(&features)
+            .expect("the feature file is readable")
+            .len(),
+        401_452
+    );
+    // Exactly one file, and none of the bookkeeping this command stays out of.
+    assert_eq!(file_count(&features_dir), 1);
+    assert!(!assets.join("assets.json").exists());
+    assert!(!assets.join("quality.json").exists());
+
+    // The digest in the payload is the package's own, which is what lets a later
+    // run decide whether these features still match the encoder.
+    let manifest = std::fs::read_to_string(hubert.join("manifest.json"))
+        .expect("the package manifest is readable");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest).expect("the manifest is JSON");
+    assert_eq!(result["model_sha256"], manifest["model"]["sha256"]);
+
+    let narration = stderr(&output);
+    assert!(narration.contains("正在提取特征"), "{narration}");
+    assert!(narration.contains("进度 1/1"), "{narration}");
+}
+
+/// Two seconds of the demo video's audio, decoded into the one shape the reader
+/// admits -- 16 kHz, mono, 16-bit PCM -- and written under the name the pipeline
+/// expects. No offset is needed: unlike a video frame, whose face score decides
+/// whether it is usable, any two seconds of this clip's audio extract alike.
+fn cut_audio(ffmpeg: &Path, demo: &Path, audio: &Path) {
+    let output = Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .arg("-i")
+        .arg(demo)
+        .args([
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            "-t",
+            "2",
+        ])
+        .arg(audio)
+        .output()
+        .expect("ffmpeg runs");
+    assert!(
+        output.status.success(),
+        "ffmpeg could not cut the audio: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
