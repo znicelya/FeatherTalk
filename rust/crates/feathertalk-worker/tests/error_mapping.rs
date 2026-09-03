@@ -1,12 +1,15 @@
 use std::{io, path::PathBuf};
 
+use feathertalk_audio::AudioError;
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskStage};
+use feathertalk_export::PackageError;
 use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError, RecoveryAction};
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
 use feathertalk_worker::{
-    is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
-    project_task_error, quality_task_error,
+    audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
+    media_task_error, package_task_error, pipeline_task_error, project_task_error,
+    quality_task_error,
 };
 
 fn io_error(kind: io::ErrorKind) -> io::Error {
@@ -421,5 +424,100 @@ fn an_empty_anomaly_list_still_produces_a_valid_error() {
     let mapped = quality_task_error(&[]);
 
     assert_eq!(mapped.code, ErrorCode::MediaInvalid);
+    mapped.validate().unwrap();
+}
+
+#[test]
+fn audio_errors_map_onto_wire_codes() {
+    let cases = vec![
+        (AudioError::InvalidRiffHeader, ErrorCode::MediaInvalid),
+        (
+            AudioError::UnsupportedWavSampleRate {
+                actual: 44_100,
+                expected: 16_000,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (AudioError::EmptyWav, ErrorCode::MediaInvalid),
+        (AudioError::ConstantWaveform, ErrorCode::MediaInvalid),
+        (
+            AudioError::WavIo {
+                operation: "read",
+                path: path(),
+                source: io_error(io::ErrorKind::StorageFull),
+            },
+            ErrorCode::DiskSpaceLow,
+        ),
+        (
+            AudioError::WavIo {
+                operation: "read",
+                path: path(),
+                source: io_error(io::ErrorKind::PermissionDenied),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            AudioError::InvalidFeatureDimension,
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            AudioError::FeatureShapeMismatch {
+                frame_count: 4,
+                tokens: 7,
+                dims: 1024,
+            },
+            ErrorCode::FeatureShapeMismatch,
+        ),
+        (
+            AudioError::TooManyChunks {
+                actual: 2_000_000,
+                limit: 1_000_000,
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            AudioError::Cancelled {
+                operation: "extract_features",
+            },
+            ErrorCode::TaskCancelled,
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let mapped = audio_task_error(&error);
+        assert_eq!(mapped.code, expected, "{error:?}");
+        assert_eq!(mapped.stage, TaskStage::Preparing, "{error:?}");
+        assert_eq!(mapped.recovery, expected.default_recovery(), "{error:?}");
+        assert!(!mapped.summary.trim().is_empty(), "{error:?}");
+        mapped.validate().unwrap();
+    }
+}
+
+#[test]
+fn only_cancellation_is_audio_cancellation() {
+    let cancelled = AudioError::Cancelled {
+        operation: "extract_features",
+    };
+
+    assert!(is_audio_cancellation(&cancelled));
+    assert!(!is_audio_cancellation(&AudioError::EmptyWav));
+}
+
+#[test]
+fn a_package_failure_names_the_hubert_variable() {
+    // Not an I/O failure, and still ModelIncompatible: the request carried no
+    // path, so the directory is the only thing a user can act on.
+    let error = PackageError::InvalidRequest("no manifest".to_owned());
+
+    let mapped = package_task_error(&error);
+
+    assert_eq!(mapped.code, ErrorCode::ModelIncompatible);
+    assert_eq!(mapped.summary, "特征模型加载失败");
+    assert_eq!(mapped.stage, TaskStage::Preparing);
+    assert!(
+        mapped.detail.contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        mapped.detail
+    );
     mapped.validate().unwrap();
 }

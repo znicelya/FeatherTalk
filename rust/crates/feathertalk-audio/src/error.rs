@@ -101,4 +101,6 @@ pub enum AudioError {
     },
     #[error("feature staging path already exists: {path}")]
     StagingCollision { path: std::path::PathBuf },
+    #[error("{operation} was cancelled")]
+    Cancelled { operation: &'static str },
 }

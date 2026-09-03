@@ -2737,7 +2737,9 @@ dependencies = [
 name = "feathertalk-worker"
 version = "0.1.0"
 dependencies = [
+ "feathertalk-audio",
  "feathertalk-domain",
+ "feathertalk-export",
  "feathertalk-frame-adapters",
  "feathertalk-frame-pipeline",
  "feathertalk-media",

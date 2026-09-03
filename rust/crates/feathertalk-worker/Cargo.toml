@@ -6,7 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+feathertalk-audio = { path = "../feathertalk-audio" }
 feathertalk-domain = { path = "../feathertalk-domain" }
+feathertalk-export = { path = "../feathertalk-export" }
 feathertalk-frame-adapters = { path = "../feathertalk-frame-adapters" }
 feathertalk-frame-pipeline = { path = "../feathertalk-frame-pipeline" }
 feathertalk-media = { path = "../feathertalk-media" }

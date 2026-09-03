@@ -25,8 +25,9 @@ pub use config::{
     ENV_PFLD_DIR, ENV_SCRFD_DIR, FeatureToolchain, ModelToolchain, WorkerConfig,
 };
 pub use error_map::{
-    is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
-    project_task_error, quality_task_error,
+    audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
+    media_task_error, package_task_error, pipeline_task_error, project_task_error,
+    quality_task_error,
 };
 pub use extract_frames::execute_extract_frames;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
