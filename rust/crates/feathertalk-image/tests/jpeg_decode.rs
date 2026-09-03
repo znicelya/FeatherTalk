@@ -1,4 +1,4 @@
-use feathertalk_image::{BgrImage, ImageError, decode_jpeg};
+use feathertalk_image::{BgrImage, ImageError, decode_jpeg, jpeg_dimensions};
 
 /// SOI followed by a baseline 4:4:4 three-component SOF0 and nothing else.
 fn jpeg_header(width: u16, height: u16) -> Vec<u8> {
@@ -108,4 +108,38 @@ fn bgr_image_reads_interleaved_pixels() {
             height: 1
         }
     ));
+}
+
+#[test]
+fn the_header_reader_agrees_with_the_decoder() {
+    let bytes = jpeg_header(640, 480);
+    assert_eq!(jpeg_dimensions(&bytes).unwrap(), (640, 480));
+    // `decode_jpeg` rejects the image on the pixel count it read from the same
+    // shared header, so that count is the product of the dimensions
+    // `jpeg_dimensions` returned. This is what pins the two paths together.
+    let error = decode_jpeg(&bytes, 0).unwrap_err();
+    let ImageError::FrameTooLarge { pixels, max_pixels } = error else {
+        panic!("a zero budget must reject the image: {error:?}");
+    };
+    assert_eq!(pixels, 640 * 480);
+    assert_eq!(max_pixels, 0);
+}
+
+#[test]
+fn a_header_prefix_is_enough_and_a_truncated_one_is_not() {
+    let bytes = jpeg_header(1280, 720);
+    let mut padded = bytes.clone();
+    padded.extend_from_slice(&[0x00; 4096]);
+    assert_eq!(jpeg_dimensions(&padded).unwrap(), (1280, 720));
+    let error = jpeg_dimensions(&bytes[..6]).unwrap_err();
+    assert!(matches!(error, ImageError::JpegDecode { .. }), "{error:?}");
+}
+
+#[test]
+fn garbage_bytes_are_not_a_jpeg_header() {
+    let error = jpeg_dimensions(b"not a jpeg at all").unwrap_err();
+    let ImageError::JpegDecode { message } = error else {
+        panic!("garbage must be a decode error: {error:?}");
+    };
+    assert!(message.contains("SOI"), "{message}");
 }

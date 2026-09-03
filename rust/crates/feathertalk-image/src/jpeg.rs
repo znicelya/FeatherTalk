@@ -1,16 +1,15 @@
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 
 use jpeg_decoder::{Decoder, PixelFormat};
 
 use crate::{BgrImage, error::ImageError};
 
-/// Decode a JPEG into BGR24.
+/// Read the SOF header and reject the degenerate sizes.
 ///
-/// The header is parsed first, so an image larger than `max_pixels` is rejected
-/// before any pixel buffer is allocated. `max_pixels` counts pixels, not bytes;
-/// the decoder's own buffer limit is derived from it.
-pub fn decode_jpeg(bytes: &[u8], max_pixels: u64) -> Result<BgrImage, ImageError> {
-    let mut decoder = Decoder::new(Cursor::new(bytes));
+/// Split out of `decode_jpeg` so that `jpeg_dimensions` cannot drift from it.
+/// The decoder is borrowed rather than owned because `decode_jpeg` keeps using
+/// it afterwards, and the pixel format comes back for the same reason.
+fn read_header<R: Read>(decoder: &mut Decoder<R>) -> Result<(u32, u32, PixelFormat), ImageError> {
     decoder
         .read_info()
         .map_err(|error| ImageError::JpegDecode {
@@ -24,6 +23,28 @@ pub fn decode_jpeg(bytes: &[u8], max_pixels: u64) -> Result<BgrImage, ImageError
     if width == 0 || height == 0 {
         return Err(ImageError::InvalidDimensions { width, height });
     }
+    Ok((width, height, info.pixel_format))
+}
+
+/// Read a JPEG's pixel dimensions without decoding a single scan.
+///
+/// Allocates nothing beyond the decoder's header state, so it takes no pixel
+/// budget: a caller that cares about size limits owns that policy. The asset
+/// lock uses it to learn the frame geometry a quality report does not record.
+pub fn jpeg_dimensions(bytes: &[u8]) -> Result<(u32, u32), ImageError> {
+    let mut decoder = Decoder::new(Cursor::new(bytes));
+    let (width, height, _) = read_header(&mut decoder)?;
+    Ok((width, height))
+}
+
+/// Decode a JPEG into BGR24.
+///
+/// The header is parsed first, so an image larger than `max_pixels` is rejected
+/// before any pixel buffer is allocated. `max_pixels` counts pixels, not bytes;
+/// the decoder's own buffer limit is derived from it.
+pub fn decode_jpeg(bytes: &[u8], max_pixels: u64) -> Result<BgrImage, ImageError> {
+    let mut decoder = Decoder::new(Cursor::new(bytes));
+    let (width, height, pixel_format) = read_header(&mut decoder)?;
     let pixels = u64::from(width) * u64::from(height);
     if pixels > max_pixels {
         return Err(ImageError::FrameTooLarge { pixels, max_pixels });
@@ -33,7 +54,6 @@ pub fn decode_jpeg(bytes: &[u8], max_pixels: u64) -> Result<BgrImage, ImageError
         .and_then(|bytes| usize::try_from(bytes).ok())
         .ok_or(ImageError::FrameTooLarge { pixels, max_pixels })?;
     decoder.set_max_decoding_buffer_size(bgr_len);
-    let pixel_format = info.pixel_format;
     let data = decoder.decode().map_err(|error| ImageError::JpegDecode {
         message: error.to_string(),
     })?;
