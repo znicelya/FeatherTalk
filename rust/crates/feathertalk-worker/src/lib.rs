@@ -1,9 +1,9 @@
 //! The FeatherTalk worker: a JSON Lines command server over stdin/stdout.
 //!
 //! This slice serves `validate_project`, `probe_media`, `normalize_media`,
-//! `extract_frames`, and `extract_features` on the CPU. Every other command in
-//! [`feathertalk_domain::TaskKind`] is reported as unsupported in the handshake
-//! and rejected if a client asks for it anyway.
+//! `extract_frames`, `extract_features`, and `lock_asset_package` on the CPU.
+//! Every other command in [`feathertalk_domain::TaskKind`] is reported as
+//! unsupported in the handshake and rejected if a client asks for it anyway.
 
 mod adapters;
 mod admission;

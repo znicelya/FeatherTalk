@@ -354,6 +354,68 @@ fn extract_features_without_a_model_directory_is_refused_with_its_slug() {
     error.validate().unwrap();
 }
 
+#[test]
+fn lock_asset_package_reports_a_package_failure_as_a_model_incompatibility() {
+    let temp = tempfile::tempdir().unwrap();
+    let request = Request::LockAssetPackage(ProjectDirParams {
+        project_dir: temp.path().join("project"),
+    });
+    let config = WorkerConfig::from_values_with_toolchains(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(temp.path().display().to_string()),
+    );
+    let runner = FakeRunner::new(vec![]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        &config,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("locking with a broken package must fail");
+    };
+    // The package is read before the project is admitted, so an empty model
+    // directory is reported as a model problem even though the project
+    // directory does not exist either.
+    assert_eq!(error.code, ErrorCode::ModelIncompatible);
+    assert_eq!(error.summary, "特征模型加载失败");
+    assert!(
+        error.detail.contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        error.detail
+    );
+    error.validate().unwrap();
+}
+
+#[test]
+fn lock_asset_package_without_a_model_directory_is_refused_with_its_slug() {
+    let request = Request::LockAssetPackage(ProjectDirParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+    });
+    let runner = FakeRunner::new(vec![]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        &bare_config(),
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("lock_asset_package without a model directory must fail");
+    };
+    assert_eq!(error.code, ErrorCode::WorkerCrashed);
+    assert_eq!(error.summary, "当前 worker 不支持该命令");
+    assert!(
+        error.detail.contains("lock_asset_package"),
+        "{}",
+        error.detail
+    );
+    error.validate().unwrap();
+}
+
 /// A runner that scripts probe output and writes the bytes `ffmpeg` would have
 /// written, so the normalization pipeline can verify and commit them.
 struct NormalizeRunner {

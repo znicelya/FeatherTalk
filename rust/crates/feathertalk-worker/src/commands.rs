@@ -1,4 +1,5 @@
 use feathertalk_domain::{ErrorCode, Progress, Request, TaskError, TaskKind, TaskStage};
+use feathertalk_export::read_package_manifest;
 use feathertalk_frame_pipeline::SystemProcessRunner as FrameProcessRunner;
 use feathertalk_media::{
     CancellableProcessRunner, CancellationToken, MediaError, MediaInput, NormalizationSpec,
@@ -9,8 +10,8 @@ use feathertalk_project::validate_project_dir;
 
 use crate::{
     FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
-    execute_extract_frames, is_media_cancellation, media_task_error, normalize_to_json,
-    package_task_error, pipeline_task_error, probe_to_json, project_task_error,
+    execute_extract_frames, execute_lock_asset_package, is_media_cancellation, media_task_error,
+    normalize_to_json, package_task_error, pipeline_task_error, probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -132,6 +133,21 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
             };
             let (mut encoder, model_sha256) = model.into_parts();
             execute_extract_features(params, token, reporter, &mut encoder, &model_sha256)
+        }
+        Request::LockAssetPackage(params) => {
+            let Some(features) = config.features() else {
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            // Only the package manifest is needed: the command runs no
+            // inference, so mapping the safetensors weights into memory to
+            // read one string would be pure waste. `read_package_manifest`
+            // still runs `validate_package_directory` and
+            // `manifest.validate()`, so a broken package is caught here.
+            let manifest = match read_package_manifest(features.hubert_dir()) {
+                Ok(manifest) => manifest,
+                Err(error) => return CommandOutcome::Failed(package_task_error(&error)),
+            };
+            execute_lock_asset_package(params, token, reporter, &manifest.model.sha256)
         }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
