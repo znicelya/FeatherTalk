@@ -35,6 +35,10 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
     // commands already wrote, so its only requirement is the model directory.
     if config.features().is_some() {
         commands.push(TaskKind::ExtractFeatures);
+        // The lock needs the same package for a different reason: it reads the
+        // encoder's digest out of the package manifest and writes it into
+        // `assets.json`, which is what later runs compare against.
+        commands.push(TaskKind::LockAssetPackage);
     }
     commands
 }

@@ -399,6 +399,9 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
         // Feature extraction needs no media tools, so its only wall is the
         // FeatherHuBERT directory.
         TaskKind::ExtractFeatures => feature_reason(slug, config),
+        // The lock reads files the earlier commands already wrote, so the
+        // package directory is its only wall too.
+        TaskKind::LockAssetPackage => feature_reason(slug, config),
         // Listing `supported_commands` instead of a hard-coded set keeps this
         // message correct as later commands land.
         _ => format!(

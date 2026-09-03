@@ -206,7 +206,8 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::ExtractFrames,
-            TaskKind::ExtractFeatures
+            TaskKind::ExtractFeatures,
+            TaskKind::LockAssetPackage
         ]
     );
 }
@@ -236,6 +237,10 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
     assert!(config.media().is_none());
     assert_eq!(
         supported_commands(&config),
-        vec![TaskKind::ValidateProject, TaskKind::ExtractFeatures]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ExtractFeatures,
+            TaskKind::LockAssetPackage
+        ]
     );
 }

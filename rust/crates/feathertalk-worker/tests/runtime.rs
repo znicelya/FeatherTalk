@@ -240,6 +240,12 @@ fn extract_features_request() -> Request {
     })
 }
 
+fn lock_asset_package_request() -> Request {
+    Request::LockAssetPackage(ProjectDirParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+    })
+}
+
 fn absolute(name: &str) -> String {
     std::env::current_dir()
         .unwrap()
@@ -282,7 +288,8 @@ fn full_config() -> WorkerConfig {
     )
 }
 
-/// Every toolchain resolves, so `extract_features` reaches the executor as well.
+/// Every toolchain resolves, so `extract_features` and `lock_asset_package`
+/// reach the executor as well.
 fn every_toolchain_config() -> WorkerConfig {
     WorkerConfig::from_values_with_toolchains(
         Some(absolute("ffprobe-test")),
@@ -1052,4 +1059,37 @@ fn extract_features_never_asks_for_the_media_toolchain() {
         "{}",
         reasons[0]
     );
+}
+
+#[test]
+fn lock_asset_package_reaches_the_executor_once_the_model_directory_resolves() {
+    let harness = Harness::start(every_toolchain_config(), instant_executor());
+    harness.send(&start(&task("00000032"), lock_asset_package_request()));
+    let frames = harness.finish();
+
+    assert!(rejections(&frames).is_empty(), "{frames:?}");
+    assert_eq!(
+        stages(&frames),
+        vec![
+            ("1787900000000-00000032", "preparing"),
+            ("1787900000000-00000032", "completed"),
+        ]
+    );
+}
+
+#[test]
+fn lock_asset_package_is_rejected_with_the_hubert_variable() {
+    let harness = Harness::start(full_config(), instant_executor());
+    harness.send(&start(&task("00000033"), lock_asset_package_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("lock_asset_package"), "{}", reasons[0]);
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        reasons[0]
+    );
+    assert!(events(&frames).is_empty());
 }
