@@ -11,6 +11,7 @@ pub const ENV_MEDIA_TIMEOUT_MS: &str = "FEATHERTALK_WORKER_MEDIA_TIMEOUT_MS";
 pub const DEFAULT_MEDIA_TIMEOUT_MS: u64 = 300_000;
 pub const ENV_SCRFD_DIR: &str = "FEATHERTALK_WORKER_SCRFD_DIR";
 pub const ENV_PFLD_DIR: &str = "FEATHERTALK_WORKER_PFLD_DIR";
+pub const ENV_HUBERT_DIR: &str = "FEATHERTALK_WORKER_HUBERT_DIR";
 
 /// Where the worker finds the two model artifact directories.
 ///
@@ -33,6 +34,22 @@ impl ModelToolchain {
     }
 }
 
+/// Where the worker finds the FeatherHuBERT model package.
+///
+/// Only the shape of the path is checked here, for the same reason as
+/// `ModelToolchain`: a directory can disappear between startup and the first
+/// job, so the manifest and the weights are validated when a job loads them.
+#[derive(Debug, Clone)]
+pub struct FeatureToolchain {
+    hubert_dir: PathBuf,
+}
+
+impl FeatureToolchain {
+    pub fn hubert_dir(&self) -> &Path {
+        &self.hubert_dir
+    }
+}
+
 /// Everything the worker learns from its environment at startup.
 ///
 /// A missing or unusable media toolchain is not a startup failure: the worker
@@ -45,16 +62,19 @@ pub struct WorkerConfig {
     media_rejection: Option<String>,
     models: Option<ModelToolchain>,
     model_rejection: Option<String>,
+    features: Option<FeatureToolchain>,
+    feature_rejection: Option<String>,
 }
 
 impl WorkerConfig {
     pub fn from_env() -> Self {
-        Self::from_values_with_models(
+        Self::from_values_with_toolchains(
             std::env::var(ENV_FFPROBE).ok(),
             std::env::var(ENV_FFMPEG).ok(),
             std::env::var(ENV_MEDIA_TIMEOUT_MS).ok(),
             std::env::var(ENV_SCRFD_DIR).ok(),
             std::env::var(ENV_PFLD_DIR).ok(),
+            std::env::var(ENV_HUBERT_DIR).ok(),
         )
     }
 
@@ -68,12 +88,25 @@ impl WorkerConfig {
         Self::from_values_with_models(ffprobe, ffmpeg, timeout_ms, None, None)
     }
 
+    /// The frame form: no FeatherHuBERT directory, so `extract_features` stays
+    /// unsupported.
     pub fn from_values_with_models(
         ffprobe: Option<String>,
         ffmpeg: Option<String>,
         timeout_ms: Option<String>,
         scrfd_dir: Option<String>,
         pfld_dir: Option<String>,
+    ) -> Self {
+        Self::from_values_with_toolchains(ffprobe, ffmpeg, timeout_ms, scrfd_dir, pfld_dir, None)
+    }
+
+    pub fn from_values_with_toolchains(
+        ffprobe: Option<String>,
+        ffmpeg: Option<String>,
+        timeout_ms: Option<String>,
+        scrfd_dir: Option<String>,
+        pfld_dir: Option<String>,
+        hubert_dir: Option<String>,
     ) -> Self {
         let (media, media_rejection) = match media_toolchain(ffprobe, ffmpeg, timeout_ms) {
             Ok(toolchain) => (Some(toolchain), None),
@@ -83,12 +116,18 @@ impl WorkerConfig {
             Ok(toolchain) => (Some(toolchain), None),
             Err(reason) => (None, Some(reason)),
         };
+        let (features, feature_rejection) = match feature_toolchain(hubert_dir) {
+            Ok(toolchain) => (Some(toolchain), None),
+            Err(reason) => (None, Some(reason)),
+        };
         Self {
             worker_version: env!("CARGO_PKG_VERSION").to_owned(),
             media,
             media_rejection,
             models,
             model_rejection,
+            features,
+            feature_rejection,
         }
     }
 
@@ -110,6 +149,14 @@ impl WorkerConfig {
 
     pub fn model_rejection(&self) -> Option<&str> {
         self.model_rejection.as_deref()
+    }
+
+    pub fn features(&self) -> Option<&FeatureToolchain> {
+        self.features.as_ref()
+    }
+
+    pub fn feature_rejection(&self) -> Option<&str> {
+        self.feature_rejection.as_deref()
     }
 }
 
@@ -143,6 +190,11 @@ fn model_toolchain(
         scrfd_dir,
         pfld_dir,
     })
+}
+
+fn feature_toolchain(hubert_dir: Option<String>) -> Result<FeatureToolchain, String> {
+    let hubert_dir = required_path(hubert_dir, ENV_HUBERT_DIR)?;
+    Ok(FeatureToolchain { hubert_dir })
 }
 
 fn required_path(value: Option<String>, variable: &str) -> Result<PathBuf, String> {

@@ -21,8 +21,8 @@ mod runtime;
 pub use adapters::{AdapterLockError, AdapterLocks};
 pub use commands::{CommandOutcome, execute, execute_with_runner};
 pub use config::{
-    DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFMPEG, ENV_FFPROBE, ENV_MEDIA_TIMEOUT_MS, ENV_PFLD_DIR,
-    ENV_SCRFD_DIR, ModelToolchain, WorkerConfig,
+    DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFMPEG, ENV_FFPROBE, ENV_HUBERT_DIR, ENV_MEDIA_TIMEOUT_MS,
+    ENV_PFLD_DIR, ENV_SCRFD_DIR, FeatureToolchain, ModelToolchain, WorkerConfig,
 };
 pub use error_map::{
     is_media_cancellation, is_pipeline_cancellation, media_task_error, pipeline_task_error,
