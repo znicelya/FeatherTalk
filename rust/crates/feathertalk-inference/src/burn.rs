@@ -30,24 +30,11 @@ impl UnetAudioInput {
     }
 }
 
-pub fn build_unet_audio_input(
+pub fn build_unet_audio_window(
     features: &FeatureMatrix,
-    plan: &InferenceFramePlan,
+    audio_window: &[Option<usize>; 8],
 ) -> Result<UnetAudioInput, InferenceError> {
-    let tokens = features.tokens();
-    let dims = features.dims();
-    if dims != FEATURE_DIMS || tokens == 0 || !tokens.is_multiple_of(TOKENS_PER_FRAME) {
-        return Err(InferenceError::InvalidFeatureShape { tokens, dims });
-    }
-
-    let frame_count = tokens / TOKENS_PER_FRAME;
-    if plan.output_index >= frame_count {
-        return Err(InferenceError::OutputFrameOutOfRange {
-            index: plan.output_index,
-            count: frame_count,
-        });
-    }
-
+    let frame_count = feature_frame_count(features)?;
     let mut values = Vec::new();
     values
         .try_reserve_exact(UNET_AUDIO_VALUES)
@@ -56,7 +43,7 @@ pub fn build_unet_audio_input(
         })?;
     values.resize(UNET_AUDIO_VALUES, 0.0);
 
-    for (slot, frame_index) in plan.audio_window.iter().copied().enumerate() {
+    for (slot, frame_index) in audio_window.iter().copied().enumerate() {
         let Some(frame_index) = frame_index else {
             continue;
         };
@@ -85,6 +72,29 @@ pub fn build_unet_audio_input(
     }
 
     Ok(UnetAudioInput { values })
+}
+
+pub fn build_unet_audio_input(
+    features: &FeatureMatrix,
+    plan: &InferenceFramePlan,
+) -> Result<UnetAudioInput, InferenceError> {
+    let frame_count = feature_frame_count(features)?;
+    if plan.output_index >= frame_count {
+        return Err(InferenceError::OutputFrameOutOfRange {
+            index: plan.output_index,
+            count: frame_count,
+        });
+    }
+    build_unet_audio_window(features, &plan.audio_window)
+}
+
+fn feature_frame_count(features: &FeatureMatrix) -> Result<usize, InferenceError> {
+    let tokens = features.tokens();
+    let dims = features.dims();
+    if dims != FEATURE_DIMS || tokens == 0 || !tokens.is_multiple_of(TOKENS_PER_FRAME) {
+        return Err(InferenceError::InvalidFeatureShape { tokens, dims });
+    }
+    Ok(tokens / TOKENS_PER_FRAME)
 }
 
 pub fn run_unet_prediction<B, M>(

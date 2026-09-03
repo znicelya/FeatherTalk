@@ -10,7 +10,10 @@ mod raw_sink;
 mod render;
 mod sequence;
 
-pub use burn::{UnetAudioInput, build_unet_audio_input, render_planned_frame, run_unet_prediction};
+pub use burn::{
+    UnetAudioInput, build_unet_audio_input, build_unet_audio_window, render_planned_frame,
+    run_unet_prediction,
+};
 pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
 pub use executor::{OfflineRenderRequest, OfflineRenderResult, execute_offline_render};

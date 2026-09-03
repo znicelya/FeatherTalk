@@ -1,5 +1,7 @@
 use feathertalk_audio::FeatureMatrix;
-use feathertalk_inference::{InferenceError, InferenceFramePlan, build_unet_audio_input};
+use feathertalk_inference::{
+    InferenceError, InferenceFramePlan, build_unet_audio_input, build_unet_audio_window,
+};
 
 fn features(frame_count: usize) -> FeatureMatrix {
     let tokens = frame_count * 2;
@@ -80,6 +82,44 @@ fn audio_window_rejects_output_and_slot_indices_beyond_feature_frames() {
             slot: 0,
             index: 2,
             frame_count: 2
+        })
+    ));
+}
+
+#[test]
+fn plan_free_audio_window_matches_the_planned_window() {
+    let matrix = features(3);
+    let audio_window = [None, None, Some(0), Some(1), Some(2), None, None, None];
+    let plan = InferenceFramePlan {
+        output_index: 1,
+        source_frame_index: 0,
+        reference_frame_index: 0,
+        audio_window,
+    };
+    let planned = build_unet_audio_input(&matrix, &plan).unwrap();
+    let direct = build_unet_audio_window(&matrix, &audio_window).unwrap();
+    assert_eq!(direct.shape(), [1, 16, 32, 32]);
+    assert_eq!(direct.as_slice(), planned.as_slice());
+}
+
+#[test]
+fn plan_free_audio_window_rejects_slots_and_feature_shapes() {
+    let matrix = features(2);
+    let window = [None, None, None, None, Some(2), None, None, None];
+    assert!(matches!(
+        build_unet_audio_window(&matrix, &window),
+        Err(InferenceError::InvalidAudioWindowIndex {
+            slot: 4,
+            index: 2,
+            frame_count: 2
+        })
+    ));
+    let odd = FeatureMatrix::new(3, 1024, vec![0.0; 3 * 1024]).unwrap();
+    assert!(matches!(
+        build_unet_audio_window(&odd, &[None; 8]),
+        Err(InferenceError::InvalidFeatureShape {
+            tokens: 3,
+            dims: 1024
         })
     ));
 }
