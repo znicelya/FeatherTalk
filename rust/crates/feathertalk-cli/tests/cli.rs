@@ -179,3 +179,14 @@ fn an_unsupported_extract_frames_names_the_model_variables() {
     assert!(text.contains("FEATHERTALK_WORKER_SCRFD_DIR"), "{text}");
     assert!(text.contains("FEATHERTALK_WORKER_PFLD_DIR"), "{text}");
 }
+
+#[test]
+fn an_unsupported_extract_features_names_the_hubert_variable() {
+    // The fake worker advertises `validate_project` alone, so the client's
+    // capability gate answers before any task starts.
+    let output = run("only-validate", &["extract-features", "p", "audio.wav"]);
+    assert_eq!(code(&output), 3);
+    let text = stderr(&output);
+    assert!(text.contains("extract_features"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_HUBERT_DIR"), "{text}");
+}

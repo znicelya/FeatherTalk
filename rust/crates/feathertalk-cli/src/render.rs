@@ -21,6 +21,11 @@ const ENV_WORKER_FFMPEG: &str = "FEATHERTALK_WORKER_FFMPEG";
 const ENV_WORKER_SCRFD_DIR: &str = "FEATHERTALK_WORKER_SCRFD_DIR";
 const ENV_WORKER_PFLD_DIR: &str = "FEATHERTALK_WORKER_PFLD_DIR";
 
+/// The worker's variable for the FeatherHuBERT package directory, a literal for
+/// the same reason: `feathertalk-worker`'s `ENV_HUBERT_DIR` is the source of
+/// truth for this name.
+const ENV_WORKER_HUBERT_DIR: &str = "FEATHERTALK_WORKER_HUBERT_DIR";
+
 /// The Chinese name of every stage.
 ///
 /// No `_` arm on purpose: adding a stage to the protocol must break this match.
@@ -284,6 +289,11 @@ pub fn render_client_error(error: &ClientError) -> String {
                     "\n{requested} 需要媒体工具与人脸模型。请用环境变量 {ENV_WORKER_FFPROBE}、\
                      {ENV_WORKER_FFMPEG}、{ENV_WORKER_SCRFD_DIR}、{ENV_WORKER_PFLD_DIR} \
                      指定它们的完整路径。"
+                ));
+            } else if *requested == "extract_features" {
+                text.push_str(&format!(
+                    "\n{requested} 需要 FeatherHuBERT 特征模型。请用环境变量 \
+                     {ENV_WORKER_HUBERT_DIR} 指定模型包目录的完整路径。"
                 ));
             }
             text

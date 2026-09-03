@@ -7,7 +7,8 @@ use feathertalk_client::{
     generate_task_id,
 };
 use feathertalk_domain::{
-    ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, Request, TaskId,
+    ExtractFeaturesParams, ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams,
+    ProjectDirParams, Request, TaskId,
 };
 
 use crate::cli::{Cli, Command};
@@ -95,6 +96,14 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
             Ok(Some(Request::ExtractFrames(ExtractFramesParams {
                 project_dir: project_dir.clone(),
                 video: video.clone(),
+            })))
+        }
+        Command::ExtractFeatures { project_dir, audio } => {
+            reject_empty(project_dir, "工程目录")?;
+            reject_empty(audio, "音频文件")?;
+            Ok(Some(Request::ExtractFeatures(ExtractFeaturesParams {
+                project_dir: project_dir.clone(),
+                audio: audio.clone(),
             })))
         }
     }
@@ -248,6 +257,41 @@ mod tests {
         assert_eq!(
             params.video,
             PathBuf::from("project/assets/video_25fps.mp4")
+        );
+    }
+
+    #[test]
+    fn extract_features_refuses_empty_arguments() {
+        let error = build_request(&Command::ExtractFeatures {
+            project_dir: PathBuf::new(),
+            audio: PathBuf::from("project/assets/audio_16k_mono.wav"),
+        })
+        .expect_err("an empty project directory is refused");
+        assert_eq!(error, "工程目录不能为空。");
+
+        let error = build_request(&Command::ExtractFeatures {
+            project_dir: PathBuf::from("project"),
+            audio: PathBuf::new(),
+        })
+        .expect_err("an empty audio file is refused");
+        assert_eq!(error, "音频文件不能为空。");
+    }
+
+    #[test]
+    fn extract_features_carries_both_paths() {
+        let request = build_request(&Command::ExtractFeatures {
+            project_dir: PathBuf::from("project"),
+            audio: PathBuf::from("project/assets/audio_16k_mono.wav"),
+        })
+        .expect("both paths are accepted")
+        .expect("extract-features needs a task");
+        let Request::ExtractFeatures(params) = request else {
+            panic!("extract-features must build an ExtractFeatures request");
+        };
+        assert_eq!(params.project_dir, PathBuf::from("project"));
+        assert_eq!(
+            params.audio,
+            PathBuf::from("project/assets/audio_16k_mono.wav")
         );
     }
 
