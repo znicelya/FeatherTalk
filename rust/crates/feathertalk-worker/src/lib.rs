@@ -10,6 +10,7 @@ mod commands;
 mod config;
 mod error_map;
 mod extract_frames;
+mod feature_result;
 mod handshake;
 mod models;
 mod normalize_result;
@@ -30,6 +31,7 @@ pub use error_map::{
     quality_task_error,
 };
 pub use extract_frames::execute_extract_frames;
+pub use feature_result::feature_to_json;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
 pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
