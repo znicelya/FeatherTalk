@@ -21,6 +21,7 @@ members = [
   "crates/feathertalk-training",
   "crates/feathertalk-inference",
   "crates/feathertalk-export",
+  "crates/feathertalk-training-data",
   "tools/pfld-artifact",
   "tools/vgg19-package",
   "tools/model-package",

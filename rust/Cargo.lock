@@ -2701,6 +2701,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "feathertalk-training-data"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "feathertalk-audio",
+ "feathertalk-inference",
+ "feathertalk-preprocess",
+ "feathertalk-project",
+ "feathertalk-training",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "feathertalk-vgg19-package"
 version = "0.1.0"
 dependencies = [
