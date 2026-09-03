@@ -119,6 +119,29 @@ where
     Ok(PackageBuildReport { manifest })
 }
 
+/// Reads and validates the manifest of an inference model package.
+///
+/// `load_model_package` runs this first. A caller that has to know the shipped
+/// hyperparameters before it can name the expected description -- the worker's
+/// FeatherHuBERT loader, for one -- runs it on its own.
+pub fn read_package_manifest(
+    directory: impl AsRef<Path>,
+) -> Result<ModelPackageManifest, PackageError> {
+    let directory = directory.as_ref();
+    io::validate_package_directory(directory, false)?;
+    let manifest_bytes = io::read_bounded_regular(
+        &directory.join(crate::MANIFEST_FILE_NAME),
+        crate::MAX_MANIFEST_BYTES,
+        "manifest",
+    )?;
+    let manifest: ModelPackageManifest =
+        serde_json::from_slice(&manifest_bytes).map_err(|error| {
+            PackageError::InvalidManifest(format!("invalid manifest JSON: {error}"))
+        })?;
+    manifest.validate()?;
+    Ok(manifest)
+}
+
 pub fn load_model_package<B, M, F>(
     directory: impl AsRef<Path>,
     expected: &ModelDescription,
@@ -132,17 +155,7 @@ where
 {
     let directory = directory.as_ref();
     expected.validate()?;
-    io::validate_package_directory(directory, false)?;
-    let manifest_bytes = io::read_bounded_regular(
-        &directory.join(crate::MANIFEST_FILE_NAME),
-        crate::MAX_MANIFEST_BYTES,
-        "manifest",
-    )?;
-    let manifest: ModelPackageManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|error| {
-            PackageError::InvalidManifest(format!("invalid manifest JSON: {error}"))
-        })?;
-    manifest.validate()?;
+    let manifest = read_package_manifest(directory)?;
     if manifest.description() != *expected {
         return Err(PackageError::InvalidRequest(
             "expected model description does not match package manifest".to_owned(),

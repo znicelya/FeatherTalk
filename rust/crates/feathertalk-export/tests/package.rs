@@ -6,9 +6,9 @@ use burn::{
 };
 use burn_store::ModuleSnapshot;
 use feathertalk_export::{
-    LicenseBundle, LicenseEntry, ModelConfiguration, ModelDescription, ModelPackageManifest,
-    PackageBuildRequest, PackageError, SourceManifest, TrainingManifest, load_model_package,
-    write_model_package,
+    LicenseBundle, LicenseEntry, MAX_MANIFEST_BYTES, ModelConfiguration, ModelDescription,
+    ModelPackageManifest, PackageBuildRequest, PackageError, SourceManifest, TrainingManifest,
+    load_model_package, read_package_manifest, write_model_package,
 };
 use feathertalk_models::backend::CpuBackend;
 use sha2::{Digest, Sha256};
@@ -88,6 +88,31 @@ fn package_round_trip_contains_exact_three_files_and_preserves_tensor_data() {
     assert_eq!(manifest, report.manifest);
     assert_module_data_equal(&model, &loaded);
     assert!(root.path().join("published").is_dir());
+}
+
+#[test]
+fn manifest_reader_returns_the_published_manifest_and_enforces_the_directory_contract() {
+    let (_root, request, model) = fixture();
+    let device = Default::default();
+    let report = write_model_package::<CpuBackend, _, _>(&request, &model, &device, |device| {
+        LinearConfig::new(2, 2).init::<CpuBackend>(device)
+    })
+    .unwrap();
+
+    let manifest = read_package_manifest(&request.destination).unwrap();
+    assert_eq!(manifest, report.manifest);
+    assert_eq!(manifest.configuration, request.description.configuration);
+
+    fs::write(request.destination.join("notes.txt"), b"unexpected").unwrap();
+    let error = read_package_manifest(&request.destination).unwrap_err();
+    assert!(matches!(error, PackageError::InvalidRequest(_)));
+    fs::remove_file(request.destination.join("notes.txt")).unwrap();
+
+    let oversized = vec![b' '; usize::try_from(MAX_MANIFEST_BYTES).unwrap() + 1];
+    fs::write(request.destination.join("manifest.json"), oversized).unwrap();
+    let error = read_package_manifest(&request.destination).unwrap_err();
+    assert!(matches!(error, PackageError::InvalidRequest(_)));
+    assert!(error.to_string().contains("manifest exceeds 65536 bytes"));
 }
 
 #[test]

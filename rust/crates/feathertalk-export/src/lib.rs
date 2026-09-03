@@ -25,5 +25,6 @@ pub use manifest::{
 pub use onnx_feather_hubert::export_feather_hubert_onnx;
 pub use onnx_unet::{export_mobileone_unet_onnx, export_original_unet_onnx};
 pub use package::{
-    PackageBuildReport, PackageBuildRequest, load_model_package, write_model_package,
+    PackageBuildReport, PackageBuildRequest, load_model_package, read_package_manifest,
+    write_model_package,
 };
