@@ -1,8 +1,8 @@
 use std::{collections::VecDeque, path::PathBuf, sync::Mutex, time::Duration};
 
 use feathertalk_domain::{
-    ErrorCode, NormalizeMediaParams, ProbeMediaParams, Progress, ProjectDirParams, Request,
-    TaskStage, TrainParams, TrainingMode, UnetVariant,
+    ErrorCode, ExtractFeaturesParams, NormalizeMediaParams, ProbeMediaParams, Progress,
+    ProjectDirParams, Request, TaskStage, TrainParams, TrainingMode, UnetVariant,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_project::{
@@ -290,6 +290,67 @@ fn an_unsupported_command_is_refused_with_its_slug() {
     };
     assert_eq!(error.code, ErrorCode::WorkerCrashed);
     assert!(error.detail.contains("train"), "{}", error.detail);
+    error.validate().unwrap();
+}
+
+#[test]
+fn extract_features_reports_a_package_failure_as_a_model_incompatibility() {
+    let temp = tempfile::tempdir().unwrap();
+    let request = Request::ExtractFeatures(ExtractFeaturesParams {
+        project_dir: temp.path().join("project"),
+        audio: temp.path().join("project/assets/audio_16k_mono.wav"),
+    });
+    let config = WorkerConfig::from_values_with_toolchains(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(temp.path().display().to_string()),
+    );
+    let runner = FakeRunner::new(vec![]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        &config,
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("loading a package out of an empty directory must fail");
+    };
+    assert_eq!(error.code, ErrorCode::ModelIncompatible);
+    assert_eq!(error.summary, "特征模型加载失败");
+    assert!(
+        error.detail.contains("FEATHERTALK_WORKER_HUBERT_DIR"),
+        "{}",
+        error.detail
+    );
+    error.validate().unwrap();
+}
+
+#[test]
+fn extract_features_without_a_model_directory_is_refused_with_its_slug() {
+    let request = Request::ExtractFeatures(ExtractFeaturesParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+        audio: PathBuf::from("C:/tmp/project/assets/audio_16k_mono.wav"),
+    });
+    let runner = FakeRunner::new(vec![]);
+    let CommandOutcome::Failed(error) = execute_with_runner(
+        &request,
+        &bare_config(),
+        &CancellationToken::new(),
+        &NoReporter,
+        &runner,
+    ) else {
+        panic!("extract_features without a model directory must fail");
+    };
+    assert_eq!(error.code, ErrorCode::WorkerCrashed);
+    assert_eq!(error.summary, "当前 worker 不支持该命令");
+    assert!(
+        error.detail.contains("extract_features"),
+        "{}",
+        error.detail
+    );
     error.validate().unwrap();
 }
 

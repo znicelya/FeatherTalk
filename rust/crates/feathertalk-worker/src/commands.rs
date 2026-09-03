@@ -8,8 +8,9 @@ use feathertalk_media::{
 use feathertalk_project::validate_project_dir;
 
 use crate::{
-    FrameModels, TaskReporter, WorkerConfig, execute_extract_frames, is_media_cancellation,
-    media_task_error, normalize_to_json, pipeline_task_error, probe_to_json, project_task_error,
+    FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
+    execute_extract_frames, is_media_cancellation, media_task_error, normalize_to_json,
+    package_task_error, pipeline_task_error, probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -120,6 +121,17 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 models.detector(),
                 models.predictor(),
             )
+        }
+        Request::ExtractFeatures(params) => {
+            let Some(features) = config.features() else {
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            let model = match FeatureModel::load(features) {
+                Ok(model) => model,
+                Err(error) => return CommandOutcome::Failed(package_task_error(&error)),
+            };
+            let (mut encoder, model_sha256) = model.into_parts();
+            execute_extract_features(params, token, reporter, &mut encoder, &model_sha256)
         }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
