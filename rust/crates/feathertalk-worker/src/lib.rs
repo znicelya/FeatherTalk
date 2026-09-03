@@ -10,6 +10,7 @@ mod admission;
 mod commands;
 mod config;
 mod error_map;
+mod extract_features;
 mod extract_frames;
 mod feature_result;
 mod handshake;
@@ -31,6 +32,7 @@ pub use error_map::{
     media_task_error, package_task_error, pipeline_task_error, project_task_error,
     quality_task_error,
 };
+pub use extract_features::execute_extract_features;
 pub use extract_frames::execute_extract_frames;
 pub use feature_result::feature_to_json;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
