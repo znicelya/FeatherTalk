@@ -54,6 +54,10 @@ impl FrameSample {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TrainingItem {
     SingleFrame(FrameSample),
+    TemporalPair {
+        first: FrameSample,
+        second: FrameSample,
+    },
 }
 
 /// A locked project directory presented as a training dataset.
@@ -291,10 +295,23 @@ impl<R: FrameReader> ProjectTrainingDataset<R> {
                 let frame = self.build_frame_sample(target_index, &target, &planes)?;
                 Ok(TrainingItem::SingleFrame(frame))
             }
-            TrainingSample::TemporalPair { .. } => Err(TrainingDataError::Sample {
-                index: 0,
-                message: "only single-frame samples are implemented".to_owned(),
-            }),
+            TrainingSample::TemporalPair {
+                first_target_index,
+                second_target_index,
+                reference_index,
+            } => {
+                let first_index = self.resolve_index(*first_target_index)?;
+                let second_index = self.resolve_index(*second_target_index)?;
+                let reference_index = self.resolve_index(*reference_index)?;
+                let reference = self.load_frame(reference_index)?;
+                let planes =
+                    self.inner_planes(reference_index, &reference.crop, MouthMasking::Keep)?;
+                let first_target = self.load_frame(first_index)?;
+                let first = self.build_frame_sample(first_index, &first_target, &planes)?;
+                let second_target = self.load_frame(second_index)?;
+                let second = self.build_frame_sample(second_index, &second_target, &planes)?;
+                Ok(TrainingItem::TemporalPair { first, second })
+            }
         }
     }
 }

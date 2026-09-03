@@ -20,12 +20,28 @@ fn open_dataset(project_dir: &Path) -> ProjectTrainingDataset<GradientFrameReade
 fn single_frame(item: &TrainingItem) -> &FrameSample {
     match item {
         TrainingItem::SingleFrame(sample) => sample,
+        TrainingItem::TemporalPair { .. } => panic!("expected a single-frame item"),
+    }
+}
+
+fn temporal_pair(item: &TrainingItem) -> (&FrameSample, &FrameSample) {
+    match item {
+        TrainingItem::TemporalPair { first, second } => (first, second),
+        TrainingItem::SingleFrame(_) => panic!("expected a temporal-pair item"),
     }
 }
 
 fn single_frame_sample(target_index: u64, reference_index: u64) -> TrainingSample {
     TrainingSample::SingleFrame {
         target_index,
+        reference_index,
+    }
+}
+
+fn temporal_sample(first: u64, second: u64, reference_index: u64) -> TrainingSample {
+    TrainingSample::TemporalPair {
+        first_target_index: first,
+        second_target_index: second,
         reference_index,
     }
 }
@@ -168,4 +184,52 @@ fn a_frame_index_past_the_end_is_rejected() {
     let error = dataset.load_sample(&single_frame_sample(4, 0)).unwrap_err();
     let message = error.to_string();
     assert!(message.contains("frame index 4 is out of range for 4 frames"));
+}
+
+#[test]
+fn a_temporal_pair_shares_one_reference_frame() {
+    let (_temp, project_dir) = locked_project(4);
+    let dataset = open_dataset(&project_dir);
+    let item = dataset.load_sample(&temporal_sample(1, 3, 0)).unwrap();
+    let (first, second) = temporal_pair(&item);
+    let plane = INNER_SIZE * INNER_SIZE;
+    let reference = inner_planes(&project_dir, 0, MouthMasking::Keep);
+    assert_eq!(&first.image()[..3 * plane], reference.as_slice());
+    assert_eq!(&second.image()[..3 * plane], reference.as_slice());
+}
+
+#[test]
+fn a_temporal_pair_masks_each_target_separately() {
+    let (_temp, project_dir) = locked_project(4);
+    let dataset = open_dataset(&project_dir);
+    let item = dataset.load_sample(&temporal_sample(1, 3, 0)).unwrap();
+    let (first, second) = temporal_pair(&item);
+    let plane = INNER_SIZE * INNER_SIZE;
+    let first_masked = inner_planes(&project_dir, 1, MouthMasking::Blackout);
+    let second_masked = inner_planes(&project_dir, 3, MouthMasking::Blackout);
+    assert_eq!(&first.image()[3 * plane..], first_masked.as_slice());
+    assert_eq!(&second.image()[3 * plane..], second_masked.as_slice());
+}
+
+#[test]
+fn a_temporal_pair_carries_two_targets_masks_and_windows() {
+    let (_temp, project_dir) = locked_project(4);
+    let dataset = open_dataset(&project_dir);
+    let item = dataset.load_sample(&temporal_sample(1, 3, 0)).unwrap();
+    let (first, second) = temporal_pair(&item);
+    let first_target = inner_planes(&project_dir, 1, MouthMasking::Keep);
+    let second_target = inner_planes(&project_dir, 3, MouthMasking::Keep);
+    assert_eq!(first.target(), first_target.as_slice());
+    assert_eq!(second.target(), second_target.as_slice());
+    assert_ne!(first.mouth_mask(), second.mouth_mask());
+    assert_ne!(first.audio(), second.audio());
+}
+
+#[test]
+fn a_temporal_pair_rejects_an_index_past_the_end() {
+    let (_temp, project_dir) = locked_project(4);
+    let dataset = open_dataset(&project_dir);
+    let error = dataset.load_sample(&temporal_sample(1, 9, 0)).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("frame index 9 is out of range for 4 frames"));
 }
