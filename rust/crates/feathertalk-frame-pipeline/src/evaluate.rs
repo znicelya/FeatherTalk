@@ -4,8 +4,8 @@ use feathertalk_face::{Detection, DetectionConfig, non_max_suppression};
 use feathertalk_pfld::PFLDLandmarks;
 
 use crate::{
-    AnomalyCode, FaceDetection, FrameAnomaly, FrameBatch, NoObserver, PipelineError,
-    PipelineObserver, PipelinePhase, RecoveryAction,
+    AnomalyCode, FaceDetection, FrameAnomaly, FrameBatch, LANDMARK_POINTS, NoObserver,
+    PipelineError, PipelineObserver, PipelinePhase, RecoveryAction,
 };
 
 pub const FACE_CONFIDENCE_THRESHOLD: f32 = 0.50;
@@ -412,13 +412,13 @@ fn serialize_landmarks(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
-    if landmarks.points().len() != 110 {
+    if landmarks.points().len() != LANDMARK_POINTS {
         return Err(format!(
-            "expected 110 points, got {}",
+            "expected {LANDMARK_POINTS} points, got {}",
             landmarks.points().len()
         ));
     }
-    let mut bytes = Vec::with_capacity(110 * 16);
+    let mut bytes = Vec::with_capacity(LANDMARK_POINTS * 16);
     for point in landmarks.points() {
         if point.x < 0 || point.y < 0 || point.x >= width as i32 || point.y >= height as i32 {
             return Err(format!(

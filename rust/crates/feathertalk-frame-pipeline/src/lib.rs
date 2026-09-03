@@ -2,6 +2,7 @@ mod commands;
 mod error;
 mod evaluate;
 mod extraction;
+mod landmark;
 mod model;
 mod observe;
 mod process;
@@ -18,6 +19,7 @@ pub use extraction::{
     ExtractedFrame, FRAME_CHUNK, FrameBatch, extract_frames, extract_frames_observed,
     extract_frames_with_runner,
 };
+pub use landmark::{LANDMARK_POINTS, MAX_LANDMARK_FILE_BYTES, read_landmark_file};
 pub use model::{
     AnomalyCode, FaceDetection, FrameAnomaly, FramePipelineSpec, FrameQuality, QualityReport,
     RecoveryAction,
