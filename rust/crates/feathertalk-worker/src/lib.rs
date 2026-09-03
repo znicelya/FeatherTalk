@@ -6,6 +6,7 @@
 //! and rejected if a client asks for it anyway.
 
 mod adapters;
+mod admission;
 mod commands;
 mod config;
 mod error_map;
