@@ -3,8 +3,8 @@ use feathertalk_audio::FeatureMatrix;
 use feathertalk_models::unet::TalkingHeadModel;
 
 use crate::{
-    BgrFrame, InferenceError, InferenceFramePlan, RenderGeometry, build_unet_image_input, crop_bgr,
-    render_frame,
+    BgrFrame, InferenceError, InferenceFramePlan, RenderGeometry, build_face_crop,
+    build_unet_image_input, render_frame,
 };
 
 const FEATURE_DIMS: usize = 1024;
@@ -155,9 +155,7 @@ where
     M: TalkingHeadModel<B>,
 {
     let audio = build_unet_audio_input(features, plan)?;
-    let source_crop = crop_bgr(frame, bbox)?;
-    let face_crop =
-        crate::resize_bilinear(&source_crop, geometry.crop_size(), geometry.crop_size())?;
+    let face_crop = build_face_crop(frame, bbox, geometry)?;
     let image = build_unet_image_input(&face_crop, geometry)?;
     let prediction = run_unet_prediction::<B, M>(model, &image, &audio, device)?;
     render_frame(frame, bbox, &prediction, geometry)

@@ -1,4 +1,6 @@
-use feathertalk_inference::{BgrFrame, InferenceError, crop_bgr, resize_bilinear};
+use feathertalk_inference::{
+    BgrFrame, InferenceError, RenderGeometry, build_face_crop, crop_bgr, resize_bilinear,
+};
 use feathertalk_preprocess::FaceBoundingBox;
 
 #[test]
@@ -70,5 +72,38 @@ fn resize_rejects_zero_target_dimensions() {
     assert!(matches!(
         resize_bilinear(&source, 0, 1),
         Err(InferenceError::InvalidResizeTarget { .. })
+    ));
+}
+
+#[test]
+fn face_crop_is_the_bbox_crop_resized_to_the_geometry() {
+    let bytes: Vec<u8> = (0..64 * 64 * 3).map(|index| (index % 253) as u8).collect();
+    let frame = BgrFrame::new(64, 64, bytes).unwrap();
+    let bbox = FaceBoundingBox {
+        xmin: 4,
+        ymin: 6,
+        xmax: 44,
+        ymax: 46,
+    };
+    let geometry = RenderGeometry::standard();
+    let face_crop = build_face_crop(&frame, &bbox, &geometry).unwrap();
+    let source = crop_bgr(&frame, &bbox).unwrap();
+    let expected = resize_bilinear(&source, 168, 168).unwrap();
+    assert_eq!((face_crop.width(), face_crop.height()), (168, 168));
+    assert_eq!(face_crop, expected);
+}
+
+#[test]
+fn face_crop_rejects_a_bbox_outside_the_frame() {
+    let frame = BgrFrame::new(8, 8, vec![0; 8 * 8 * 3]).unwrap();
+    let bbox = FaceBoundingBox {
+        xmin: 0,
+        ymin: 0,
+        xmax: 9,
+        ymax: 8,
+    };
+    assert!(matches!(
+        build_face_crop(&frame, &bbox, &RenderGeometry::standard()),
+        Err(InferenceError::InvalidBbox { .. })
     ));
 }

@@ -382,14 +382,22 @@ pub fn paste_bgr(
     Ok(())
 }
 
+pub fn build_face_crop(
+    frame: &BgrFrame,
+    bbox: &FaceBoundingBox,
+    geometry: &crate::RenderGeometry,
+) -> Result<BgrFrame, InferenceError> {
+    let source_crop = crop_bgr(frame, bbox)?;
+    resize_bilinear(&source_crop, geometry.crop_size(), geometry.crop_size())
+}
+
 pub fn render_frame(
     frame: &BgrFrame,
     bbox: &FaceBoundingBox,
     prediction: &[f32],
     geometry: &crate::RenderGeometry,
 ) -> Result<BgrFrame, InferenceError> {
-    let source_crop = crop_bgr(frame, bbox)?;
-    let mut face_crop = resize_bilinear(&source_crop, geometry.crop_size(), geometry.crop_size())?;
+    let mut face_crop = build_face_crop(frame, bbox, geometry)?;
     apply_unet_prediction(&mut face_crop, prediction, geometry)?;
     let bbox_width =
         u32::try_from(bbox.xmax - bbox.xmin).map_err(|_| InferenceError::ArithmeticOverflow)?;
