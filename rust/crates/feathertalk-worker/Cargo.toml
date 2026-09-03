@@ -13,13 +13,13 @@ feathertalk-frame-adapters = { path = "../feathertalk-frame-adapters" }
 feathertalk-frame-pipeline = { path = "../feathertalk-frame-pipeline" }
 feathertalk-media = { path = "../feathertalk-media" }
 feathertalk-models = { path = "../feathertalk-models" }
+feathertalk-pfld = { path = "../feathertalk-pfld" }
 feathertalk-project = { path = "../feathertalk-project" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
-feathertalk-pfld = { path = "../feathertalk-pfld" }
 hex = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }

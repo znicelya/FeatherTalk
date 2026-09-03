@@ -1,9 +1,4 @@
 //! Verification of a finished asset package: frames, landmarks, and counts.
-//!
-//! The scan lands one commit before its caller, so the non-test build of the
-//! crate has no consumer for it yet. The next commit wires it into the
-//! lock command and drops this allowance.
-#![allow(dead_code)]
 
 use std::fs::{self, File};
 use std::io::Read;
