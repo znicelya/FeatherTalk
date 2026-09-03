@@ -34,7 +34,8 @@ pub struct Cli {
 }
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
-/// `normalize-media`, `extract-frames`, `extract-features`, `capabilities`.
+/// `normalize-media`, `extract-frames`, `extract-features`,
+/// `lock-asset-package`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -67,6 +68,11 @@ pub enum Command {
         project_dir: PathBuf,
         /// 已归一化的 16kHz 单声道音频，位于工程目录的 assets 下
         audio: PathBuf,
+    },
+    /// 写入素材清单并加锁素材包
+    LockAssetPackage {
+        /// 工程目录
+        project_dir: PathBuf,
     },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,

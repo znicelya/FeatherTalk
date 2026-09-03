@@ -106,6 +106,12 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 audio: audio.clone(),
             })))
         }
+        Command::LockAssetPackage { project_dir } => {
+            reject_empty(project_dir, "工程目录")?;
+            Ok(Some(Request::LockAssetPackage(ProjectDirParams {
+                project_dir: project_dir.clone(),
+            })))
+        }
     }
 }
 
@@ -293,6 +299,28 @@ mod tests {
             params.audio,
             PathBuf::from("project/assets/audio_16k_mono.wav")
         );
+    }
+
+    #[test]
+    fn lock_asset_package_refuses_an_empty_project_directory() {
+        let error = build_request(&Command::LockAssetPackage {
+            project_dir: PathBuf::new(),
+        })
+        .expect_err("an empty project directory is refused");
+        assert_eq!(error, "工程目录不能为空。");
+    }
+
+    #[test]
+    fn lock_asset_package_carries_the_project_directory() {
+        let request = build_request(&Command::LockAssetPackage {
+            project_dir: PathBuf::from("project"),
+        })
+        .expect("the path is accepted")
+        .expect("lock-asset-package needs a task");
+        let Request::LockAssetPackage(params) = request else {
+            panic!("lock-asset-package must build a LockAssetPackage request");
+        };
+        assert_eq!(params.project_dir, PathBuf::from("project"));
     }
 
     #[test]

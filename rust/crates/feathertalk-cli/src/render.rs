@@ -295,6 +295,11 @@ pub fn render_client_error(error: &ClientError) -> String {
                     "\n{requested} 需要 FeatherHuBERT 特征模型。请用环境变量 \
                      {ENV_WORKER_HUBERT_DIR} 指定模型包目录的完整路径。"
                 ));
+            } else if *requested == "lock_asset_package" {
+                text.push_str(&format!(
+                    "\n{requested} 需要 FeatherHuBERT 模型包来记录编码器摘要。\
+                     请用环境变量 {ENV_WORKER_HUBERT_DIR} 指定模型包目录的完整路径。"
+                ));
             }
             text
         }
