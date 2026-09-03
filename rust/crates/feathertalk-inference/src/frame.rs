@@ -188,10 +188,36 @@ impl UnetImageInput {
     }
 }
 
-pub fn build_unet_image_input(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouthMasking {
+    Keep,
+    Blackout,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InnerImagePlanes {
+    values: Vec<f32>,
+}
+
+impl InnerImagePlanes {
+    pub fn shape(&self) -> [usize; 4] {
+        [1, UNET_OUTPUT_CHANNELS, 160, 160]
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        &self.values
+    }
+
+    pub fn into_values(self) -> Vec<f32> {
+        self.values
+    }
+}
+
+pub fn build_inner_image_planes(
     face_crop: &BgrFrame,
     geometry: &crate::RenderGeometry,
-) -> Result<UnetImageInput, InferenceError> {
+    masking: MouthMasking,
+) -> Result<InnerImagePlanes, InferenceError> {
     let (crop_size, inner_size, border) = validate_geometry_and_crop(face_crop, geometry)?;
     let crop_spec = feathertalk_preprocess::default_crop_spec();
     let mask_right = crop_spec
@@ -212,7 +238,7 @@ pub fn build_unet_image_input(
     }
     let plane = checked_elements(inner_size, inner_size)?;
     let elements = plane
-        .checked_mul(UNET_INPUT_CHANNELS)
+        .checked_mul(UNET_OUTPUT_CHANNELS)
         .ok_or(InferenceError::ArithmeticOverflow)?;
     let mut values = allocate_f32(elements)?;
     for y in 0..inner_size {
@@ -225,18 +251,39 @@ pub fn build_unet_image_input(
                 .ok_or(InferenceError::ArithmeticOverflow)?;
             let source_offset = face_crop.pixel_offset_checked(source_x, source_y)?;
             let offset = linear_offset(inner_size, x, y)?;
-            let masked = x >= crop_spec.mouth_mask.x
+            let masked = masking == MouthMasking::Blackout
+                && x >= crop_spec.mouth_mask.x
                 && x < mask_right
                 && y >= crop_spec.mouth_mask.y
                 && y < mask_bottom;
-            for channel in 0..3 {
+            for channel in 0..UNET_OUTPUT_CHANNELS {
                 let normalized = f32::from(face_crop.bgr[source_offset + channel]) / 255.0;
-                values[channel * plane + offset] = normalized;
-                values[(channel + 3) * plane + offset] = if masked { 0.0 } else { normalized };
+                values[channel * plane + offset] = if masked { 0.0 } else { normalized };
             }
         }
     }
     debug_assert_eq!(crop_size, inner_size + 2 * border);
+    Ok(InnerImagePlanes { values })
+}
+
+pub fn build_unet_image_input(
+    face_crop: &BgrFrame,
+    geometry: &crate::RenderGeometry,
+) -> Result<UnetImageInput, InferenceError> {
+    let keep = build_inner_image_planes(face_crop, geometry, MouthMasking::Keep)?;
+    let blackout = build_inner_image_planes(face_crop, geometry, MouthMasking::Blackout)?;
+    let mut values = keep.into_values();
+    let mut tail = blackout.into_values();
+    let total = values
+        .len()
+        .checked_add(tail.len())
+        .ok_or(InferenceError::ArithmeticOverflow)?;
+    values
+        .try_reserve_exact(tail.len())
+        .map_err(|_| InferenceError::AllocationFailure {
+            bytes: total.saturating_mul(std::mem::size_of::<f32>()),
+        })?;
+    values.append(&mut tail);
     Ok(UnetImageInput { values })
 }
 

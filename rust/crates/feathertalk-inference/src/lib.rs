@@ -15,8 +15,9 @@ pub use command::{CommandSpec, raw_video_command};
 pub use error::InferenceError;
 pub use executor::{OfflineRenderRequest, OfflineRenderResult, execute_offline_render};
 pub use frame::{
-    BgrFrame, UnetImageInput, apply_unet_prediction, build_unet_image_input, crop_bgr, paste_bgr,
-    render_frame, resize_bilinear,
+    BgrFrame, InnerImagePlanes, MouthMasking, UnetImageInput, apply_unet_prediction,
+    build_inner_image_planes, build_unet_image_input, crop_bgr, paste_bgr, render_frame,
+    resize_bilinear,
 };
 pub use frame_reader::{DEFAULT_MAX_FRAME_PIXELS, FrameReader, JpegFrameReader};
 pub use plan::{InferenceFramePlan, RenderPlan};

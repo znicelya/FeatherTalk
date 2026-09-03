@@ -1,5 +1,6 @@
 use feathertalk_inference::{
-    BgrFrame, InferenceError, RenderGeometry, apply_unet_prediction, build_unet_image_input,
+    BgrFrame, InferenceError, MouthMasking, RenderGeometry, apply_unet_prediction,
+    build_inner_image_planes, build_unet_image_input,
 };
 
 #[test]
@@ -69,4 +70,65 @@ fn tensor_bridges_reject_wrong_crop_dimensions() {
             ..
         })
     ));
+}
+
+#[test]
+fn inner_planes_blackout_only_the_mouth_rectangle() {
+    let mut bytes = vec![64; 168 * 168 * 3];
+    let pixel = (4 + 6) * 168 * 3 + (4 + 6) * 3;
+    bytes[pixel..pixel + 3].copy_from_slice(&[128, 0, 255]);
+    let unmasked_pixel = (4_u32 * 168 + 4) as usize * 3;
+    bytes[unmasked_pixel..unmasked_pixel + 3].copy_from_slice(&[32, 64, 96]);
+    let crop = BgrFrame::new(168, 168, bytes).unwrap();
+    let geometry = RenderGeometry::standard();
+    let keep = build_inner_image_planes(&crop, &geometry, MouthMasking::Keep).unwrap();
+    let blackout = build_inner_image_planes(&crop, &geometry, MouthMasking::Blackout).unwrap();
+    assert_eq!(keep.shape(), [1, 3, 160, 160]);
+    assert_eq!(blackout.shape(), [1, 3, 160, 160]);
+    assert_eq!(keep.as_slice().len(), 3 * 160 * 160);
+    let plane = 160 * 160;
+    let offset = 6 * 160 + 6;
+    assert_eq!(keep.as_slice()[offset], 128.0 / 255.0);
+    assert_eq!(keep.as_slice()[plane + offset], 0.0);
+    assert_eq!(keep.as_slice()[2 * plane + offset], 1.0);
+    assert_eq!(blackout.as_slice()[offset], 0.0);
+    assert_eq!(blackout.as_slice()[plane + offset], 0.0);
+    assert_eq!(blackout.as_slice()[2 * plane + offset], 0.0);
+    assert_eq!(keep.as_slice()[0], 32.0 / 255.0);
+    assert_eq!(keep.as_slice()[plane], 64.0 / 255.0);
+    assert_eq!(keep.as_slice()[2 * plane], 96.0 / 255.0);
+    assert_eq!(blackout.as_slice()[0], 32.0 / 255.0);
+    assert_eq!(blackout.as_slice()[plane], 64.0 / 255.0);
+    assert_eq!(blackout.as_slice()[2 * plane], 96.0 / 255.0);
+}
+
+#[test]
+fn image_input_is_keep_planes_followed_by_blackout_planes() {
+    let bytes: Vec<u8> = (0..168 * 168 * 3)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let crop = BgrFrame::new(168, 168, bytes).unwrap();
+    let geometry = RenderGeometry::standard();
+    let input = build_unet_image_input(&crop, &geometry).unwrap();
+    let keep = build_inner_image_planes(&crop, &geometry, MouthMasking::Keep).unwrap();
+    let blackout = build_inner_image_planes(&crop, &geometry, MouthMasking::Blackout).unwrap();
+    let half = 3 * 160 * 160;
+    assert_eq!(input.as_slice().len(), 2 * half);
+    assert_eq!(&input.as_slice()[..half], keep.as_slice());
+    assert_eq!(&input.as_slice()[half..], blackout.as_slice());
+}
+
+#[test]
+fn inner_planes_reject_wrong_crop_dimensions() {
+    let crop = BgrFrame::new(10, 10, vec![0; 300]).unwrap();
+    let geometry = RenderGeometry::standard();
+    for masking in [MouthMasking::Keep, MouthMasking::Blackout] {
+        assert!(matches!(
+            build_inner_image_planes(&crop, &geometry, masking),
+            Err(InferenceError::TensorShapeMismatch {
+                context: "face_crop",
+                ..
+            })
+        ));
+    }
 }
