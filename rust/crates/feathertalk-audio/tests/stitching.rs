@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use feathertalk_audio::{
     AudioError, ChunkEncoder, DEFAULT_CHUNK_SAMPLES, FeatureMatrix, drop_odd_token,
-    extract_long_audio,
+    extract_long_audio, fit_feature_tokens,
 };
 
 #[derive(Clone)]
@@ -130,4 +130,41 @@ fn returns_empty_feature_without_calling_encoder_for_short_input() {
     let mut encoder = PanicEncoder;
     let matrix = extract_long_audio(&waveform(399), &mut encoder, DEFAULT_CHUNK_SAMPLES).unwrap();
     assert_eq!(matrix, FeatureMatrix::new(0, 2, vec![]).unwrap());
+}
+
+#[test]
+fn fitting_pads_truncates_and_leaves_an_exact_matrix_alone() {
+    let matrix = FeatureMatrix::new(2, 4, vec![1.0; 8]).unwrap();
+
+    let padded = fit_feature_tokens(matrix.clone(), 3).unwrap();
+    assert_eq!(padded.tokens(), 3);
+    assert_eq!(padded.dims(), 4);
+    assert_eq!(&padded.values()[..8], &[1.0; 8]);
+    assert_eq!(&padded.values()[8..], &[0.0; 4]);
+
+    let truncated = fit_feature_tokens(matrix.clone(), 1).unwrap();
+    assert_eq!(truncated.tokens(), 1);
+    assert_eq!(truncated.values(), &[1.0; 4]);
+
+    let unchanged = fit_feature_tokens(matrix.clone(), 2).unwrap();
+    assert_eq!(unchanged, matrix);
+}
+
+#[test]
+fn an_impossible_token_count_overflows_instead_of_allocating() {
+    let matrix = FeatureMatrix::new(1, 1024, vec![0.5; 1024]).unwrap();
+    let error = fit_feature_tokens(matrix, usize::MAX).unwrap_err();
+    assert!(
+        matches!(error, AudioError::FeatureSizeOverflow),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn fitting_to_zero_tokens_empties_the_matrix() {
+    let matrix = FeatureMatrix::new(2, 4, vec![1.0; 8]).unwrap();
+    let empty = fit_feature_tokens(matrix, 0).unwrap();
+    assert_eq!(empty.tokens(), 0);
+    assert_eq!(empty.dims(), 4);
+    assert!(empty.values().is_empty());
 }

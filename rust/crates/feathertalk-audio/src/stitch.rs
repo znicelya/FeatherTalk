@@ -40,12 +40,27 @@ pub fn extract_long_audio<E: ChunkEncoder>(
         .target_tokens()
         .checked_mul(dimension)
         .ok_or(AudioError::FeatureSizeOverflow)?;
-    if values.len() < target_values {
-        values.resize(target_values, 0.0);
-    } else {
-        values.truncate(target_values);
-    }
+    fit_values(&mut values, target_values);
     FeatureMatrix::new(plan.target_tokens(), dimension, values)
+}
+
+/// Pad or truncate a feature matrix to exactly `tokens` tokens.
+///
+/// Same rule as the tail of `extract_long_audio` — short output gains zero
+/// vectors, long output loses its tail — exposed for callers that learn the
+/// token count from somewhere other than the waveform. The asset lock learns
+/// it from the frame count.
+pub fn fit_feature_tokens(
+    matrix: FeatureMatrix,
+    tokens: usize,
+) -> Result<FeatureMatrix, AudioError> {
+    let dims = matrix.dims();
+    let target_values = tokens
+        .checked_mul(dims)
+        .ok_or(AudioError::FeatureSizeOverflow)?;
+    let mut values = matrix.into_values();
+    fit_values(&mut values, target_values);
+    FeatureMatrix::new(tokens, dims, values)
 }
 
 pub fn drop_odd_token(matrix: FeatureMatrix) -> FeatureMatrix {
@@ -55,5 +70,14 @@ pub fn drop_odd_token(matrix: FeatureMatrix) -> FeatureMatrix {
         let tokens = matrix.tokens() - 1;
         let values = matrix.values()[..tokens * matrix.dims()].to_vec();
         FeatureMatrix::new(tokens, matrix.dims(), values).expect("validated feature matrix")
+    }
+}
+
+/// Pad with zeros or truncate so that `values` holds exactly `target_values`.
+fn fit_values(values: &mut Vec<f32>, target_values: usize) {
+    if values.len() < target_values {
+        values.resize(target_values, 0.0);
+    } else {
+        values.truncate(target_values);
     }
 }

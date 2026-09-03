@@ -17,7 +17,7 @@ pub use format::{
     write_feature_file_no_clobber,
 };
 pub use normalize::normalize_waveform;
-pub use stitch::{ChunkEncoder, drop_odd_token, extract_long_audio};
+pub use stitch::{ChunkEncoder, drop_odd_token, extract_long_audio, fit_feature_tokens};
 pub use wav::{MAX_WAV_FILE_BYTES, WAV_SAMPLE_RATE, read_wav_16k_mono};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,5 +61,11 @@ impl FeatureMatrix {
     }
     pub fn values(&self) -> &[f32] {
         &self.values
+    }
+
+    /// Take the backing storage. `pub(crate)` because it is a stepping stone
+    /// for in-crate transforms, not part of the crate's public surface.
+    pub(crate) fn into_values(self) -> Vec<f32> {
+        self.values
     }
 }
