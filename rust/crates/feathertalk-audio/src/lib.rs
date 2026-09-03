@@ -4,6 +4,7 @@ mod error;
 mod format;
 mod normalize;
 mod stitch;
+mod wav;
 
 pub use chunk::{
     ChunkPlan, ChunkRange, DEFAULT_CHUNK_SAMPLES, HUBERT_KERNEL, HUBERT_STRIDE,
@@ -17,6 +18,7 @@ pub use format::{
 };
 pub use normalize::normalize_waveform;
 pub use stitch::{ChunkEncoder, drop_odd_token, extract_long_audio};
+pub use wav::{MAX_WAV_FILE_BYTES, WAV_SAMPLE_RATE, read_wav_16k_mono};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeatureMatrix {

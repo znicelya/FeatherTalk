@@ -2,6 +2,35 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AudioError {
+    #[error("wav I/O error during {operation} at {path}: {source}")]
+    WavIo {
+        operation: &'static str,
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("wav file is not a regular non-symlink file: {path}")]
+    WavNotRegular { path: std::path::PathBuf },
+    #[error("wav file exceeds {limit} bytes: {actual}")]
+    WavTooLarge { limit: u64, actual: u64 },
+    #[error("wav file is not a RIFF/WAVE container")]
+    InvalidRiffHeader,
+    #[error("wav header is invalid: {reason}")]
+    InvalidWavHeader { reason: String },
+    #[error("wav file is missing the {chunk:?} chunk")]
+    MissingWavChunk { chunk: &'static str },
+    #[error("unsupported wav format code {code}, expected 16-bit PCM")]
+    UnsupportedWavFormat { code: u16 },
+    #[error("unsupported wav channel count {actual}, expected mono")]
+    UnsupportedWavChannels { actual: u16 },
+    #[error("unsupported wav sample rate {actual}, expected {expected}")]
+    UnsupportedWavSampleRate { actual: u32, expected: u32 },
+    #[error("unsupported wav bit depth {actual}, expected 16")]
+    UnsupportedWavBitDepth { actual: u16 },
+    #[error("wav payload is truncated: expected {expected} bytes, got {actual}")]
+    WavPayloadTruncated { expected: u64, actual: u64 },
+    #[error("wav file has no samples")]
+    EmptyWav,
     #[error("waveform is empty")]
     EmptyWaveform,
     #[error("waveform contains a non-finite value at index {index}")]
