@@ -11,9 +11,9 @@ use feathertalk_training::TrainingError;
 use feathertalk_training_data::TrainingDataError;
 use feathertalk_worker::{
     audio_task_error, is_audio_cancellation, is_inference_cancellation, is_media_cancellation,
-    is_pipeline_cancellation, media_task_error, package_task_error, pipeline_task_error,
-    project_task_error, quality_task_error, render_task_error, training_data_task_error,
-    training_task_error,
+    is_pipeline_cancellation, legacy_task_error, media_task_error, package_task_error,
+    pipeline_task_error, project_task_error, quality_task_error, render_task_error,
+    training_data_task_error, training_task_error,
 };
 
 fn io_error(kind: io::ErrorKind) -> io::Error {
@@ -565,6 +565,18 @@ fn a_package_failure_names_the_hubert_variable() {
         "{}",
         mapped.detail
     );
+    mapped.validate().unwrap();
+}
+
+#[test]
+fn legacy_import_failures_use_the_reimport_recovery() {
+    let package = PackageError::InvalidRequest("synthetic".to_owned());
+    let detail = package.to_string();
+    let mapped = legacy_task_error(&detail, TaskStage::Importing);
+    assert_eq!(mapped.code, ErrorCode::ModelIncompatible);
+    assert_eq!(mapped.summary, "模型导入失败");
+    assert_eq!(mapped.stage, TaskStage::Importing);
+    assert_eq!(mapped.recovery, feathertalk_domain::Recovery::ReimportModel);
     mapped.validate().unwrap();
 }
 

@@ -1,4 +1,4 @@
-use std::io;
+use std::{fmt::Display, io};
 
 use feathertalk_audio::AudioError;
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskError, TaskStage};
@@ -110,6 +110,17 @@ pub fn package_task_error(error: &PackageError) -> TaskError {
         "特征模型加载失败",
         &clamp(&package_detail(error)),
         FAILURE_STAGE,
+    )
+}
+
+/// Maps a legacy model import or package publication failure onto the stable
+/// model recovery contract, preserving the phase in which it occurred.
+pub fn legacy_task_error(error: &impl Display, stage: TaskStage) -> TaskError {
+    TaskError::new(
+        ErrorCode::ModelIncompatible,
+        "模型导入失败",
+        &clamp(&error.to_string()),
+        stage,
     )
 }
 
