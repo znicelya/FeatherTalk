@@ -74,10 +74,10 @@ pub fn execute_import_legacy_model(
         .join(feathertalk_export::LICENSE_FILE_NAME);
     let result = match params.kind {
         LegacyModelKind::FeatherHubert => {
-            import_feather_hubert(params, &licenses, &created_at, config)
+            import_feather_hubert(params, &licenses, &created_at, config, token)
         }
         LegacyModelKind::OriginalUnet => {
-            import_original_unet(params, &licenses, &created_at, config)
+            import_original_unet(params, &licenses, &created_at, config, token)
         }
         LegacyModelKind::Pfld | LegacyModelKind::MobileOneUnet => Err(failure(
             TaskStage::Preparing,
@@ -98,6 +98,15 @@ pub fn execute_import_legacy_model(
 }
 
 fn validate_request(params: &ImportLegacyModelParams) -> Result<(), ImportLegacyModelError> {
+    if matches!(
+        params.kind,
+        LegacyModelKind::Pfld | LegacyModelKind::MobileOneUnet
+    ) {
+        return Err(failure(
+            TaskStage::Preparing,
+            "legacy model kind is not supported by the standard package writer",
+        ));
+    }
     let source = &params.source;
     if !source.is_absolute() {
         return Err(failure(
@@ -158,7 +167,11 @@ fn import_feather_hubert(
     licenses: &Path,
     created_at: &str,
     config: &WorkerConfig,
+    token: &CancellationToken,
 ) -> Result<serde_json::Value, ImportLegacyModelError> {
+    if token.is_cancelled() {
+        return Err(ImportLegacyModelError::Cancelled);
+    }
     let report = build_feather_hubert_package(&FeatherHubertPackageRequest {
         source: params.source.clone(),
         licenses: licenses.to_owned(),
@@ -184,6 +197,7 @@ fn import_original_unet(
     licenses: &Path,
     created_at: &str,
     config: &WorkerConfig,
+    token: &CancellationToken,
 ) -> Result<serde_json::Value, ImportLegacyModelError> {
     let device = Default::default();
     let model_config = OriginalUnetConfig::production();
@@ -197,6 +211,9 @@ fn import_original_unet(
         },
     )
     .map_err(|error| failure(TaskStage::Importing, error.to_string()))?;
+    if token.is_cancelled() {
+        return Err(ImportLegacyModelError::Cancelled);
+    }
     let file_name = source_file_name(&params.source)?;
     let source_version = legacy_version(&file_name)?;
     let package = write_model_package::<CpuBackend, _, _>(
