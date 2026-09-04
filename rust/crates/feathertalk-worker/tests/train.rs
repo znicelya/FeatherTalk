@@ -1,13 +1,16 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use burn::optim::AdamConfig;
-use feathertalk_domain::{ErrorCode, Progress, TaskStage, TrainingMode as DomainTrainingMode};
+use feathertalk_domain::{
+    ErrorCode, Progress, TaskStage, TrainParams, TrainingMode as DomainTrainingMode, UnetVariant,
+};
 use feathertalk_media::CancellationToken;
 use feathertalk_worker::{
-    CommandOutcome, TrainDevice, TrainingPaths, latest_checkpoint, run_training,
+    CommandOutcome, MAX_EPOCHS, TrainDevice, TrainingPaths, WorkerConfig, check_frame_count,
+    execute_train, latest_checkpoint, run_training,
 };
 use serde_json::{Value, json};
 
@@ -321,4 +324,112 @@ fn a_step_that_fails_reports_the_step_it_reached() {
         assert!(!paths.checkpoints().exists());
         assert_eq!(reporter.events().len(), 1);
     });
+}
+
+/// A config whose training toolchain points at an empty directory. Every
+/// admission test below fails long before the weights would be read.
+fn training_config(vgg19_dir: &Path) -> WorkerConfig {
+    WorkerConfig::from_values_with_training(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(vgg19_dir.display().to_string()),
+    )
+}
+
+fn train_params(project_dir: &Path, mode: DomainTrainingMode, epochs: u32) -> TrainParams {
+    TrainParams {
+        project_dir: project_dir.to_path_buf(),
+        mode,
+        variant: UnetVariant::OriginalUnet,
+        epochs,
+        resume: false,
+    }
+}
+
+/// A directory that gets past `check_project_dir`: absolute, a real directory,
+/// with a regular `project.json` inside. Nothing in it is locked.
+fn project_shell(root: &Path) -> PathBuf {
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.json"), "{}").unwrap();
+    project
+}
+
+#[test]
+fn a_relative_project_directory_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let config = training_config(root.path());
+    let training = config.training().expect("the directory exists");
+    let params = train_params(Path::new("project"), DomainTrainingMode::Baseline, 1);
+
+    let outcome = execute_train(
+        &params,
+        &CancellationToken::new(),
+        &Recorder::new(),
+        training,
+    );
+
+    let error = failed(outcome);
+    assert_eq!(error.code, ErrorCode::MediaInvalid);
+    assert_eq!(error.summary, "工程目录必须是绝对路径");
+}
+
+#[test]
+fn the_epoch_count_has_to_be_in_range() {
+    let root = tempfile::tempdir().unwrap();
+    let project = project_shell(root.path());
+    let config = training_config(root.path());
+    let training = config.training().expect("the directory exists");
+
+    for epochs in [0, MAX_EPOCHS + 1] {
+        let params = train_params(&project, DomainTrainingMode::Baseline, epochs);
+        let outcome = execute_train(
+            &params,
+            &CancellationToken::new(),
+            &Recorder::new(),
+            training,
+        );
+        let error = failed(outcome);
+        assert_eq!(error.summary, "训练轮数无效", "{epochs}");
+        assert_eq!(error.code, ErrorCode::MediaInvalid, "{epochs}");
+    }
+}
+
+#[test]
+fn a_project_without_a_locked_package_is_refused_by_the_dataset() {
+    let root = tempfile::tempdir().unwrap();
+    let project = project_shell(root.path());
+    let config = training_config(root.path());
+    let training = config.training().expect("the directory exists");
+    let reporter = Recorder::new();
+    let params = train_params(&project, DomainTrainingMode::Baseline, 1);
+
+    let outcome = execute_train(&params, &CancellationToken::new(), &reporter, training);
+
+    // `ProjectTrainingDataset::open` is the single place that enforces "extract,
+    // extract features, then lock"; the worker does not re-check it.
+    let error = failed(outcome);
+    assert_eq!(error.code, ErrorCode::MediaInvalid);
+    assert_eq!(error.stage, TaskStage::Preparing);
+    // The stage went out before the expensive part of admission started.
+    assert_eq!(reporter.events().len(), 1);
+    assert_eq!(reporter.events()[0].0, TaskStage::Preparing);
+}
+
+#[test]
+fn the_temporal_mode_needs_two_frames() {
+    // Checked through its own function: reaching it through `execute_train`
+    // needs a locked one-frame project, which would mean copying
+    // feathertalk-training-run's fixture into this crate for one assertion.
+    assert!(check_frame_count(DomainTrainingMode::Baseline, 1).is_ok());
+    assert!(check_frame_count(DomainTrainingMode::Temporal, 2).is_ok());
+
+    let error = check_frame_count(DomainTrainingMode::Temporal, 1)
+        .expect_err("one frame yields no temporal pair");
+    assert_eq!(error.summary, "帧数不足，无法做时序训练");
+    assert_eq!(error.code, ErrorCode::MediaInvalid);
 }

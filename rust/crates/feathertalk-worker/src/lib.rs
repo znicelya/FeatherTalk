@@ -54,7 +54,7 @@ pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;
 pub use reporter::{NoReporter, TaskReporter};
 pub use runtime::{JobExecutor, serve, serve_with_executor};
-pub use train::run_training;
+pub use train::{check_frame_count, execute_train, run_training};
 pub use train_result::{TrainSummary, train_to_json};
 pub use training::{
     DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, MAX_EPOCHS, TRAIN_BACKEND_NAME, TRAINING_SEED,

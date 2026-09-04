@@ -10,8 +10,9 @@ use feathertalk_project::validate_project_dir;
 
 use crate::{
     FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
-    execute_extract_frames, execute_lock_asset_package, is_media_cancellation, media_task_error,
-    normalize_to_json, package_task_error, pipeline_task_error, probe_to_json, project_task_error,
+    execute_extract_frames, execute_lock_asset_package, execute_train, is_media_cancellation,
+    media_task_error, normalize_to_json, package_task_error, pipeline_task_error, probe_to_json,
+    project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -148,6 +149,12 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 Err(error) => return CommandOutcome::Failed(package_task_error(&error)),
             };
             execute_lock_asset_package(params, token, reporter, &manifest.model.sha256)
+        }
+        Request::Train(params) => {
+            let Some(training) = config.training() else {
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            execute_train(params, token, reporter, training)
         }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
