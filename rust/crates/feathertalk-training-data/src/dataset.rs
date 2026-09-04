@@ -18,6 +18,12 @@ const FEATURE_FILE: &str = "assets/features/feather_hubert.f32";
 const FEATURE_DIMS: usize = 1024;
 const TOKENS_PER_FRAME: usize = 2;
 const INNER_SIZE: usize = 160;
+/// The four plane lengths the batch stackers assume, fixed by the tensor
+/// contract: `[6, 160, 160]`, `[16, 32, 32]`, `[3, 160, 160]`, `[1, 160, 160]`.
+const IMAGE_ELEMENTS: usize = 6 * INNER_SIZE * INNER_SIZE;
+const AUDIO_ELEMENTS: usize = 16 * 32 * 32;
+const TARGET_ELEMENTS: usize = 3 * INNER_SIZE * INNER_SIZE;
+const MOUTH_MASK_ELEMENTS: usize = INNER_SIZE * INNER_SIZE;
 
 /// One training frame, flattened into the planes the losses consume.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +35,31 @@ pub struct FrameSample {
 }
 
 impl FrameSample {
+    /// Assembles a frame sample from four already-flattened planes.
+    ///
+    /// `ProjectTrainingDataset` fills the fields directly from disk. This is for
+    /// callers that synthesise a sample instead -- the worker's training tests
+    /// drive the loop with a stub dataset, and every plane length the stackers
+    /// rely on is checked here so a wrong one fails at construction rather than
+    /// inside a tensor reshape.
+    pub fn new(
+        image: Vec<f32>,
+        audio: Vec<f32>,
+        target: Vec<f32>,
+        mouth_mask: Vec<f32>,
+    ) -> Result<Self, TrainingDataError> {
+        check_plane("image", image.len(), IMAGE_ELEMENTS)?;
+        check_plane("audio", audio.len(), AUDIO_ELEMENTS)?;
+        check_plane("target", target.len(), TARGET_ELEMENTS)?;
+        check_plane("mouth_mask", mouth_mask.len(), MOUTH_MASK_ELEMENTS)?;
+        Ok(Self {
+            image,
+            audio,
+            target,
+            mouth_mask,
+        })
+    }
+
     /// `[6, 160, 160]`: the reference frame's planes followed by the mouth-masked target planes.
     pub fn image(&self) -> &[f32] {
         &self.image
@@ -111,6 +142,18 @@ fn landmark_error(index: usize, path: &Path, message: String) -> TrainingDataErr
 
 fn sample_error(index: usize, message: String) -> TrainingDataError {
     TrainingDataError::Sample { index, message }
+}
+
+/// A synthesised sample has no frame index, so the error reports index 0 and
+/// names the plane instead.
+fn check_plane(plane: &str, actual: usize, expected: usize) -> Result<(), TrainingDataError> {
+    if actual == expected {
+        return Ok(());
+    }
+    Err(sample_error(
+        0,
+        format!("{plane} plane must hold {expected} values, got {actual}"),
+    ))
 }
 
 impl ProjectTrainingDataset<JpegFrameReader> {

@@ -233,3 +233,37 @@ fn a_temporal_pair_rejects_an_index_past_the_end() {
     let message = error.to_string();
     assert!(message.contains("frame index 9 is out of range for 4 frames"));
 }
+
+#[test]
+fn a_synthesised_frame_sample_keeps_the_four_planes() {
+    let sample = FrameSample::new(
+        vec![0.25; 6 * 160 * 160],
+        vec![0.5; 16 * 32 * 32],
+        vec![0.75; 3 * 160 * 160],
+        vec![1.0; 160 * 160],
+    )
+    .expect("the four planes match the tensor contract");
+
+    assert_eq!(sample.image().len(), 153_600);
+    assert_eq!(sample.audio().len(), 16_384);
+    assert_eq!(sample.target().len(), 76_800);
+    assert_eq!(sample.mouth_mask().len(), 25_600);
+    assert_eq!(sample.image().first().copied(), Some(0.25));
+    assert_eq!(sample.mouth_mask().last().copied(), Some(1.0));
+}
+
+#[test]
+fn a_plane_of_the_wrong_length_is_refused_by_name() {
+    let error = FrameSample::new(
+        vec![0.0; 6 * 160 * 160],
+        vec![0.0; 16 * 32 * 32],
+        vec![0.0; 3 * 160 * 160],
+        vec![0.0; 160],
+    )
+    .expect_err("a truncated mouth mask cannot be stacked into a batch");
+
+    let message = error.to_string();
+    assert!(message.contains("mouth_mask"), "{message}");
+    assert!(message.contains("25600"), "{message}");
+    assert!(message.contains("160"), "{message}");
+}
