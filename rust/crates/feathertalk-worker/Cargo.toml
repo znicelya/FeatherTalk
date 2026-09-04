@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+burn = { workspace = true }
 feathertalk-audio = { path = "../feathertalk-audio" }
 feathertalk-domain = { path = "../feathertalk-domain" }
 feathertalk-export = { path = "../feathertalk-export" }
@@ -17,11 +18,12 @@ feathertalk-pfld = { path = "../feathertalk-pfld" }
 feathertalk-project = { path = "../feathertalk-project" }
 feathertalk-training = { path = "../feathertalk-training" }
 feathertalk-training-data = { path = "../feathertalk-training-data" }
+feathertalk-training-run = { path = "../feathertalk-training-run" }
+hex = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
-hex = { workspace = true }
-sha2 = { workspace = true }
 tempfile = { workspace = true }

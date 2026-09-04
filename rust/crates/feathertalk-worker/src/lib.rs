@@ -25,6 +25,7 @@ mod probe_result;
 mod quality_result;
 mod reporter;
 mod runtime;
+mod training;
 
 pub use adapters::{AdapterLockError, AdapterLocks};
 pub use commands::{CommandOutcome, execute, execute_with_runner};
@@ -51,3 +52,8 @@ pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;
 pub use reporter::{NoReporter, TaskReporter};
 pub use runtime::{JobExecutor, serve, serve_with_executor};
+pub use training::{
+    DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, MAX_EPOCHS, TRAIN_BACKEND_NAME, TRAINING_SEED,
+    TrainBackend, TrainDevice, TrainingPaths, TrainingPlan, WORKER_STATE, checkpoint_descriptor,
+    sample_count, training_config, training_mode,
+};
