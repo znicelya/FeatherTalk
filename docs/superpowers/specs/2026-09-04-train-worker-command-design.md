@@ -12,6 +12,7 @@
 本切片范围内的改动：
 
 - `feathertalk-worker`：新增 `training.rs`（后端别名、模型与描述符装配、检查点发布、遥测落盘）、`train.rs`（命令编排）、`train_result.rs`（结果载荷）；`config.rs` 新增 `ENV_VGG19_DIR` 与 `TrainingToolchain`；`handshake.rs` 宣告 `Train` 与 `Capabilities.training`；`runtime.rs` 增加拒绝文案并把执行线程的栈提到 64 MiB；`error_map.rs` 新增 `training_task_error` 与 `training_data_task_error`；`Cargo.toml` 新增 `feathertalk-training`、`feathertalk-training-data`、`feathertalk-training-run`、`burn` 依赖，并把 `hex`、`sha2` 从 dev-dependencies 提为正式依赖。
+- `feathertalk-training-data`：新增 `FrameSample::new`，校验四个平面的长度（`[6, 160, 160]`、`[16, 32, 32]`、`[3, 160, 160]`、`[1, 160, 160]`）。worker 的单元测试要构造 `TrainingItem`，而 `FrameSample` 的四个字段是私有的、只有 `ProjectTrainingDataset` 能填；没有这个构造函数，worker 就得把 `feathertalk-training-run/tests/fixture/mod.rs` 那套 180 行加锁工程夹具复制一遍，把编排层的测试绑死在另一个 crate 的磁盘格式上。
 - `feathertalk-cli`：新增 `train` 子命令、对应的 `build_request` 分支与 `UnsupportedCommand` 提示分支。
 
 一个直接结论：本命令只需要 `FEATHERTALK_WORKER_VGG19_DIR` 一个新环境变量，不需要 ffmpeg、SCRFD、PFLD 或 HuBERT——帧、关键点与音频特征都已经在加锁后的工程目录里（见 §11）。
@@ -349,7 +350,7 @@ feathertalk train <PROJECT_DIR> --mode <MODE> --variant <VARIANT> --epochs <N> [
 
 `feathertalk-worker`（新增 `tests/train.rs`、`tests/train_result.rs`）：
 
-- 成功路径：桩数据集（8 帧）、`parity_micro` 模型、常量提取器、`epochs = 2`，断言检查点目录名、指标文件数、预览目录数与结果载荷各字段；
+- 成功路径：桩数据集（8 帧，样本由 `FrameSample::new` 合成）、`parity_micro` 模型、常量提取器、`epochs = 2`，断言检查点目录名、指标文件数、预览目录数与结果载荷各字段；
 - 续训：先跑 1 个 epoch，再用 `resume = true` 跑同样的配置，断言 `global_step` 从检查点接上、`resumed_from` 指向那个目录；
 - 描述符不匹配：改掉 `model_config_sha256` 后续训，断言 `MODEL_INCOMPATIBLE`；
 - 名字撞车：预置一个同名 `checkpoint-*` 目录，断言发布例程把它退休并写入新内容；
