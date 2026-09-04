@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use feathertalk_worker::{ENV_HUBERT_DIR, WorkerConfig};
+use feathertalk_worker::{ENV_HUBERT_DIR, ENV_VGG19_DIR, WorkerConfig};
 
 fn absolute(name: &str) -> String {
     std::env::current_dir()
@@ -121,4 +121,67 @@ fn the_feature_toolchain_is_resolved_independently_of_the_models() {
     assert!(config.features().is_none());
     let rejection = config.feature_rejection().expect("a reason is kept");
     assert!(rejection.contains("is not set"), "{rejection}");
+}
+
+fn with_vgg19(vgg19_dir: Option<String>) -> WorkerConfig {
+    WorkerConfig::from_values_with_training(None, None, None, None, None, None, vgg19_dir)
+}
+
+#[test]
+fn an_absolute_directory_resolves_the_training_toolchain() {
+    let config = with_vgg19(Some(absolute("vgg19")));
+
+    let training = config.training().expect("an absolute directory resolves");
+    assert_eq!(training.vgg19_dir(), PathBuf::from(absolute("vgg19")));
+    assert_eq!(config.training_rejection(), None);
+    // Training shares nothing with the other toolchains.
+    assert!(config.media().is_none());
+    assert!(config.models().is_none());
+    assert!(config.features().is_none());
+}
+
+#[test]
+fn a_missing_vgg19_directory_rejects_the_training_toolchain() {
+    let config = with_vgg19(None);
+
+    assert!(config.training().is_none());
+    let rejection = config.training_rejection().expect("a reason is kept");
+    assert!(rejection.contains(ENV_VGG19_DIR), "{rejection}");
+}
+
+#[test]
+fn a_relative_vgg19_directory_is_rejected_with_the_variable_name() {
+    let config = with_vgg19(Some("artifacts/vgg19".to_owned()));
+
+    assert!(config.training().is_none());
+    let rejection = config.training_rejection().expect("a reason is kept");
+    assert!(rejection.contains(ENV_VGG19_DIR), "{rejection}");
+    assert!(rejection.contains("absolute"), "{rejection}");
+}
+
+#[test]
+fn an_empty_vgg19_directory_is_rejected() {
+    let config = with_vgg19(Some("   ".to_owned()));
+
+    assert!(
+        config
+            .training_rejection()
+            .is_some_and(|reason| reason.contains(ENV_VGG19_DIR))
+    );
+}
+
+#[test]
+fn the_toolchain_constructor_leaves_training_unconfigured() {
+    let config = WorkerConfig::from_values_with_toolchains(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(absolute("feather_hubert")),
+    );
+
+    assert!(config.features().is_some());
+    assert!(config.training().is_none());
+    assert_eq!(ENV_VGG19_DIR, "FEATHERTALK_WORKER_VGG19_DIR");
 }

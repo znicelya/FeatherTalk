@@ -29,7 +29,8 @@ pub use adapters::{AdapterLockError, AdapterLocks};
 pub use commands::{CommandOutcome, execute, execute_with_runner};
 pub use config::{
     DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFMPEG, ENV_FFPROBE, ENV_HUBERT_DIR, ENV_MEDIA_TIMEOUT_MS,
-    ENV_PFLD_DIR, ENV_SCRFD_DIR, FeatureToolchain, ModelToolchain, WorkerConfig,
+    ENV_PFLD_DIR, ENV_SCRFD_DIR, ENV_VGG19_DIR, FeatureToolchain, ModelToolchain,
+    TrainingToolchain, WorkerConfig,
 };
 pub use error_map::{
     audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
