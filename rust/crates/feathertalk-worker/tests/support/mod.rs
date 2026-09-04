@@ -1,35 +1,48 @@
 #![allow(dead_code)]
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use burn::{
     module::Module,
+    optim::AdamConfig,
     tensor::{Tensor, backend::Backend},
 };
 use feathertalk_audio::{FeatureMatrix, write_feature_file};
 use feathertalk_domain::{
     Progress, TaskStage, TrainParams, TrainingMode as DomainTrainingMode, UnetVariant,
 };
-use feathertalk_export::ModelConfiguration;
+use feathertalk_export::{
+    LicenseBundle, LicenseEntry, ModelConfiguration, ModelDescription, PackageBuildRequest,
+    SourceManifest, TrainingManifest, write_model_package,
+};
 use feathertalk_inference::{
     BgrFrame, CommandSpec, FrameReader, InferenceError, RawVideoSink, RawVideoSinkFactory,
 };
 use feathertalk_media::CancellationToken;
-use feathertalk_models::unet::{OriginalUnet, OriginalUnetConfig};
+use feathertalk_models::{
+    feather_hubert::{FeatherHubertConfig, FeatherHubertEncoder},
+    unet::{OriginalUnet, OriginalUnetConfig},
+};
 use feathertalk_project::{
     AssetManifest, AssetPackageState, FeatureType, ModelSelection, ProjectManifest,
     TaskHistoryEntry, TaskHistoryStatus, lock_asset_package, write_project_manifest_atomic,
 };
 use feathertalk_training::{
-    PerceptualFeatureExtractor, TrainingDataset, TrainingError, TrainingSample,
+    CheckpointDescriptor, DATA_LOADER_STATE_SCHEMA_VERSION, DataLoaderConfig, DataLoaderState,
+    PerceptualFeatureExtractor, Provenance, RandomAlgorithm, SamplingConfig, SamplingKind,
+    TRAINING_STATE_SCHEMA_VERSION, TrainingCheckpointState, TrainingDataset, TrainingError,
+    TrainingSample, save_training_checkpoint,
 };
 use feathertalk_training_data::{FrameSample, TrainingItem};
 use feathertalk_worker::{
-    RenderBackend, RenderDevice, TaskReporter, TrainBackend, TrainDevice, TrainingPaths,
-    TrainingPlan, checkpoint_descriptor, project_assets, training_config,
+    RenderBackend, RenderDevice, TRAINING_SEED, TaskReporter, TrainBackend, TrainDevice,
+    TrainingPaths, TrainingPlan, checkpoint_descriptor, project_assets, training_config,
 };
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 /// A 160x160 forward plus backward through burn's autodiff graph overruns the
@@ -413,4 +426,122 @@ pub fn render_model(device: &RenderDevice) -> OriginalUnet<RenderBackend> {
     OriginalUnetConfig::parity_micro()
         .init::<RenderBackend>(device)
         .fork(device)
+}
+
+/// Publishes a micro FeatherHuBERT package under `root/{name}` and returns it.
+///
+/// Ported from `tests/features.rs::published_package` with the minimum app
+/// version as a parameter, because compatibility is exactly what varies here.
+/// The real writer rather than hand-written files: the manifest declares the size
+/// and digest of everything beside it, and only the writer makes them agree.
+pub fn published_package(root: &Path, name: &str, minimum_app_version: &str) -> PathBuf {
+    let source_name = format!("{name}-source.pth");
+    let source_path = root.join(&source_name);
+    fs::write(&source_path, b"source-fixture").expect("the source fixture is written");
+    let source_sha256 = hex::encode(Sha256::digest(b"source-fixture"));
+    let licenses_path = root.join(format!("{name}-LICENSES.input.json"));
+    let licenses = LicenseBundle {
+        schema_version: 1,
+        entries: vec![LicenseEntry {
+            component: "synthetic FeatherHuBERT fixture".to_owned(),
+            license_id: "LicenseRef-Test".to_owned(),
+            source_url: "https://example.invalid/feather-hubert".to_owned(),
+            notice: "test-only local record".to_owned(),
+        }],
+    };
+    fs::write(
+        &licenses_path,
+        serde_json::to_vec(&licenses).expect("the bundle serialises"),
+    )
+    .expect("the licenses fixture is written");
+    let config = FeatherHubertConfig::parity_micro();
+    let device = RenderDevice::default();
+    let model = config.init::<RenderBackend>(&device);
+    let request = PackageBuildRequest {
+        destination: root.join(name),
+        description: ModelDescription::feather_hubert(config.clone()),
+        source_path,
+        source: SourceManifest {
+            format: "test".to_owned(),
+            identifier: "feather-hubert-fixture".to_owned(),
+            version: "1".to_owned(),
+            file_name: source_name,
+            sha256: source_sha256,
+            url: None,
+        },
+        licenses_path,
+        created_at: "2026-08-27T00:00:00Z".to_owned(),
+        minimum_app_version: minimum_app_version.to_owned(),
+        training: TrainingManifest::default(),
+    };
+    write_model_package::<RenderBackend, FeatherHubertEncoder<RenderBackend>, _>(
+        &request,
+        &model,
+        &device,
+        |device| config.init::<RenderBackend>(device),
+    )
+    .expect("the package is written");
+    request.destination
+}
+
+/// The training state a checkpoint carries.
+///
+/// A copy of the private `state()` in `tests/render.rs`: every field is one
+/// `TrainingCheckpointState::validate` insists on, and the three cross-checked
+/// values come from `training_config` rather than from a literal. `tests/render.rs`
+/// keeps its own copy -- folding them together would mean re-verifying a committed
+/// test for no change in behaviour.
+pub fn checkpoint_state(project_dir: &Path, frame_count: u64) -> TrainingCheckpointState {
+    let params = TrainParams {
+        project_dir: project_dir.to_path_buf(),
+        mode: DomainTrainingMode::Baseline,
+        variant: UnetVariant::OriginalUnet,
+        epochs: 1,
+        resume: false,
+    };
+    let config = training_config(&params);
+    let batch_size = config.batch_size;
+    let temporal_stride = config.temporal_stride;
+    TrainingCheckpointState {
+        schema_version: TRAINING_STATE_SCHEMA_VERSION,
+        epoch: 1,
+        global_step: 2,
+        random_seed: TRAINING_SEED,
+        data_loader: DataLoaderState {
+            schema_version: DATA_LOADER_STATE_SCHEMA_VERSION,
+            random_algorithm: RandomAlgorithm::Splitmix64FisherYatesV1,
+            config: DataLoaderConfig {
+                batch_size,
+                seed: TRAINING_SEED,
+                sampling: SamplingConfig {
+                    kind: SamplingKind::SingleFrame,
+                    temporal_stride,
+                },
+            },
+            frame_count,
+            epoch: 1,
+            next_position: 0,
+        },
+        training_config: config,
+        asset_provenance: Provenance {
+            entries: BTreeMap::new(),
+        },
+        model_provenance: Provenance {
+            entries: BTreeMap::new(),
+        },
+    }
+}
+
+/// Writes a real checkpoint whose manifest carries `descriptor`. `directory` must
+/// not exist: `save_training_checkpoint` creates it.
+pub fn write_checkpoint(directory: &Path, descriptor: CheckpointDescriptor) {
+    let device = TrainDevice::default();
+    save_training_checkpoint::<TrainBackend, _, _>(
+        directory,
+        &model(&device),
+        &AdamConfig::new().init(),
+        descriptor,
+        checkpoint_state(directory, 2),
+    )
+    .expect("the checkpoint is written");
 }

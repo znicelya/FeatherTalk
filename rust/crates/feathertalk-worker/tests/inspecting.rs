@@ -4,7 +4,17 @@ use std::{
 };
 
 use feathertalk_domain::{ErrorCode, TaskStage};
-use feathertalk_worker::{ModelSourceKind, model_source_kind};
+use feathertalk_export::read_package_manifest;
+use feathertalk_training::{CheckpointDescriptor, read_training_checkpoint};
+use feathertalk_worker::{
+    ModelSourceKind, checkpoint_descriptor, checkpoint_files, checkpoint_incompatibilities,
+    model_source_kind, package_files, package_incompatibilities, render_variant,
+};
+
+#[path = "support/mod.rs"]
+mod support;
+
+use support::{published_package, write_checkpoint};
 
 /// Classification never opens a file, so every fixture is a one-byte placeholder.
 fn touch(path: &Path) {
@@ -94,5 +104,129 @@ fn both_kinds_have_a_stable_slug() {
     assert_eq!(
         ModelSourceKind::TrainingCheckpoint.as_slug(),
         "training_checkpoint"
+    );
+}
+
+#[test]
+fn a_package_this_build_satisfies_is_compatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = published_package(root.path(), "package", "0.1.0");
+    let manifest = read_package_manifest(&dir).expect("the package is readable");
+    let files = package_files(&dir, &manifest);
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].file_name, "model.safetensors");
+    assert_eq!(files[1].file_name, "LICENSES.json");
+    assert!(files.iter().all(|file| file.agrees()));
+    assert!(package_incompatibilities(&manifest, &files, "0.1.0").is_empty());
+}
+
+#[test]
+fn a_package_that_wants_a_newer_app_is_incompatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = published_package(root.path(), "package", "9.9.9");
+    let manifest = read_package_manifest(&dir).expect("the package is readable");
+    let files = package_files(&dir, &manifest);
+    assert_eq!(
+        package_incompatibilities(&manifest, &files, "0.1.0"),
+        vec!["minimum_app_version"]
+    );
+}
+
+#[test]
+fn an_unparseable_worker_version_is_incompatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = published_package(root.path(), "package", "0.1.0");
+    let manifest = read_package_manifest(&dir).expect("the package is readable");
+    let files = package_files(&dir, &manifest);
+    // Refusing to guess is the honest answer: a version this code cannot read is
+    // not a version it can claim to satisfy.
+    assert_eq!(
+        package_incompatibilities(&manifest, &files, "0.1"),
+        vec!["minimum_app_version"]
+    );
+}
+
+#[test]
+fn a_truncated_model_file_is_reported_by_size() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = published_package(root.path(), "package", "0.1.0");
+    let manifest = read_package_manifest(&dir).expect("the package is readable");
+    fs::write(dir.join("model.safetensors"), b"truncated").expect("the model is truncated");
+    let files = package_files(&dir, &manifest);
+    assert!(!files[0].agrees());
+    assert_eq!(
+        package_incompatibilities(&manifest, &files, "0.1.0"),
+        vec!["file_size"]
+    );
+}
+
+#[test]
+fn a_checkpoint_this_build_can_rebuild_is_compatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = root.path().join("checkpoint");
+    let variant = render_variant("original_unet").expect("the kind is known");
+    let descriptor =
+        checkpoint_descriptor(&variant.configuration()).expect("the descriptor is computed");
+    write_checkpoint(&dir, descriptor);
+    let checkpoint = read_training_checkpoint(&dir).expect("the checkpoint is readable");
+    let files = checkpoint_files(&dir, &checkpoint.manifest);
+    assert_eq!(files.len(), 3);
+    assert_eq!(files[0].file_name, "model.bin");
+    assert_eq!(files[1].file_name, "optimizer.bin");
+    assert_eq!(files[2].file_name, "training-state.json");
+    assert!(checkpoint_incompatibilities(&checkpoint.manifest, &files).is_empty());
+}
+
+#[test]
+fn a_checkpoint_of_an_unknown_kind_is_incompatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = root.path().join("checkpoint");
+    write_checkpoint(
+        &dir,
+        CheckpointDescriptor::new("legacy_unet", "v1", "0".repeat(64)),
+    );
+    let checkpoint = read_training_checkpoint(&dir).expect("the checkpoint is readable");
+    let files = checkpoint_files(&dir, &checkpoint.manifest);
+    // The kind decides which configuration to compare against, so an unknown kind
+    // is the only reason reported: the rest cannot be computed.
+    assert_eq!(
+        checkpoint_incompatibilities(&checkpoint.manifest, &files),
+        vec!["model_kind"]
+    );
+}
+
+#[test]
+fn a_checkpoint_of_another_architecture_is_incompatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = root.path().join("checkpoint");
+    let variant = render_variant("original_unet").expect("the kind is known");
+    let mine = checkpoint_descriptor(&variant.configuration()).expect("the descriptor is computed");
+    write_checkpoint(
+        &dir,
+        CheckpointDescriptor::new("original_unet", "unet-burn-v0", &mine.model_config_sha256),
+    );
+    let checkpoint = read_training_checkpoint(&dir).expect("the checkpoint is readable");
+    let files = checkpoint_files(&dir, &checkpoint.manifest);
+    assert_eq!(
+        checkpoint_incompatibilities(&checkpoint.manifest, &files),
+        vec!["architecture_version"]
+    );
+}
+
+#[test]
+fn a_checkpoint_of_another_configuration_is_incompatible() {
+    let root = tempfile::tempdir().expect("the temporary root is created");
+    let dir = root.path().join("checkpoint");
+    let variant = render_variant("original_unet").expect("the kind is known");
+    let mine = checkpoint_descriptor(&variant.configuration()).expect("the descriptor is computed");
+    write_checkpoint(
+        &dir,
+        CheckpointDescriptor::new("original_unet", &mine.architecture_version, "0".repeat(64)),
+    );
+    let checkpoint = read_training_checkpoint(&dir).expect("the checkpoint is readable");
+    let files = checkpoint_files(&dir, &checkpoint.manifest);
+    assert_eq!(
+        checkpoint_incompatibilities(&checkpoint.manifest, &files),
+        vec!["model_config_sha256"]
     );
 }

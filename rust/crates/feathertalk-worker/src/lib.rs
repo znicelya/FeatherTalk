@@ -51,7 +51,10 @@ pub use extract_frames::execute_extract_frames;
 pub use feature_result::feature_to_json;
 pub use features::FeatureModel;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
-pub use inspecting::{ModelSourceKind, model_source_kind};
+pub use inspecting::{
+    InspectedFile, ModelSourceKind, checkpoint_files, checkpoint_incompatibilities,
+    model_source_kind, package_files, package_incompatibilities,
+};
 pub use lock_asset_package::execute_lock_asset_package;
 pub use lock_result::lock_to_json;
 pub use models::FrameModels;
