@@ -22,7 +22,11 @@ pub fn cpu_adapter() -> AdapterInfo {
 pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
     // Neither command needs a toolchain: one walks a project directory, the
     // other reads a model manifest, so both are always available.
-    let mut commands = vec![TaskKind::ValidateProject, TaskKind::InspectModel];
+    let mut commands = vec![
+        TaskKind::ValidateProject,
+        TaskKind::InspectModel,
+        TaskKind::ImportLegacyModel,
+    ];
     // Both media commands shell out to the same two binaries, so they are
     // available together or not at all.
     if config.media().is_some() {

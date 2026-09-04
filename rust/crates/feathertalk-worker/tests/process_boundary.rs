@@ -39,7 +39,11 @@ fn the_binary_announces_itself_and_exits_zero_on_shutdown() {
     // environment can offer.
     assert_eq!(
         ready.supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
+        ]
     );
 
     let shutdown = ClientFrame::Shutdown(ShutdownFrame {

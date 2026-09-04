@@ -41,6 +41,7 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render
@@ -66,10 +67,25 @@ fn a_worker_without_a_media_toolchain_only_offers_the_toolchain_free_commands() 
     // Inspection reads manifests, so it is announced with no toolchain at all.
     assert_eq!(
         frame.supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
+        ]
     );
     assert!(!frame.capabilities.ffmpeg);
-    assert_eq!(supported_commands(&config).len(), 2);
+    assert_eq!(supported_commands(&config).len(), 3);
+}
+
+#[test]
+fn a_worker_always_announces_legacy_model_import() {
+    let config = WorkerConfig::from_values(None, None, None);
+    assert!(supported_commands(&config).contains(&TaskKind::ImportLegacyModel));
+    assert!(
+        ready_frame(&config)
+            .supported_commands
+            .contains(&TaskKind::ImportLegacyModel)
+    );
 }
 
 #[test]
@@ -152,6 +168,7 @@ fn a_fully_configured_worker_offers_extract_frames() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -187,7 +204,11 @@ fn models_without_a_media_toolchain_offer_nothing_new() {
     assert!(config.models().is_some());
     assert_eq!(
         supported_commands(&config),
-        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
+        ]
     );
 }
 
@@ -215,6 +236,7 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -253,6 +275,7 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage
         ]
@@ -284,6 +307,7 @@ fn a_worker_with_a_vgg19_package_offers_train() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::Train
         ]
     );
@@ -313,6 +337,7 @@ fn every_toolchain_plus_vgg19_offers_every_command() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
+            TaskKind::ImportLegacyModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
