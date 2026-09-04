@@ -2772,6 +2772,7 @@ dependencies = [
  "feathertalk-export",
  "feathertalk-frame-adapters",
  "feathertalk-frame-pipeline",
+ "feathertalk-inference",
  "feathertalk-media",
  "feathertalk-models",
  "feathertalk-pfld",

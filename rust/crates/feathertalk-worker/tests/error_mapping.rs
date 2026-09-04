@@ -4,14 +4,16 @@ use feathertalk_audio::AudioError;
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskStage};
 use feathertalk_export::PackageError;
 use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError, RecoveryAction};
+use feathertalk_inference::InferenceError;
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
 use feathertalk_training::TrainingError;
 use feathertalk_training_data::TrainingDataError;
 use feathertalk_worker::{
-    audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
-    media_task_error, package_task_error, pipeline_task_error, project_task_error,
-    quality_task_error, training_data_task_error, training_task_error,
+    audio_task_error, is_audio_cancellation, is_inference_cancellation, is_media_cancellation,
+    is_pipeline_cancellation, media_task_error, package_task_error, pipeline_task_error,
+    project_task_error, quality_task_error, render_task_error, training_data_task_error,
+    training_task_error,
 };
 
 fn io_error(kind: io::ErrorKind) -> io::Error {
@@ -753,4 +755,287 @@ fn every_training_data_error_maps_to_a_code_and_a_valid_payload() {
         assert!(!mapped.summary.trim().is_empty(), "{error:?}");
         mapped.validate().unwrap();
     }
+}
+
+/// One row per `InferenceError` variant, in the declaration order of
+/// `feathertalk-inference/src/error.rs`. A `Vec` gives no exhaustiveness check,
+/// so a forgotten row here is a mapping nobody ever ran.
+#[test]
+fn every_inference_error_maps_to_a_render_task_error() {
+    let stage = TaskStage::Rendering { frame: 3, total: 8 };
+    let cases: Vec<(InferenceError, ErrorCode)> = vec![
+        (
+            InferenceError::InvalidInputDirectory {
+                field: "frame_dir",
+                path: path(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::InvalidInputArtifact {
+                field: "landmark_path",
+                path: path(),
+                message: "bad".to_owned(),
+            },
+            ErrorCode::LandmarkInvalid,
+        ),
+        (
+            InferenceError::InvalidInputArtifact {
+                field: "feature_path",
+                path: path(),
+                message: "bad".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::FrameIndexOutOfRange { index: 4, count: 2 },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::FrameDimensionsMismatch {
+                index: 1,
+                expected_width: 1280,
+                expected_height: 720,
+                actual_width: 640,
+                actual_height: 480,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::FrameReader {
+                index: 0,
+                path: path(),
+                message: "decode".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::SinkStart {
+                message: "spawn".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::SinkWrite {
+                message: "broken pipe".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::SinkFinish {
+                message: "exit".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::StagingCollision { path: path() },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::StagingOutputInvalid {
+                path: path(),
+                message: "empty".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::AtomicPublishFailed {
+                path: path(),
+                message: "rename".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::ToolFailed {
+                operation: "render",
+                exit_code: Some(1),
+                stderr: "ffmpeg".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::FrameCountTooSmall {
+                actual: 1,
+                minimum: 2,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (InferenceError::EmptyFeatures, ErrorCode::MediaInvalid),
+        (
+            InferenceError::OutputFrameOutOfRange { index: 9, count: 2 },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::InvalidField {
+                field: "task_id",
+                message: "empty".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (InferenceError::ArithmeticOverflow, ErrorCode::MediaInvalid),
+        (
+            InferenceError::OutputExists { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::OutputNotRegular { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::OutputSymlink { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::OutputParentInvalid { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::InvalidTaskId {
+                task_id: "..".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::FfmpegPathNotAbsolute { path: path() },
+            ErrorCode::MediaInvalid,
+        ),
+        (InferenceError::EmptyFfmpegPath, ErrorCode::MediaInvalid),
+        (
+            InferenceError::InvalidFrameDimensions {
+                width: 0,
+                height: 720,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::FrameBufferLengthMismatch {
+                expected: 100,
+                actual: 99,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::PixelOutOfRange {
+                x: 9,
+                y: 9,
+                width: 4,
+                height: 4,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::InvalidBbox {
+                xmin: 4,
+                ymin: 4,
+                xmax: 0,
+                ymax: 0,
+                frame_width: 8,
+                frame_height: 8,
+            },
+            ErrorCode::LandmarkInvalid,
+        ),
+        (
+            InferenceError::InvalidResizeTarget {
+                width: 0,
+                height: 0,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::TensorShapeMismatch {
+                context: "audio",
+                expected: vec![1, 32, 32, 32],
+                actual: vec![1, 2, 3, 4],
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::InvalidFeatureShape {
+                tokens: 3,
+                dims: 1024,
+            },
+            ErrorCode::FeatureShapeMismatch,
+        ),
+        (
+            InferenceError::InvalidAudioWindowIndex {
+                slot: 1,
+                index: 9,
+                frame_count: 2,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::NonFiniteModelInput {
+                context: "reference",
+                index: 7,
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::ModelTensorData {
+                context: "prediction",
+                message: "read".to_owned(),
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::NonFiniteModelOutput { index: 3 },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::ModelOutputOutOfRange {
+                index: 3,
+                value: 1.5,
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::NonFinitePrediction { index: 2 },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            InferenceError::PasteOutOfBounds {
+                x: 9,
+                y: 9,
+                source_width: 4,
+                source_height: 4,
+                destination_width: 2,
+                destination_height: 2,
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            InferenceError::AllocationFailure { bytes: 1 << 40 },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            InferenceError::Cancelled {
+                operation: "render",
+            },
+            ErrorCode::TaskCancelled,
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let mapped = render_task_error(&error, stage.clone());
+        assert_eq!(mapped.code, expected, "{error:?}");
+        mapped.validate().unwrap();
+        assert!(!mapped.summary.trim().is_empty(), "{error:?}");
+        // Summaries are user-facing, so they are Chinese, never English.
+        assert!(!mapped.summary.is_ascii(), "{}", mapped.summary);
+        assert!(!mapped.detail.trim().is_empty(), "{error:?}");
+        // The stage is the caller's, echoed rather than replaced.
+        assert_eq!(mapped.stage, stage, "{error:?}");
+    }
+}
+
+#[test]
+fn only_a_cancelled_render_counts_as_a_cancellation() {
+    assert!(is_inference_cancellation(&InferenceError::Cancelled {
+        operation: "render",
+    }));
+    assert!(!is_inference_cancellation(&InferenceError::EmptyFeatures));
+    assert!(!is_inference_cancellation(
+        &InferenceError::ArithmeticOverflow
+    ));
 }

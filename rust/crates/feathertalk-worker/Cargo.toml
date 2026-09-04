@@ -12,6 +12,7 @@ feathertalk-domain = { path = "../feathertalk-domain" }
 feathertalk-export = { path = "../feathertalk-export" }
 feathertalk-frame-adapters = { path = "../feathertalk-frame-adapters" }
 feathertalk-frame-pipeline = { path = "../feathertalk-frame-pipeline" }
+feathertalk-inference = { path = "../feathertalk-inference" }
 feathertalk-media = { path = "../feathertalk-media" }
 feathertalk-models = { path = "../feathertalk-models" }
 feathertalk-pfld = { path = "../feathertalk-pfld" }

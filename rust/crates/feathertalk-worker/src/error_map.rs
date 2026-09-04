@@ -4,6 +4,7 @@ use feathertalk_audio::AudioError;
 use feathertalk_domain::{ErrorCode, MAX_DETAIL_CHARS, TaskError, TaskStage};
 use feathertalk_export::PackageError;
 use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError};
+use feathertalk_inference::InferenceError;
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
 use feathertalk_training::TrainingError;
@@ -516,4 +517,129 @@ fn io_summary(source: &io::Error) -> &'static str {
 /// on a character boundary.
 pub(crate) fn clamp(detail: &str) -> String {
     detail.chars().take(MAX_DETAIL_CHARS).collect()
+}
+
+/// The `field` name inference uses for the landmark artifact. It is the one
+/// input whose failure the protocol reports as a landmark problem rather than a
+/// generic media problem.
+const LANDMARK_FIELD: &str = "landmark_path";
+
+/// Maps an inference failure onto the wire, keeping the stage the render was in
+/// when it happened.
+pub fn render_task_error(error: &InferenceError, stage: TaskStage) -> TaskError {
+    TaskError::new(
+        inference_error_code(error),
+        inference_summary(error),
+        &clamp(&error.to_string()),
+        stage,
+    )
+}
+
+/// True when the render stopped because the task was cancelled, which the
+/// command reports as `CommandOutcome::Cancelled` rather than as a failure.
+pub fn is_inference_cancellation(error: &InferenceError) -> bool {
+    matches!(error, InferenceError::Cancelled { .. })
+}
+
+/// Exhaustive on purpose: a new inference failure has to be classified here
+/// rather than defaulting to `MediaInvalid` through a `_` arm.
+fn inference_error_code(error: &InferenceError) -> ErrorCode {
+    match error {
+        // The guard comes first: a landmark file that will not parse is the
+        // client's data problem, and the protocol has a code that says so.
+        InferenceError::InvalidInputArtifact { field, .. } if *field == LANDMARK_FIELD => {
+            ErrorCode::LandmarkInvalid
+        }
+        InferenceError::InvalidBbox { .. } => ErrorCode::LandmarkInvalid,
+        InferenceError::InvalidFeatureShape { .. } => ErrorCode::FeatureShapeMismatch,
+        InferenceError::InvalidInputDirectory { .. }
+        | InferenceError::InvalidInputArtifact { .. }
+        | InferenceError::InvalidField { .. }
+        | InferenceError::ArithmeticOverflow
+        | InferenceError::OutputExists { .. }
+        | InferenceError::OutputNotRegular { .. }
+        | InferenceError::OutputSymlink { .. }
+        | InferenceError::OutputParentInvalid { .. }
+        | InferenceError::InvalidTaskId { .. }
+        | InferenceError::FfmpegPathNotAbsolute { .. }
+        | InferenceError::EmptyFfmpegPath
+        | InferenceError::FrameCountTooSmall { .. }
+        | InferenceError::EmptyFeatures
+        | InferenceError::FrameIndexOutOfRange { .. }
+        | InferenceError::OutputFrameOutOfRange { .. }
+        | InferenceError::InvalidAudioWindowIndex { .. }
+        | InferenceError::FrameDimensionsMismatch { .. }
+        | InferenceError::InvalidFrameDimensions { .. }
+        | InferenceError::InvalidResizeTarget { .. }
+        | InferenceError::PixelOutOfRange { .. }
+        | InferenceError::PasteOutOfBounds { .. }
+        | InferenceError::FrameBufferLengthMismatch { .. } => ErrorCode::MediaInvalid,
+        InferenceError::TensorShapeMismatch { .. }
+        | InferenceError::NonFiniteModelInput { .. }
+        | InferenceError::ModelTensorData { .. }
+        | InferenceError::NonFiniteModelOutput { .. }
+        | InferenceError::ModelOutputOutOfRange { .. }
+        | InferenceError::NonFinitePrediction { .. } => ErrorCode::ModelIncompatible,
+        InferenceError::SinkStart { .. }
+        | InferenceError::SinkWrite { .. }
+        | InferenceError::SinkFinish { .. }
+        | InferenceError::ToolFailed { .. }
+        | InferenceError::StagingCollision { .. }
+        | InferenceError::StagingOutputInvalid { .. }
+        | InferenceError::AtomicPublishFailed { .. }
+        | InferenceError::FrameReader { .. }
+        | InferenceError::AllocationFailure { .. } => ErrorCode::WorkerCrashed,
+        InferenceError::Cancelled { .. } => ErrorCode::TaskCancelled,
+    }
+}
+
+/// The user-facing half of the mapping. Grouped by what an operator can do about
+/// it, which is why these groups do not match the code groups one for one.
+fn inference_summary(error: &InferenceError) -> &'static str {
+    match error {
+        InferenceError::InvalidInputArtifact { field, .. } if *field == LANDMARK_FIELD => {
+            "关键点数据无效"
+        }
+        InferenceError::InvalidBbox { .. } => "关键点数据无效",
+        InferenceError::InvalidFeatureShape { .. } => "音频特征形状不符",
+        InferenceError::InvalidField { .. }
+        | InferenceError::ArithmeticOverflow
+        | InferenceError::OutputExists { .. }
+        | InferenceError::OutputNotRegular { .. }
+        | InferenceError::OutputSymlink { .. }
+        | InferenceError::OutputParentInvalid { .. }
+        | InferenceError::InvalidTaskId { .. }
+        | InferenceError::FfmpegPathNotAbsolute { .. }
+        | InferenceError::EmptyFfmpegPath
+        | InferenceError::InvalidResizeTarget { .. } => "渲染请求无效",
+        InferenceError::InvalidInputDirectory { .. }
+        | InferenceError::InvalidInputArtifact { .. }
+        | InferenceError::FrameCountTooSmall { .. }
+        | InferenceError::EmptyFeatures
+        | InferenceError::FrameIndexOutOfRange { .. }
+        | InferenceError::OutputFrameOutOfRange { .. }
+        | InferenceError::InvalidAudioWindowIndex { .. }
+        | InferenceError::FrameDimensionsMismatch { .. }
+        | InferenceError::InvalidFrameDimensions { .. }
+        | InferenceError::FrameBufferLengthMismatch { .. } => "渲染素材不可用",
+        InferenceError::PixelOutOfRange { .. } | InferenceError::PasteOutOfBounds { .. } => {
+            "渲染几何越界"
+        }
+        InferenceError::TensorShapeMismatch { .. }
+        | InferenceError::NonFiniteModelInput { .. }
+        | InferenceError::ModelTensorData { .. }
+        | InferenceError::NonFiniteModelOutput { .. }
+        | InferenceError::ModelOutputOutOfRange { .. }
+        | InferenceError::NonFinitePrediction { .. } => "模型推理结果异常",
+        InferenceError::SinkStart { .. }
+        | InferenceError::SinkWrite { .. }
+        | InferenceError::SinkFinish { .. }
+        | InferenceError::ToolFailed { .. } => "视频编码进程失败",
+        InferenceError::StagingCollision { .. }
+        | InferenceError::StagingOutputInvalid { .. }
+        | InferenceError::AtomicPublishFailed { .. } => "产物发布失败",
+        InferenceError::FrameReader { .. } => "视频帧解码失败",
+        InferenceError::AllocationFailure { .. } => "内存不足",
+        InferenceError::Cancelled { .. } => "任务已取消",
+    }
 }
