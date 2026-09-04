@@ -271,16 +271,35 @@ pub fn render_audio(project_dir: &Path) -> PathBuf {
 #[derive(Debug, Default)]
 pub struct StubFrameReader {
     pub frames: Mutex<Vec<usize>>,
+    /// The index whose read fails, for the tests that need a failure in the
+    /// middle of the loop rather than before it starts.
+    pub fail_at: Option<usize>,
+}
+
+impl StubFrameReader {
+    pub fn failing_at(index: usize) -> Self {
+        Self {
+            frames: Mutex::new(Vec::new()),
+            fail_at: Some(index),
+        }
+    }
 }
 
 impl FrameReader for StubFrameReader {
-    fn read(&self, index: usize, _path: &Path) -> Result<BgrFrame, InferenceError> {
+    fn read(&self, index: usize, path: &Path) -> Result<BgrFrame, InferenceError> {
         const SIDE: u32 = 168;
 
         self.frames
             .lock()
             .expect("the reader is intact")
             .push(index);
+        if self.fail_at == Some(index) {
+            return Err(InferenceError::FrameReader {
+                index,
+                path: path.to_owned(),
+                message: "injected reader failure".into(),
+            });
+        }
         // A value that follows the index, so an all-zero frame would be visible.
         let value = (index as u8).wrapping_add(1);
         BgrFrame::new(SIDE, SIDE, vec![value; (SIDE * SIDE * 3) as usize])
