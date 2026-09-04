@@ -63,13 +63,14 @@ feathertalk-training = { path = "../feathertalk-training" }
 feathertalk-training-data = { path = "../feathertalk-training-data" }
 
 [dev-dependencies]
+feathertalk-audio = { path = "../feathertalk-audio" }
 feathertalk-inference = { path = "../feathertalk-inference" }
 feathertalk-preprocess = { path = "../feathertalk-preprocess" }
 feathertalk-project = { path = "../feathertalk-project" }
 tempfile.workspace = true
 ```
 
-`default-features = false` 与 `feathertalk-inference` 一致：后端由最终二进制选，库不替它决定。dev-dependencies 那四个只为夹具服务（§15）。
+`default-features = false` 与 `feathertalk-inference` 一致：后端由最终二进制选，库不替它决定。dev-dependencies 那五个只为夹具服务（§15）：`feathertalk-project` 写 manifest 与加锁包，`feathertalk-preprocess` 写 landmarks，`feathertalk-audio` 写特征文件，`feathertalk-inference` 提供 `FrameReader` 桩要实现的 trait，`tempfile` 给临时项目目录。
 
 模块划分，每个文件一件事：
 
@@ -330,10 +331,11 @@ pub fn build_preview_artifact<B, M, D>(
 
 ## 14. 对既有 crate 的最小改动
 
-两处，各一行量级：
+三个改动，各一行量级：
 
 - `feathertalk-models`：新增 `unet/training_graph.rs`（`TrainableTalkingHead` 与两个 impl），`unet/mod.rs` 加 `mod` 与 `pub use`。
 - `feathertalk-training`：`DataLoaderConfig::sample_count` 由 `pub(crate)` 改 `pub`（§11）。它是纯查询、已有校验、已被 `validate` 间接测过，放宽可见性不引入新行为。
+- `feathertalk-training`：`TrainingDataLoader` 新增 `pub fn dataset(&self) -> &D`。`dataset` 字段是私有的，而 §13 的 `build_preview_artifact` 要拿 `&D` 去 `load_sample` 固定样本；runner 必须自己持有 loader 才能推进采样，没有这个访问器就得把数据集在 runner 里再存一份或让调用方在外面另开一个。与已有的 `state()` 完全对称，只读借用，不引入新行为。
 
 `rust/Cargo.toml` 的 `members` 加一行。`feathertalk-training-data` 不动，worker、CLI、线协议不动。
 
