@@ -23,6 +23,7 @@ mod models;
 mod normalize_result;
 mod probe_result;
 mod quality_result;
+mod render_result;
 mod rendering;
 mod reporter;
 mod runtime;
@@ -54,6 +55,7 @@ pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;
+pub use render_result::{RenderSummary, render_to_json};
 pub use rendering::{
     ProjectAssets, RENDER_BACKEND_NAME, RENDER_FPS, RenderBackend, RenderDevice, RenderJob,
     RenderVariant, check_max_output_frames, check_render_paths, progress_total, project_assets,
