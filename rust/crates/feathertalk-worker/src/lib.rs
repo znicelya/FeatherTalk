@@ -23,6 +23,7 @@ mod models;
 mod normalize_result;
 mod probe_result;
 mod quality_result;
+mod rendering;
 mod reporter;
 mod runtime;
 mod train;
@@ -53,6 +54,11 @@ pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;
+pub use rendering::{
+    ProjectAssets, RENDER_BACKEND_NAME, RENDER_FPS, RenderBackend, RenderDevice, RenderJob,
+    RenderVariant, check_max_output_frames, check_render_paths, progress_total, project_assets,
+    render_job, render_variant, staging_task_id,
+};
 pub use reporter::{NoReporter, TaskReporter};
 pub use runtime::{JobExecutor, serve, serve_with_executor};
 pub use train::{check_frame_count, execute_train, run_training};
