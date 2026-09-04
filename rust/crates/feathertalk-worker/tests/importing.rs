@@ -2,7 +2,9 @@ use std::{fs, path::PathBuf};
 
 use feathertalk_domain::{ImportLegacyModelParams, LegacyModelKind, TaskStage};
 use feathertalk_media::CancellationToken;
-use feathertalk_worker::{NoReporter, WorkerConfig, execute_import_legacy_model};
+use feathertalk_worker::{
+    CommandOutcome, NoReporter, WorkerConfig, execute, execute_import_legacy_model,
+};
 
 fn params(source: PathBuf, kind: LegacyModelKind, destination: PathBuf) -> ImportLegacyModelParams {
     ImportLegacyModelParams {
@@ -68,4 +70,26 @@ fn import_honours_cancellation_before_import() {
     .unwrap_err();
     assert!(matches!(error.stage(), TaskStage::Preparing));
     assert!(error.is_cancelled());
+}
+
+#[test]
+fn command_maps_legacy_validation_failure_to_model_incompatible() {
+    let root = tempfile::tempdir().unwrap();
+    let request = feathertalk_domain::Request::ImportLegacyModel(params(
+        root.path().join("model.pth"),
+        LegacyModelKind::FeatherHubert,
+        root.path().join("package"),
+    ));
+    let error = match execute(
+        &request,
+        &WorkerConfig::from_values(None, None, None),
+        &CancellationToken::new(),
+        &NoReporter,
+    ) {
+        CommandOutcome::Failed(error) => error,
+        other => panic!("expected failure, got {other:?}"),
+    };
+    assert_eq!(error.code, feathertalk_domain::ErrorCode::ModelIncompatible);
+    assert_eq!(error.summary, "模型导入失败");
+    assert_eq!(error.stage, TaskStage::Preparing);
 }
