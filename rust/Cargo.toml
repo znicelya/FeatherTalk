@@ -56,3 +56,13 @@ tempfile = "3.20"
 thiserror = "2.0"
 time = { version = "0.3.55", features = ["parsing", "formatting", "macros"] }
 zip = { version = "6", default-features = false, features = ["deflate"] }
+
+# burn's tensor kernels are generic, so they are monomorphized into whichever
+# crate calls them and compile at opt-level 0 in a plain `cargo test`. That makes
+# a 160x160 micro-UNet forward plus backward take about 47 s instead of about
+# 1 s: `feathertalk-training-run`'s six single-frame step tests measured 285 s at
+# opt-level 0 against 7 s at opt-level 2. Overriding only the dependencies with
+# `[profile.dev.package."*"]` does not help, for the same monomorphization
+# reason, so the whole dev profile is optimized. Debug info stays enabled.
+[profile.dev]
+opt-level = 2
