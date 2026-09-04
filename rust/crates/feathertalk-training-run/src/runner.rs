@@ -1,10 +1,12 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, path::Path, time::Duration};
 
 use burn::{module::AutodiffModule, optim::Optimizer, tensor::backend::AutodiffBackend};
 use feathertalk_models::unet::TrainableTalkingHead;
 use feathertalk_training::{
-    PerceptualFeatureExtractor, TrainingConfig, TrainingDataLoader, TrainingDataset, TrainingError,
-    TrainingMetrics, TrainingMode,
+    CheckpointDescriptor, PerceptualFeatureExtractor, Provenance, RestoredTrainingState,
+    TRAINING_STATE_SCHEMA_VERSION, TrainingCheckpointManifest, TrainingCheckpointState,
+    TrainingConfig, TrainingDataLoader, TrainingDataset, TrainingError, TrainingMetrics,
+    TrainingMode, save_training_checkpoint,
 };
 use feathertalk_training_data::{TrainingItem, stack_single_frame_batch, stack_temporal_batch};
 
@@ -194,5 +196,60 @@ where
             gpu_memory_bytes,
             worker_state,
         )
+    }
+
+    /// Snapshots everything a checkpoint needs besides the weights themselves.
+    pub fn checkpoint_state(&self) -> TrainingCheckpointState {
+        let state = self.loader.state();
+        TrainingCheckpointState {
+            schema_version: TRAINING_STATE_SCHEMA_VERSION,
+            epoch: state.epoch,
+            global_step: self.global_step,
+            random_seed: state.config.seed,
+            data_loader: state.clone(),
+            training_config: self.config.clone(),
+            asset_provenance: Provenance {
+                entries: BTreeMap::new(),
+            },
+            model_provenance: Provenance {
+                entries: BTreeMap::new(),
+            },
+        }
+    }
+
+    /// Writes a complete checkpoint directory: weights, optimizer, and state.
+    pub fn save_checkpoint(
+        &self,
+        destination: impl AsRef<Path>,
+        descriptor: CheckpointDescriptor,
+    ) -> Result<TrainingCheckpointManifest, TrainingError> {
+        let model = self.model()?;
+        save_training_checkpoint::<B, M, O>(
+            destination,
+            model,
+            &self.optimizer,
+            descriptor,
+            self.checkpoint_state(),
+        )
+    }
+
+    /// Rebuilds a runner from a loaded checkpoint and a freshly opened dataset.
+    pub fn restore(
+        dataset: D,
+        restored: RestoredTrainingState<M, O>,
+        device: B::Device,
+    ) -> Result<Self, TrainingError> {
+        restored.state.validate()?;
+        let global_step = restored.state.global_step;
+        let loader = TrainingDataLoader::restore(dataset, restored.state.data_loader)?;
+        Ok(Self {
+            model: Some(restored.model),
+            optimizer: restored.optimizer,
+            loader,
+            config: restored.state.training_config,
+            device,
+            global_step,
+            samples_seen: 0,
+        })
     }
 }
