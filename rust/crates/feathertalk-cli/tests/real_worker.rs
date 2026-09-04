@@ -91,10 +91,80 @@ fn capabilities_reports_the_real_handshake() {
     let output = run(&worker, &["capabilities"], &[]);
     assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
     let text = stdout(&output);
-    // `CPU_ADAPTER_ID` and the two commands the worker always advertises.
+    // `CPU_ADAPTER_ID` and the three commands the worker always advertises.
     assert!(text.contains("cpu-0"), "{text}");
     assert!(text.contains("validate_project"), "{text}");
     assert!(text.contains("inspect_model"), "{text}");
+    assert!(text.contains("import_legacy_model"), "{text}");
+}
+
+#[test]
+fn a_real_legacy_model_is_imported_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_legacy_model_is_imported_end_to_end") else {
+        return;
+    };
+    let Some(source) = std::env::var_os("FEATHERTALK_WORKER_LEGACY_MODEL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+    else {
+        println!(
+            "skipping a_real_legacy_model_is_imported_end_to_end: it needs an explicit \
+             FEATHERTALK_WORKER_LEGACY_MODEL .pth file"
+        );
+        return;
+    };
+    let Some(licenses) = source
+        .parent()
+        .map(|parent| parent.join("LICENSES.json"))
+        .filter(|path| path.is_file())
+    else {
+        println!(
+            "skipping a_real_legacy_model_is_imported_end_to_end: source sibling LICENSES.json is missing"
+        );
+        return;
+    };
+    let destination_root = TempDir::new().expect("a temporary directory is available");
+    let destination = destination_root.path().join("imported-model");
+    let source_arg = source.to_string_lossy().into_owned();
+    let destination_arg = destination.to_string_lossy().into_owned();
+    let output = run(
+        &worker,
+        &[
+            "import-legacy-model",
+            &source_arg,
+            "feather-hubert",
+            &destination_arg,
+        ],
+        &[],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    assert!(licenses.is_file());
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(destination.join("manifest.json")).expect("manifest is published"),
+    )
+    .expect("manifest is valid JSON");
+    assert_eq!(result["kind"], "import_legacy_model");
+    assert_eq!(result["model_kind"], "feather_hubert");
+    assert_eq!(result["source"], source.display().to_string());
+    assert_eq!(result["destination"], destination.display().to_string());
+    assert_eq!(result["source_sha256"], manifest["source"]["sha256"]);
+    assert_eq!(result["model_sha256"], manifest["model"]["sha256"]);
+    assert!(
+        result["tensor_count"]
+            .as_u64()
+            .expect("tensor count is numeric")
+            > 0
+    );
+    assert!(
+        result["total_elements"]
+            .as_u64()
+            .expect("element count is numeric")
+            > 0
+    );
+    assert!(destination.join("model.safetensors").is_file());
+    assert!(destination.join("LICENSES.json").is_file());
 }
 
 /// The real FeatherHuBERT package, read through the real protocol. No ffmpeg and
