@@ -6,6 +6,8 @@ use feathertalk_export::PackageError;
 use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError};
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
+use feathertalk_training::TrainingError;
+use feathertalk_training_data::TrainingDataError;
 
 use crate::ENV_HUBERT_DIR;
 
@@ -108,6 +110,111 @@ pub fn package_task_error(error: &PackageError) -> TaskError {
         &clamp(&package_detail(error)),
         FAILURE_STAGE,
     )
+}
+
+/// Maps a training failure onto the wire.
+///
+/// The stage is a parameter, unlike every other mapper in this file: a run that
+/// fails at step 3000 has to report the step it failed in, not `Preparing`. The
+/// command body passes `TaskStage::Preparing` while it is assembling the run and
+/// the last reported `Training { .. }` once the loop has started.
+pub fn training_task_error(error: &TrainingError, stage: TaskStage) -> TaskError {
+    TaskError::new(
+        training_error_code(error),
+        training_summary(error),
+        &clamp(&error.to_string()),
+        stage,
+    )
+}
+
+/// Maps a dataset failure. Opening the dataset is the only place one can
+/// surface, and that happens during admission, so the stage is fixed.
+pub fn training_data_task_error(error: &TrainingDataError) -> TaskError {
+    TaskError::new(
+        training_data_error_code(error),
+        training_data_summary(error),
+        &clamp(&error.to_string()),
+        FAILURE_STAGE,
+    )
+}
+
+fn training_error_code(error: &TrainingError) -> ErrorCode {
+    match error {
+        TrainingError::Io(source) => io_error_code(source),
+        // `InvalidInput` is wide: a corrupt sample and a diverged loss both land
+        // here, and both are the user's data or hyperparameters.
+        TrainingError::InvalidInput(_) | TrainingError::CheckpointDirectory(_) => {
+            ErrorCode::MediaInvalid
+        }
+        TrainingError::InvalidPackage(_)
+        | TrainingError::HashMismatch { .. }
+        | TrainingError::InvalidCheckpoint(_)
+        | TrainingError::CheckpointCompatibility(_) => ErrorCode::ModelIncompatible,
+        // Every input to the config variants is a worker constant, so they can
+        // only be worker bugs; `Store` is left with storage-layer faults once
+        // the checkpoint preflight has rejected the incompatible cases.
+        TrainingError::InvalidConfig(_)
+        | TrainingError::InvalidDataLoaderConfig(_)
+        | TrainingError::InvalidDataLoaderState(_)
+        | TrainingError::DataLoaderOverflow { .. }
+        | TrainingError::PermutationAllocation { .. }
+        | TrainingError::BatchAllocation { .. }
+        | TrainingError::StalePreparedBatch
+        | TrainingError::Store(_) => ErrorCode::WorkerCrashed,
+    }
+}
+
+fn training_summary(error: &TrainingError) -> &'static str {
+    match error {
+        TrainingError::Io(source) => io_summary(source),
+        TrainingError::InvalidInput(_) => "训练输入无效",
+        TrainingError::InvalidConfig(_) | TrainingError::InvalidDataLoaderConfig(_) => {
+            "训练配置无效"
+        }
+        TrainingError::InvalidDataLoaderState(_)
+        | TrainingError::DataLoaderOverflow { .. }
+        | TrainingError::PermutationAllocation { .. }
+        | TrainingError::BatchAllocation { .. }
+        | TrainingError::StalePreparedBatch => "训练运行状态异常",
+        TrainingError::InvalidPackage(_) | TrainingError::HashMismatch { .. } => {
+            "感知损失模型加载失败"
+        }
+        TrainingError::Store(_) => "检查点读写失败",
+        TrainingError::InvalidCheckpoint(_) | TrainingError::CheckpointCompatibility(_) => {
+            "检查点与当前训练不兼容"
+        }
+        TrainingError::CheckpointDirectory(_) => "检查点目录无效",
+    }
+}
+
+fn training_data_error_code(error: &TrainingDataError) -> ErrorCode {
+    match error {
+        // The name lines up with the domain code: the token count and the frame
+        // count disagree, which deserves better than a generic media error.
+        TrainingDataError::FeatureShape { .. } => ErrorCode::FeatureShapeMismatch,
+        // Index and stacking invariants a user cannot reach from a request.
+        TrainingDataError::FrameIndexOutOfRange { .. } | TrainingDataError::Batch { .. } => {
+            ErrorCode::WorkerCrashed
+        }
+        TrainingDataError::Project { .. }
+        | TrainingDataError::Features { .. }
+        | TrainingDataError::Frame { .. }
+        | TrainingDataError::Landmarks { .. }
+        | TrainingDataError::Sample { .. } => ErrorCode::MediaInvalid,
+    }
+}
+
+fn training_data_summary(error: &TrainingDataError) -> &'static str {
+    match error {
+        TrainingDataError::Project { .. } => "工程目录不可用于训练",
+        TrainingDataError::Features { .. } => "音频特征文件不可读",
+        TrainingDataError::FeatureShape { .. } => "特征长度与帧数不匹配",
+        TrainingDataError::FrameIndexOutOfRange { .. } => "样本帧号越界",
+        TrainingDataError::Frame { .. } => "训练帧不可读",
+        TrainingDataError::Landmarks { .. } => "关键点文件不可读",
+        TrainingDataError::Sample { .. } => "训练样本构造失败",
+        TrainingDataError::Batch { .. } => "训练批次堆叠失败",
+    }
 }
 
 fn project_error_code(error: &ProjectError) -> ErrorCode {

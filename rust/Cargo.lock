@@ -2775,6 +2775,8 @@ dependencies = [
  "feathertalk-models",
  "feathertalk-pfld",
  "feathertalk-project",
+ "feathertalk-training",
+ "feathertalk-training-data",
  "hex",
  "serde_json",
  "sha2 0.11.0",

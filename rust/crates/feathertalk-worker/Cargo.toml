@@ -15,6 +15,8 @@ feathertalk-media = { path = "../feathertalk-media" }
 feathertalk-models = { path = "../feathertalk-models" }
 feathertalk-pfld = { path = "../feathertalk-pfld" }
 feathertalk-project = { path = "../feathertalk-project" }
+feathertalk-training = { path = "../feathertalk-training" }
+feathertalk-training-data = { path = "../feathertalk-training-data" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }

@@ -6,10 +6,12 @@ use feathertalk_export::PackageError;
 use feathertalk_frame_pipeline::{AnomalyCode, FrameAnomaly, PipelineError, RecoveryAction};
 use feathertalk_media::MediaError;
 use feathertalk_project::ProjectError;
+use feathertalk_training::TrainingError;
+use feathertalk_training_data::TrainingDataError;
 use feathertalk_worker::{
     audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
     media_task_error, package_task_error, pipeline_task_error, project_task_error,
-    quality_task_error,
+    quality_task_error, training_data_task_error, training_task_error,
 };
 
 fn io_error(kind: io::ErrorKind) -> io::Error {
@@ -562,4 +564,193 @@ fn a_package_failure_names_the_hubert_variable() {
         mapped.detail
     );
     mapped.validate().unwrap();
+}
+
+fn try_reserve_error() -> std::collections::TryReserveError {
+    Vec::<u64>::new()
+        .try_reserve_exact(usize::MAX)
+        .expect_err("an impossible reservation fails")
+}
+
+#[test]
+fn every_training_error_maps_to_a_code_and_a_valid_payload() {
+    let cases = vec![
+        (
+            TrainingError::Io(io_error(io::ErrorKind::StorageFull)),
+            ErrorCode::DiskSpaceLow,
+        ),
+        (
+            TrainingError::Io(io_error(io::ErrorKind::PermissionDenied)),
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::InvalidInput("loss is not finite".to_owned()),
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingError::InvalidConfig("batch_size".to_owned()),
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::InvalidDataLoaderConfig("stride".to_owned()),
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::InvalidDataLoaderState("epoch".to_owned()),
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::DataLoaderOverflow {
+                operation: "counting steps",
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::PermutationAllocation {
+                samples: 8,
+                source: try_reserve_error(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::BatchAllocation {
+                items: 2,
+                source: try_reserve_error(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (TrainingError::StalePreparedBatch, ErrorCode::WorkerCrashed),
+        (
+            TrainingError::InvalidPackage("manifest".to_owned()),
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            TrainingError::HashMismatch {
+                file: "model.safetensors".to_owned(),
+                expected: "a".repeat(64),
+                actual: "b".repeat(64),
+            },
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            TrainingError::Store("record write failed".to_owned()),
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingError::InvalidCheckpoint("manifest".to_owned()),
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            TrainingError::CheckpointCompatibility("frame_count".to_owned()),
+            ErrorCode::ModelIncompatible,
+        ),
+        (
+            TrainingError::CheckpointDirectory("already exists".to_owned()),
+            ErrorCode::MediaInvalid,
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let mapped = training_task_error(&error, TaskStage::Preparing);
+        assert_eq!(mapped.code, expected, "{error:?}");
+        assert_eq!(mapped.stage, TaskStage::Preparing, "{error:?}");
+        assert!(!mapped.summary.trim().is_empty(), "{error:?}");
+        assert!(!mapped.detail.is_empty(), "{error:?}");
+        mapped.validate().unwrap();
+    }
+}
+
+#[test]
+fn a_mid_run_training_failure_keeps_the_stage_it_failed_in() {
+    let stage = TaskStage::Training {
+        epoch: 3,
+        step: 3000,
+        loss: 0.125,
+    };
+    let mapped = training_task_error(&TrainingError::StalePreparedBatch, stage.clone());
+
+    assert_eq!(mapped.stage, stage);
+    mapped.validate().unwrap();
+}
+
+#[test]
+fn a_long_training_detail_is_clamped() {
+    let error = TrainingError::InvalidInput("x".repeat(MAX_DETAIL_CHARS * 2));
+    let mapped = training_task_error(&error, TaskStage::Preparing);
+
+    assert_eq!(mapped.detail.chars().count(), MAX_DETAIL_CHARS);
+    mapped.validate().unwrap();
+}
+
+#[test]
+fn every_training_data_error_maps_to_a_code_and_a_valid_payload() {
+    let cases = vec![
+        (
+            TrainingDataError::Project {
+                path: path(),
+                message: "not locked".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingDataError::Features {
+                path: path(),
+                message: "truncated".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingDataError::FeatureShape {
+                path: path(),
+                expected_tokens: 8,
+                actual_tokens: 98,
+                dims: 1024,
+            },
+            ErrorCode::FeatureShapeMismatch,
+        ),
+        (
+            TrainingDataError::FrameIndexOutOfRange {
+                index: 9,
+                frame_count: 4,
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+        (
+            TrainingDataError::Frame {
+                index: 0,
+                path: path(),
+                message: "not a jpeg".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingDataError::Landmarks {
+                index: 0,
+                path: path(),
+                message: "short line".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingDataError::Sample {
+                index: 0,
+                message: "image plane".to_owned(),
+            },
+            ErrorCode::MediaInvalid,
+        ),
+        (
+            TrainingDataError::Batch {
+                message: "shape".to_owned(),
+            },
+            ErrorCode::WorkerCrashed,
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let mapped = training_data_task_error(&error);
+        assert_eq!(mapped.code, expected, "{error:?}");
+        assert_eq!(mapped.stage, TaskStage::Preparing, "{error:?}");
+        assert!(!mapped.summary.trim().is_empty(), "{error:?}");
+        mapped.validate().unwrap();
+    }
 }

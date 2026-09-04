@@ -36,7 +36,7 @@ pub use config::{
 pub use error_map::{
     audio_task_error, is_audio_cancellation, is_media_cancellation, is_pipeline_cancellation,
     media_task_error, package_task_error, pipeline_task_error, project_task_error,
-    quality_task_error,
+    quality_task_error, training_data_task_error, training_task_error,
 };
 pub use extract_features::execute_extract_features;
 pub use extract_frames::execute_extract_frames;
