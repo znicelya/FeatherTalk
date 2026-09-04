@@ -91,9 +91,73 @@ fn capabilities_reports_the_real_handshake() {
     let output = run(&worker, &["capabilities"], &[]);
     assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
     let text = stdout(&output);
-    // `CPU_ADAPTER_ID` and the one command the worker always advertises.
+    // `CPU_ADAPTER_ID` and the two commands the worker always advertises.
     assert!(text.contains("cpu-0"), "{text}");
     assert!(text.contains("validate_project"), "{text}");
+    assert!(text.contains("inspect_model"), "{text}");
+}
+
+/// The real FeatherHuBERT package, read through the real protocol. No ffmpeg and
+/// no demo clip: inspection reads manifests and nothing else.
+#[test]
+fn a_real_model_package_is_inspected_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_model_package_is_inspected_end_to_end") else {
+        return;
+    };
+    let Some(hubert) = real_dir("HUBERT_DIR") else {
+        println!(
+            "skipping a_real_model_package_is_inspected_end_to_end: it needs \
+             FEATHERTALK_WORKER_HUBERT_DIR"
+        );
+        return;
+    };
+    let source_arg = hubert.to_string_lossy().into_owned();
+    let output = run(&worker, &["inspect-model", &source_arg], &[]);
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let inspected: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+
+    assert_eq!(inspected["source_kind"], "model_package");
+    assert_eq!(inspected["source_path"], hubert.display().to_string());
+    assert_eq!(inspected["schema_version"], 1);
+    assert_eq!(inspected["model_kind"], "feather_hubert");
+    assert_eq!(inspected["architecture_version"], "feather-hubert-burn-v1");
+    // A published package is not a resume point and carries no step counter.
+    assert!(inspected["model_config_sha256"].is_null());
+    assert!(inspected["epoch"].is_null());
+    assert_eq!(inspected["training_mode"], "inference");
+    assert!(
+        inspected["parameter_count"]
+            .as_u64()
+            .expect("parameter count is numeric")
+            > 0
+    );
+    assert!(
+        inspected["tensor_count"]
+            .as_u64()
+            .expect("tensor count is numeric")
+            > 0
+    );
+    assert_eq!(inspected["inputs"][0]["name"], "waveform");
+    assert_eq!(inspected["outputs"][0]["name"], "hidden");
+
+    let files = inspected["files"].as_array().expect("files is an array");
+    assert_eq!(files.len(), 2);
+    for file in files {
+        assert_eq!(file["sha256"].as_str().expect("sha256 is text").len(), 64);
+        // The package on this machine is intact, so the manifest and the disk
+        // agree -- which is also what makes `compatible` true below.
+        assert_eq!(file["bytes"], file["bytes_on_disk"]);
+    }
+
+    assert_eq!(inspected["compatible"], true);
+    assert_eq!(
+        inspected["incompatibilities"]
+            .as_array()
+            .expect("incompatibilities is an array")
+            .len(),
+        0
+    );
 }
 
 #[test]
