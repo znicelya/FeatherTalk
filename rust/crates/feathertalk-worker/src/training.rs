@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use burn::tensor::Device;
 use feathertalk_domain::{TrainParams, TrainingMode as DomainTrainingMode, UnetVariant};
@@ -206,4 +209,111 @@ pub struct TrainingPlan {
     /// The checkpoint this run resumes from, `None` for a fresh run. It is also
     /// what the result payload reports as `resumed_from`.
     pub resume_from: Option<PathBuf>,
+}
+
+/// Prefix of the directory a checkpoint is written into before it takes its
+/// step name.
+const PUBLISH_PREFIX: &str = ".publish-";
+/// Prefix of the directory an overwritten checkpoint is moved aside into.
+const RETIRED_PREFIX: &str = ".retired-";
+/// How many names to try before giving up on finding a free one.
+const MAX_PUBLISH_ATTEMPTS: u32 = 1024;
+
+/// Writes the checkpoint for `global_step` through a staging directory so the
+/// step's own name only ever holds a complete checkpoint.
+///
+/// `save` is handed a directory that does not exist yet -- the contract
+/// `save_training_checkpoint` already expects -- and only has to write. The
+/// rename into place happens here.
+pub fn publish_checkpoint<F>(
+    paths: &TrainingPaths,
+    global_step: u64,
+    save: F,
+) -> Result<PathBuf, TrainingError>
+where
+    F: FnOnce(&Path) -> Result<(), TrainingError>,
+{
+    let root = paths.checkpoints();
+    fs::create_dir_all(root)?;
+    let staged = reserve_name(root, PUBLISH_PREFIX)?;
+    if let Err(error) = save(&staged) {
+        // The staging name is ours alone, so removing it cannot take a real
+        // checkpoint down with it.
+        let _ = fs::remove_dir_all(&staged);
+        return Err(error);
+    }
+
+    let destination = paths.checkpoint(global_step);
+    let retired = match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            let retired = reserve_name(root, RETIRED_PREFIX)?;
+            fs::rename(&destination, &retired)?;
+            Some(retired)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(TrainingError::from(error)),
+    };
+
+    fs::rename(&staged, &destination)?;
+    if let Some(retired) = retired {
+        // The destination is already correct, so a leftover copy is untidy
+        // rather than broken and is not worth failing the step over.
+        let _ = fs::remove_dir_all(&retired);
+    }
+    Ok(destination)
+}
+
+/// Reserves a free name under `root` by creating the directory and removing it
+/// again, which proves the name is both free and creatable.
+///
+/// The name comes back unoccupied because `save_training_checkpoint` refuses a
+/// destination that exists. Two workers on one project would race here, which
+/// the pid in the name makes harmless in practice and which the
+/// one-worker-per-project rule rules out anyway.
+fn reserve_name(root: &Path, prefix: &str) -> Result<PathBuf, TrainingError> {
+    let pid = std::process::id();
+    for attempt in 0..MAX_PUBLISH_ATTEMPTS {
+        let candidate = root.join(format!("{prefix}{pid}-{attempt}"));
+        match fs::create_dir(&candidate) {
+            Ok(()) => {
+                fs::remove_dir(&candidate)?;
+                return Ok(candidate);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(TrainingError::from(error)),
+        }
+    }
+    Err(TrainingError::CheckpointDirectory(format!(
+        "no free staging name under {} after {MAX_PUBLISH_ATTEMPTS} attempts",
+        root.display()
+    )))
+}
+
+/// The checkpoint with the largest step, or `None` when the project has never
+/// trained.
+pub fn latest_checkpoint(paths: &TrainingPaths) -> Result<Option<PathBuf>, TrainingError> {
+    let entries = match fs::read_dir(paths.checkpoints()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(TrainingError::from(error)),
+    };
+
+    let mut best: Option<(u64, PathBuf)> = None;
+    for entry in entries {
+        let entry = entry?;
+        // Bind the name before borrowing from it: `file_name` returns an owned
+        // `OsString`, and `entry.file_name().to_str()` would not live long
+        // enough (E0716).
+        let name = entry.file_name();
+        let Some(step) = name.to_str().and_then(TrainingPaths::checkpoint_step) else {
+            continue;
+        };
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(seen, _)| step > *seen) {
+            best = Some((step, entry.path()));
+        }
+    }
+    Ok(best.map(|(_, path)| path))
 }

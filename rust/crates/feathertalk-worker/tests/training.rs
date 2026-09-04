@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use feathertalk_domain::{TrainParams, TrainingMode as DomainTrainingMode, UnetVariant};
 use feathertalk_export::ModelConfiguration;
 use feathertalk_models::unet::{MobileOneUnetConfig, OriginalUnetConfig};
-use feathertalk_training::TrainingMode;
+use feathertalk_training::{TrainingError, TrainingMode};
 use feathertalk_worker::{
     DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, MAX_EPOCHS, TRAIN_BACKEND_NAME, TRAINING_SEED,
-    TrainingPaths, WORKER_STATE, checkpoint_descriptor, sample_count, training_config,
-    training_mode,
+    TrainingPaths, WORKER_STATE, checkpoint_descriptor, latest_checkpoint, publish_checkpoint,
+    sample_count, training_config, training_mode,
 };
 
 fn params(mode: DomainTrainingMode, epochs: u32) -> TrainParams {
@@ -190,4 +190,119 @@ fn only_step_numbered_checkpoint_names_are_recognised() {
     ] {
         assert_eq!(TrainingPaths::checkpoint_step(name), None, "{name}");
     }
+}
+
+/// Behaves like `save_training_checkpoint`: it creates the destination itself
+/// and refuses one that already exists.
+fn fake_save(marker: &'static str) -> impl FnOnce(&Path) -> Result<(), TrainingError> {
+    move |staged: &Path| {
+        if staged.exists() {
+            return Err(TrainingError::CheckpointDirectory(format!(
+                "checkpoint destination already exists: {}",
+                staged.display()
+            )));
+        }
+        std::fs::create_dir_all(staged)?;
+        std::fs::write(staged.join("manifest.json"), marker)?;
+        Ok(())
+    }
+}
+
+fn names(directory: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(directory)
+        .expect("the directory is readable")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn marker_of(checkpoint: &Path) -> String {
+    std::fs::read_to_string(checkpoint.join("manifest.json")).expect("the marker is readable")
+}
+
+#[test]
+fn a_published_checkpoint_lands_under_its_step_name() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+
+    let published =
+        publish_checkpoint(&paths, 4, fake_save("first")).expect("the publish succeeds");
+
+    assert_eq!(published, paths.checkpoint(4));
+    assert_eq!(marker_of(&published), "first");
+    // Nothing but the checkpoint is left behind.
+    assert_eq!(names(paths.checkpoints()), vec!["checkpoint-00000004"]);
+}
+
+#[test]
+fn publishing_over_an_existing_step_retires_the_old_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+    let occupied = paths.checkpoint(8);
+    std::fs::create_dir_all(&occupied).unwrap();
+    std::fs::write(occupied.join("manifest.json"), "stale").unwrap();
+    std::fs::write(occupied.join("leftover.bin"), "junk").unwrap();
+
+    let published =
+        publish_checkpoint(&paths, 8, fake_save("fresh")).expect("the publish succeeds");
+
+    assert_eq!(published, occupied);
+    assert_eq!(marker_of(&published), "fresh");
+    // The staged directory replaced the old one wholesale rather than merging
+    // into it, so the stale file is gone.
+    assert!(!published.join("leftover.bin").exists());
+    assert_eq!(names(paths.checkpoints()), vec!["checkpoint-00000008"]);
+}
+
+#[test]
+fn a_failed_save_leaves_neither_a_destination_nor_a_staging_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+
+    let error = publish_checkpoint(&paths, 4, |staged: &Path| {
+        std::fs::create_dir_all(staged)?;
+        std::fs::write(staged.join("partial.bin"), "half").unwrap();
+        Err(TrainingError::Store("record write failed".to_owned()))
+    })
+    .expect_err("a failing save fails the publish");
+
+    assert!(matches!(error, TrainingError::Store(_)), "{error:?}");
+    assert!(!paths.checkpoint(4).exists());
+    assert!(names(paths.checkpoints()).is_empty());
+}
+
+#[test]
+fn the_latest_checkpoint_is_the_largest_step() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+    for step in [4_u64, 12, 8] {
+        publish_checkpoint(&paths, step, fake_save("body")).unwrap();
+    }
+    // Decoys: a hand-made short name, a file wearing a checkpoint name, and a
+    // staging directory a crashed run left behind.
+    std::fs::create_dir_all(paths.checkpoints().join("checkpoint-16")).unwrap();
+    std::fs::write(paths.checkpoints().join("checkpoint-00000020"), "not a dir").unwrap();
+    std::fs::create_dir_all(paths.checkpoints().join(".publish-1-0")).unwrap();
+
+    let latest = latest_checkpoint(&paths)
+        .expect("the directory is readable")
+        .expect("three checkpoints exist");
+
+    assert_eq!(latest, paths.checkpoint(12));
+}
+
+#[test]
+fn a_project_that_never_trained_has_no_latest_checkpoint() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+
+    assert_eq!(
+        latest_checkpoint(&paths).expect("a missing directory is not an error"),
+        None
+    );
+
+    // An empty directory is the same answer.
+    std::fs::create_dir_all(paths.checkpoints()).unwrap();
+    assert_eq!(latest_checkpoint(&paths).unwrap(), None);
 }

@@ -55,5 +55,5 @@ pub use runtime::{JobExecutor, serve, serve_with_executor};
 pub use training::{
     DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, MAX_EPOCHS, TRAIN_BACKEND_NAME, TRAINING_SEED,
     TrainBackend, TrainDevice, TrainingPaths, TrainingPlan, WORKER_STATE, checkpoint_descriptor,
-    sample_count, training_config, training_mode,
+    latest_checkpoint, publish_checkpoint, sample_count, training_config, training_mode,
 };
