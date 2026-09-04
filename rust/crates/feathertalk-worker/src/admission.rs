@@ -51,6 +51,28 @@ pub(crate) fn check_project_dir(project_dir: &Path) -> Result<(), TaskError> {
     Ok(())
 }
 
+/// What has to hold before a model directory is read: a real directory at an
+/// absolute path. Which of the two layouts it is is `inspecting`'s question, and
+/// whether that layout is complete is the readers' question.
+pub(crate) fn check_model_source(source: &Path) -> Result<(), TaskError> {
+    if !source.is_absolute() {
+        return Err(invalid_request(
+            "模型目录必须是绝对路径",
+            format!("source {} is not absolute", source.display()),
+        ));
+    }
+    let metadata = fs::symlink_metadata(source).map_err(|error| {
+        invalid_request("模型目录不可用", format!("{}: {error}", source.display()))
+    })?;
+    if !metadata.is_dir() {
+        return Err(invalid_request(
+            "模型目录不可用",
+            format!("{} is not a directory", source.display()),
+        ));
+    }
+    Ok(())
+}
+
 /// Every admission failure reports `MediaInvalid`: the request named a
 /// directory or an input file the worker cannot work with.
 pub(crate) fn invalid_request(summary: &'static str, detail: String) -> TaskError {
