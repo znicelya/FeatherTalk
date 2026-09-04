@@ -20,6 +20,7 @@ feathertalk-project = { path = "../feathertalk-project" }
 feathertalk-training = { path = "../feathertalk-training" }
 feathertalk-training-data = { path = "../feathertalk-training-data" }
 feathertalk-training-run = { path = "../feathertalk-training-run" }
+feathertalk-weights = { path = "../feathertalk-weights" }
 hex = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

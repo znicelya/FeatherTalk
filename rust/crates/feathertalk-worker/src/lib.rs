@@ -17,6 +17,7 @@ mod extract_frames;
 mod feature_result;
 mod features;
 mod handshake;
+mod importing;
 mod inspect;
 mod inspect_result;
 mod inspecting;
@@ -53,6 +54,7 @@ pub use extract_frames::execute_extract_frames;
 pub use feature_result::feature_to_json;
 pub use features::FeatureModel;
 pub use handshake::{CPU_ADAPTER_ID, cpu_adapter, ready_frame, supported_commands};
+pub use importing::{ImportLegacyModelError, execute_import_legacy_model};
 pub use inspect::execute_inspect_model;
 pub use inspect_result::{InspectSummary, InspectedModel, inspect_to_json};
 pub use inspecting::{

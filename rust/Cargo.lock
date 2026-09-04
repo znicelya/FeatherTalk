@@ -2780,6 +2780,7 @@ dependencies = [
  "feathertalk-training",
  "feathertalk-training-data",
  "feathertalk-training-run",
+ "feathertalk-weights",
  "hex",
  "serde_json",
  "sha2 0.11.0",
