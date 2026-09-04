@@ -139,4 +139,9 @@ pub enum InferenceError {
     },
     #[error("allocation of {bytes} bytes failed")]
     AllocationFailure { bytes: usize },
+    /// The caller stopped the render. A cancelled operation is not a failure of
+    /// the render, which is why it has its own variant instead of borrowing a
+    /// sink error and a sentinel message.
+    #[error("cancelled during {operation}")]
+    Cancelled { operation: &'static str },
 }

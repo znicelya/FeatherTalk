@@ -233,7 +233,7 @@ impl RawVideoSinkFactory for RecordingSinkFactory {
     fn start(
         &self,
         command: &feathertalk_inference::CommandSpec,
-    ) -> Result<Box<dyn RawVideoSink>, InferenceError> {
+    ) -> Result<Box<dyn RawVideoSink + '_>, InferenceError> {
         self.state.lock().unwrap().staging = Some(
             command
                 .arguments()
@@ -594,4 +594,166 @@ fn executor_rejects_symlinked_input_path_components_before_starting_sink() {
     ));
     assert!(sink_state.lock().unwrap().staging.is_none());
     assert!(!linked_request.output_path().exists());
+}
+
+/// A sink that writes `cancel_at` frames and then reports the render cancelled,
+/// which is what the worker's observing sink does once its token is set.
+struct CancellingSink {
+    state: Arc<Mutex<RecordingSinkState>>,
+    cancel_at: usize,
+}
+
+impl RawVideoSink for CancellingSink {
+    fn write_frame(&mut self, frame: &BgrFrame) -> Result<(), InferenceError> {
+        let mut state = self.state.lock().unwrap();
+        if state.frames.len() >= self.cancel_at {
+            return Err(InferenceError::Cancelled {
+                operation: "render",
+            });
+        }
+        state.frames.push(frame.as_bytes().to_vec());
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>) -> Result<(), InferenceError> {
+        Ok(())
+    }
+}
+
+struct CancellingSinkFactory {
+    state: Arc<Mutex<RecordingSinkState>>,
+    cancel_at: usize,
+}
+
+impl RawVideoSinkFactory for CancellingSinkFactory {
+    fn start(
+        &self,
+        command: &feathertalk_inference::CommandSpec,
+    ) -> Result<Box<dyn RawVideoSink + '_>, InferenceError> {
+        self.state.lock().unwrap().staging = Some(
+            command
+                .arguments()
+                .last()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+                .into(),
+        );
+        Ok(Box::new(CancellingSink {
+            state: Arc::clone(&self.state),
+            cancel_at: self.cancel_at,
+        }))
+    }
+}
+
+#[test]
+fn a_cancelled_sink_stops_the_render_and_leaves_no_output() {
+    let (_root, request) = artifact_tree(2, 4, None);
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_state = Arc::new(Mutex::new(RecordingSinkState::default()));
+    let sink_factory = CancellingSinkFactory {
+        state: Arc::clone(&sink_state),
+        cancel_at: 2,
+    };
+    let device = Default::default();
+
+    let error = execute_offline_render::<CpuBackend, _, _, _>(
+        &OutputModel { value: 1.0 },
+        &device,
+        &request,
+        &reader,
+        &sink_factory,
+    )
+    .expect_err("a cancelled sink fails the render");
+
+    assert!(
+        matches!(error, InferenceError::Cancelled { operation } if operation == "render"),
+        "{error:?}"
+    );
+    assert_eq!(error.to_string(), "cancelled during render");
+    // The two frames before the cancellation were written, the staging file the
+    // guard reserved is gone, and the destination was never created.
+    let staging = {
+        let state = sink_state.lock().unwrap();
+        assert_eq!(state.frames.len(), 2);
+        state.staging.clone().unwrap()
+    };
+    assert!(!staging.exists(), "{}", staging.display());
+    assert!(!request.output_path().exists());
+}
+
+/// A factory whose sink borrows the factory. This is the shape the worker needs
+/// for progress reporting, and it compiles only because `start` ties the boxed
+/// sink to the `&self` borrow.
+struct BorrowingSinkFactory {
+    written: Mutex<usize>,
+}
+
+struct BorrowingSink<'a> {
+    factory: &'a BorrowingSinkFactory,
+    staging: PathBuf,
+}
+
+impl RawVideoSink for BorrowingSink<'_> {
+    fn write_frame(&mut self, _frame: &BgrFrame) -> Result<(), InferenceError> {
+        let mut written = self.factory.written.lock().unwrap();
+        *written += 1;
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>) -> Result<(), InferenceError> {
+        std::fs::write(&self.staging, b"rendered-video").unwrap();
+        Ok(())
+    }
+}
+
+impl RawVideoSinkFactory for BorrowingSinkFactory {
+    fn start(
+        &self,
+        command: &feathertalk_inference::CommandSpec,
+    ) -> Result<Box<dyn RawVideoSink + '_>, InferenceError> {
+        Ok(Box::new(BorrowingSink {
+            factory: self,
+            staging: PathBuf::from(
+                command
+                    .arguments()
+                    .last()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        }))
+    }
+}
+
+#[test]
+fn a_sink_may_borrow_the_factory_that_started_it() {
+    let (_root, request) = artifact_tree(2, 3, None);
+    let reader = RecordingReader {
+        frames: Arc::new(Mutex::new(Vec::new())),
+        fail_at: None,
+        alternate_dimensions_at: None,
+    };
+    let sink_factory = BorrowingSinkFactory {
+        written: Mutex::new(0),
+    };
+    let device = Default::default();
+
+    let result = execute_offline_render::<CpuBackend, _, _, _>(
+        &OutputModel { value: 1.0 },
+        &device,
+        &request,
+        &reader,
+        &sink_factory,
+    )
+    .expect("a borrowing sink renders like any other");
+
+    assert_eq!(result.frame_count(), 3);
+    // Counted through the borrow, which is the whole point of the lifetime.
+    assert_eq!(*sink_factory.written.lock().unwrap(), 3);
+    assert!(request.output_path().is_file());
 }

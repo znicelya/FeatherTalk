@@ -9,13 +9,21 @@ use crate::{BgrFrame, CommandSpec, InferenceError};
 
 const MAX_ERROR_MESSAGE_BYTES: usize = 512;
 
-pub trait RawVideoSink: Send {
+/// The render loop writes every frame on the thread that started it, so neither
+/// half of this pair carries an auto-trait bound. Requiring `Send` here would
+/// rule out a sink that borrows a progress reporter, and a reporter that owns a
+/// channel to the control loop is not `Sync`.
+pub trait RawVideoSink {
     fn write_frame(&mut self, frame: &BgrFrame) -> Result<(), InferenceError>;
     fn finish(self: Box<Self>) -> Result<(), InferenceError>;
 }
 
-pub trait RawVideoSinkFactory: Send + Sync {
-    fn start(&self, command: &CommandSpec) -> Result<Box<dyn RawVideoSink>, InferenceError>;
+pub trait RawVideoSinkFactory {
+    /// The returned sink may borrow the factory. `Box<dyn RawVideoSink>` would
+    /// mean `+ 'static` and rule out a sink that observes something the caller
+    /// owns -- a progress reporter, a cancellation token -- which is exactly
+    /// what a worker wraps around a system sink.
+    fn start(&self, command: &CommandSpec) -> Result<Box<dyn RawVideoSink + '_>, InferenceError>;
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +36,7 @@ impl SystemRawVideoSinkFactory {
 }
 
 impl RawVideoSinkFactory for SystemRawVideoSinkFactory {
-    fn start(&self, command: &CommandSpec) -> Result<Box<dyn RawVideoSink>, InferenceError> {
+    fn start(&self, command: &CommandSpec) -> Result<Box<dyn RawVideoSink + '_>, InferenceError> {
         validate_executable(command)?;
         let mut child = Command::new(command.executable())
             .args(command.arguments())
