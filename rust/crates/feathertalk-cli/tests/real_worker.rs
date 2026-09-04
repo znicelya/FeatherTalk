@@ -813,3 +813,144 @@ fn a_real_project_is_trained_end_to_end() {
     assert!(narration.contains("正在训练"), "{narration}");
     assert!(narration.contains("进度 4/4"), "{narration}");
 }
+
+/// The frames the render test locks, and half the tokens
+/// `RENDERED_AUDIO_SECONDS` extracts, so the lock trims nothing.
+const RENDERED_FRAME_COUNT: u64 = 2;
+
+/// 0.09 s at 16 kHz is 1 440 samples, which the 400-sample kernel and the
+/// 320-sample stride turn into `(1 440 - 80) / 320` = 4 FeatherHuBERT frames and
+/// so into 4 tokens, which is two video frames. Every cut from 1 360 to 1 679
+/// samples yields the same 4, which is the slack a resampler gets.
+const RENDERED_AUDIO_SECONDS: &str = "0.09";
+
+/// The whole slice, in the order a person would use it: extract features from
+/// real audio, lock the package, train one epoch, then render the checkpoint
+/// that training just wrote. This is the only test where a real ffmpeg, a real
+/// JPEG decode, a real Burn record and a playable mp4 all meet. It skips for the
+/// reasons the training test gives, plus `FEATHERTALK_WORKER_FFPROBE`, which the
+/// render needs to probe the source video.
+#[test]
+fn a_real_project_is_rendered_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_project_is_rendered_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(ffprobe), Some(hubert), Some(vgg19), Some(demo)) = (
+        real_tool("FFMPEG"),
+        real_tool("FFPROBE"),
+        real_dir("HUBERT_DIR"),
+        real_dir("VGG19_DIR"),
+        demo_clip(),
+    ) else {
+        println!(
+            "skipping a_real_project_is_rendered_end_to_end: it needs \
+             FEATHERTALK_WORKER_FFMPEG, FEATHERTALK_WORKER_FFPROBE, \
+             FEATHERTALK_WORKER_HUBERT_DIR, FEATHERTALK_WORKER_VGG19_DIR, and \
+             demo/feathertalk_demo_latest_188.mp4"
+        );
+        return;
+    };
+    let project = TempDir::new().expect("a temporary directory is available");
+    let assets = project.path().join("assets");
+    for directory in ["frames", "landmarks"] {
+        std::fs::create_dir_all(assets.join(directory)).expect("the assets tree is writable");
+    }
+    std::fs::write(project.path().join("project.json"), PROJECT_MANIFEST)
+        .expect("the temporary manifest is writable");
+    let audio = assets.join("audio_16k_mono.wav");
+    cut_audio(&ffmpeg, &demo, &audio, RENDERED_AUDIO_SECONDS);
+    // The render probes this video for its size and frame rate, so unlike the
+    // training test it is read rather than only stated.
+    cut_one_second(&ffmpeg, &demo, &assets.join("video_25fps.mp4"));
+
+    let project_arg = project.path().to_string_lossy().into_owned();
+    let audio_arg = audio.to_string_lossy().into_owned();
+    let hubert_arg = hubert.to_string_lossy().into_owned();
+    let vgg19_arg = vgg19.to_string_lossy().into_owned();
+    let hubert_env = [("FEATHERTALK_WORKER_HUBERT_DIR", hubert_arg.as_str())];
+    let output = run(
+        &worker,
+        &["extract-features", &project_arg, &audio_arg],
+        &hubert_env,
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let extracted: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(extracted["tokens"], 4);
+    assert_eq!(extracted["frame_count"], RENDERED_FRAME_COUNT);
+
+    write_frame_fixtures(&assets, RENDERED_FRAME_COUNT);
+    let output = run(&worker, &["lock-asset-package", &project_arg], &hubert_env);
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let locked: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(locked["frame_count"], RENDERED_FRAME_COUNT);
+    assert_eq!(locked["token_adjustment"], 0);
+
+    // The training test pins what this prints; here it only has to leave a
+    // checkpoint behind. One epoch over two frames is two steps.
+    let output = run(
+        &worker,
+        &["train", &project_arg, "--mode", "baseline", "--epochs", "1"],
+        &[("FEATHERTALK_WORKER_VGG19_DIR", vgg19_arg.as_str())],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+
+    // The checkpoint is joined one component at a time because the worker
+    // reports a native path and `join` keeps a forward slash as written.
+    let checkpoint = project
+        .path()
+        .join("models")
+        .join("unet")
+        .join("checkpoint-00000002");
+    assert!(checkpoint.join("manifest.json").is_file());
+
+    let output_file = project.path().join("preview.mp4");
+    let checkpoint_arg = checkpoint.to_string_lossy().into_owned();
+    let output_arg = output_file.to_string_lossy().into_owned();
+    let ffmpeg_arg = ffmpeg.to_string_lossy().into_owned();
+    let ffprobe_arg = ffprobe.to_string_lossy().into_owned();
+    let output = run(
+        &worker,
+        &[
+            "render",
+            &project_arg,
+            &checkpoint_arg,
+            &audio_arg,
+            &output_arg,
+        ],
+        &[
+            ("FEATHERTALK_WORKER_FFMPEG", ffmpeg_arg.as_str()),
+            ("FEATHERTALK_WORKER_FFPROBE", ffprobe_arg.as_str()),
+        ],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let rendered: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+
+    assert_eq!(rendered["output_path"], output_file.display().to_string());
+    assert_eq!(rendered["frame_count"], RENDERED_FRAME_COUNT);
+    // The committed frame fixture is 1280x720, and the render pastes the
+    // generated mouth back into the full frame rather than cropping it.
+    assert_eq!(rendered["width"], 1280);
+    assert_eq!(rendered["height"], 720);
+    assert_eq!(rendered["fps"], 25);
+    assert_eq!(rendered["backend"], "ndarray-cpu");
+    assert_eq!(rendered["checkpoint_dir"], checkpoint.display().to_string());
+    assert_eq!(rendered["model_kind"], "original_unet");
+    assert_eq!(rendered["model_config_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(rendered["checkpoint_epoch"], 1);
+    assert_eq!(rendered["checkpoint_global_step"], RENDERED_FRAME_COUNT);
+    assert_eq!(rendered["source_frame_count"], RENDERED_FRAME_COUNT);
+    assert_eq!(rendered["max_output_frames"], serde_json::Value::Null);
+
+    // A file a person can play: the atomic publish renamed the staging file into
+    // place, so this path is the mp4 and not a leftover fragment.
+    let published = std::fs::metadata(&output_file).expect("the render published its output");
+    assert!(published.is_file());
+    assert!(published.len() > 0, "{}", published.len());
+
+    let narration = stderr(&output);
+    assert!(narration.contains("正在渲染"), "{narration}");
+    assert!(narration.contains("进度 2/2"), "{narration}");
+}
