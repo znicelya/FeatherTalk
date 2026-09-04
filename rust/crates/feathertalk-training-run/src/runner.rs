@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use burn::{module::AutodiffModule, optim::Optimizer, tensor::backend::AutodiffBackend};
 use feathertalk_models::unet::TrainableTalkingHead;
 use feathertalk_training::{
     PerceptualFeatureExtractor, TrainingConfig, TrainingDataLoader, TrainingDataset, TrainingError,
-    TrainingMode,
+    TrainingMetrics, TrainingMode,
 };
 use feathertalk_training_data::{TrainingItem, stack_single_frame_batch, stack_temporal_batch};
 
@@ -147,5 +149,50 @@ where
 
     pub fn model(&self) -> Result<&M, TrainingError> {
         self.model.as_ref().ok_or_else(poisoned)
+    }
+
+    /// Turns one `StepReport` plus wall-clock elapsed time into wire metrics.
+    pub fn metrics(
+        &self,
+        report: &StepReport,
+        elapsed: Duration,
+        gpu_memory_bytes: Option<u64>,
+        worker_state: &str,
+    ) -> Result<TrainingMetrics, TrainingError> {
+        let state = self.loader.state();
+        let sample_count = state.config.sample_count(state.frame_count)?;
+        let total = self.config.total_epochs.saturating_mul(sample_count);
+        let done = state
+            .epoch
+            .saturating_mul(sample_count)
+            .saturating_add(state.next_position);
+        let remaining = total.saturating_sub(done);
+        let seconds = elapsed.as_secs_f64();
+        let samples_per_second = if seconds > 0.0 {
+            self.samples_seen as f64 / seconds
+        } else {
+            0.0
+        };
+        let estimated_remaining_seconds = if samples_per_second > 0.0 {
+            remaining as f64 / samples_per_second
+        } else {
+            0.0
+        };
+        TrainingMetrics::new(
+            self.config.mode,
+            report.epoch,
+            report.global_step,
+            report.losses.total,
+            report.losses.full,
+            report.losses.perceptual,
+            report.losses.mouth,
+            report.losses.temporal,
+            report.losses.temporal_mouth,
+            self.samples_seen,
+            samples_per_second,
+            estimated_remaining_seconds,
+            gpu_memory_bytes,
+            worker_state,
+        )
     }
 }
