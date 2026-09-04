@@ -18,6 +18,10 @@ use feathertalk_inference::{
 };
 use feathertalk_media::CancellationToken;
 use feathertalk_models::unet::{OriginalUnet, OriginalUnetConfig};
+use feathertalk_project::{
+    AssetManifest, AssetPackageState, FeatureType, ModelSelection, ProjectManifest,
+    TaskHistoryEntry, TaskHistoryStatus, lock_asset_package, write_project_manifest_atomic,
+};
 use feathertalk_training::{
     PerceptualFeatureExtractor, TrainingDataset, TrainingError, TrainingSample,
 };
@@ -263,6 +267,55 @@ pub fn render_audio(project_dir: &Path) -> PathBuf {
     project_dir.join("audio.wav")
 }
 
+/// The frame size the render fixtures advertise, which is the size
+/// `StubFrameReader` hands back.
+pub const RENDER_FRAME_SIDE: u32 = 168;
+
+/// Turns a `render_tree` into a project `validate_project_dir` accepts: the two
+/// media placeholders it insists on, the project manifest, and a locked asset
+/// package.
+///
+/// The order matters: `write_asset_manifest_atomic` refuses to overwrite a
+/// manifest that already validates as locked, so the lock runs last.
+pub fn lock_render_tree(project_dir: &Path, frame_count: u64) {
+    let assets = project_dir.join("assets");
+    std::fs::write(assets.join("video_25fps.mp4"), b"video").expect("the video is written");
+    std::fs::write(assets.join("audio_16k_mono.wav"), b"audio").expect("the audio is written");
+    let manifest = ProjectManifest {
+        schema_version: 1,
+        project_id: "render".into(),
+        display_name: "Render".into(),
+        asset_package: "assets/assets.json".into(),
+        default_model: ModelSelection::OriginalUnet,
+        task_history: vec![TaskHistoryEntry {
+            task_id: "task-1".into(),
+            kind: "preprocess".into(),
+            status: TaskHistoryStatus::Completed,
+            updated_at: "2026-09-04T10:00:00Z".into(),
+        }],
+    };
+    write_project_manifest_atomic(&project_dir.join("project.json"), &manifest)
+        .expect("the project manifest is written");
+    lock_asset_package(
+        project_dir,
+        AssetManifest {
+            schema_version: 1,
+            state: AssetPackageState::Locked,
+            video_fps: 25,
+            audio_sample_rate: 16_000,
+            audio_channels: 1,
+            frame_count,
+            frame_width: RENDER_FRAME_SIDE,
+            frame_height: RENDER_FRAME_SIDE,
+            feature_type: FeatureType::FeatherHubert,
+            feature_shape: [frame_count, 2, 1024],
+            landmark_model_sha256: "a".repeat(64),
+            feature_model_sha256: "b".repeat(64),
+        },
+    )
+    .expect("the asset package locks");
+}
+
 /// Hands back a 168x168 frame for every index and remembers which indexes the
 /// render asked for.
 ///
@@ -287,8 +340,7 @@ impl StubFrameReader {
 
 impl FrameReader for StubFrameReader {
     fn read(&self, index: usize, path: &Path) -> Result<BgrFrame, InferenceError> {
-        const SIDE: u32 = 168;
-
+        let side = RENDER_FRAME_SIDE;
         self.frames
             .lock()
             .expect("the reader is intact")
@@ -302,7 +354,7 @@ impl FrameReader for StubFrameReader {
         }
         // A value that follows the index, so an all-zero frame would be visible.
         let value = (index as u8).wrapping_add(1);
-        BgrFrame::new(SIDE, SIDE, vec![value; (SIDE * SIDE * 3) as usize])
+        BgrFrame::new(side, side, vec![value; (side * side * 3) as usize])
     }
 }
 

@@ -56,7 +56,7 @@ pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;
 pub use quality_result::quality_to_json;
-pub use render::run_render;
+pub use render::{execute_render, run_render};
 pub use render_result::{RenderSummary, render_to_json};
 pub use rendering::{
     ProjectAssets, RENDER_BACKEND_NAME, RENDER_FPS, RenderBackend, RenderDevice, RenderJob,

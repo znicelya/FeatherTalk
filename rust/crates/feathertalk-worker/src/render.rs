@@ -2,17 +2,23 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use feathertalk_domain::{Progress, TaskStage};
+use burn::module::AutodiffModule;
+use feathertalk_domain::{ErrorCode, Progress, RenderParams, TaskError, TaskStage};
 use feathertalk_inference::{
     BgrFrame, CommandSpec, FrameReader, InferenceError, RawVideoSink, RawVideoSinkFactory,
     execute_offline_render,
 };
-use feathertalk_media::CancellationToken;
+use feathertalk_media::{CancellationToken, MediaToolchain};
 use feathertalk_models::unet::TalkingHeadModel;
+use feathertalk_project::validate_project_dir;
+use feathertalk_training::{load_training_checkpoint_model, read_training_checkpoint};
 
+use crate::admission::check_project_dir;
 use crate::{
-    CommandOutcome, RenderBackend, RenderDevice, RenderJob, RenderSummary, TaskReporter,
-    is_inference_cancellation, render_task_error, render_to_json,
+    CommandOutcome, RenderBackend, RenderDevice, RenderJob, RenderSummary, RenderVariant,
+    TaskReporter, TrainBackend, TrainDevice, check_max_output_frames, check_render_paths,
+    checkpoint_descriptor, is_inference_cancellation, project_task_error, render_job,
+    render_task_error, render_to_json, render_variant, training_task_error,
 };
 
 /// Wraps the caller's sink factory so the render reports one progress event per
@@ -151,5 +157,150 @@ where
         // A cancelled render is not a failure: no error event, no output file.
         Err(error) if is_inference_cancellation(&error) => CommandOutcome::Cancelled,
         Err(error) => CommandOutcome::Failed(render_task_error(&error, observed.stage())),
+    }
+}
+
+/// Renders a locked project with one of its own training checkpoints.
+///
+/// The order is deliberate (design section 10): the cheap rejections first, then
+/// the project manifest, then the checkpoint's own manifest -- which is where the
+/// model variant is written, so the template cannot be built any earlier.
+pub fn execute_render<R, F>(
+    params: &RenderParams,
+    token: &CancellationToken,
+    reporter: &dyn TaskReporter,
+    toolchain: &MediaToolchain,
+    frame_reader: &R,
+    sink_factory: &F,
+) -> CommandOutcome
+where
+    R: FrameReader + ?Sized,
+    F: RawVideoSinkFactory + ?Sized,
+{
+    // Reading a checkpoint is the most expensive thing this command does before
+    // the first frame, so a task cancelled while it waited does not pay for it.
+    if token.is_cancelled() {
+        return CommandOutcome::Cancelled;
+    }
+    // Everything below reads something off the disk, so the stage goes out first.
+    reporter.report(TaskStage::Preparing, None);
+    if let Err(error) = check_project_dir(&params.project_dir) {
+        return CommandOutcome::Failed(error);
+    }
+    if let Err(error) = check_render_paths(params) {
+        return CommandOutcome::Failed(error);
+    }
+    if let Err(error) = check_max_output_frames(params.max_output_frames) {
+        return CommandOutcome::Failed(error);
+    }
+    let project = match validate_project_dir(&params.project_dir) {
+        Ok(project) => project,
+        Err(error) => return CommandOutcome::Failed(project_task_error(&error)),
+    };
+    // The locked manifest owns the frame count. The feature file is read by
+    // inference, but it never decides how many frames the client was promised.
+    let frame_count = project.asset_package().manifest().frame_count;
+    let metadata = match read_training_checkpoint(&params.checkpoint) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return CommandOutcome::Failed(training_task_error(&error, TaskStage::Preparing));
+        }
+    };
+    let Some(variant) = render_variant(&metadata.manifest.model_kind) else {
+        return CommandOutcome::Failed(TaskError::new(
+            ErrorCode::ModelIncompatible,
+            "检查点的模型类型不受支持",
+            &format!("unsupported model_kind: {}", metadata.manifest.model_kind),
+            TaskStage::Preparing,
+        ));
+    };
+    let descriptor = match checkpoint_descriptor(&variant.configuration()) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            return CommandOutcome::Failed(training_task_error(&error, TaskStage::Preparing));
+        }
+    };
+    let job = match render_job(
+        params,
+        frame_count,
+        toolchain.ffmpeg(),
+        descriptor,
+        metadata.state.epoch,
+        metadata.state.global_step,
+    ) {
+        Ok(job) => job,
+        Err(error) => return CommandOutcome::Failed(error),
+    };
+
+    // The record was written by modules on `Autodiff<NdArray>`, so it is read
+    // back by the same types and the autodiff shell is dropped with `valid`.
+    let load_device = TrainDevice::default();
+    let device = RenderDevice::default();
+    match variant {
+        RenderVariant::OriginalUnet(configuration) => {
+            let template = configuration.init::<TrainBackend>(&load_device);
+            let restored = match load_training_checkpoint_model::<TrainBackend, _>(
+                &params.checkpoint,
+                &template,
+                &load_device,
+                &job.descriptor,
+            ) {
+                Ok(restored) => restored,
+                Err(error) => {
+                    return CommandOutcome::Failed(training_task_error(
+                        &error,
+                        TaskStage::Preparing,
+                    ));
+                }
+            };
+            // Loading half a gigabyte of weights is the longest step before the
+            // first frame, so the token is checked again on the far side of it.
+            if token.is_cancelled() {
+                return CommandOutcome::Cancelled;
+            }
+            let model = restored.model.valid();
+            run_render(
+                &job,
+                &model,
+                &device,
+                token,
+                reporter,
+                frame_reader,
+                sink_factory,
+            )
+        }
+        RenderVariant::MobileOneUnet(configuration) => {
+            let template = configuration.init::<TrainBackend>(&load_device);
+            let restored = match load_training_checkpoint_model::<TrainBackend, _>(
+                &params.checkpoint,
+                &template,
+                &load_device,
+                &job.descriptor,
+            ) {
+                Ok(restored) => restored,
+                Err(error) => {
+                    return CommandOutcome::Failed(training_task_error(
+                        &error,
+                        TaskStage::Preparing,
+                    ));
+                }
+            };
+            if token.is_cancelled() {
+                return CommandOutcome::Cancelled;
+            }
+            // Inference fuses the multi-branch blocks; training needed them
+            // separate, which is why the descriptor above describes the unfused
+            // shape.
+            let model = restored.model.valid().reparameterize();
+            run_render(
+                &job,
+                &model,
+                &device,
+                token,
+                reporter,
+                frame_reader,
+                sink_factory,
+            )
+        }
     }
 }

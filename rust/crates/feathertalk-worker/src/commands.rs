@@ -1,6 +1,7 @@
 use feathertalk_domain::{ErrorCode, Progress, Request, TaskError, TaskKind, TaskStage};
 use feathertalk_export::read_package_manifest;
 use feathertalk_frame_pipeline::SystemProcessRunner as FrameProcessRunner;
+use feathertalk_inference::{JpegFrameReader, SystemRawVideoSinkFactory};
 use feathertalk_media::{
     CancellableProcessRunner, CancellationToken, MediaError, MediaInput, NormalizationSpec,
     NormalizePhase, ProcessRunner, normalize_media_observed, probe_media_with_runner,
@@ -10,9 +11,9 @@ use feathertalk_project::validate_project_dir;
 
 use crate::{
     FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
-    execute_extract_frames, execute_lock_asset_package, execute_train, is_media_cancellation,
-    media_task_error, normalize_to_json, package_task_error, pipeline_task_error, probe_to_json,
-    project_task_error,
+    execute_extract_frames, execute_lock_asset_package, execute_render, execute_train,
+    is_media_cancellation, media_task_error, normalize_to_json, package_task_error,
+    pipeline_task_error, probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -155,6 +156,22 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 return CommandOutcome::Failed(unsupported(request.kind()));
             };
             execute_train(params, token, reporter, training)
+        }
+        Request::Render(params) => {
+            let Some(toolchain) = config.media() else {
+                // Unreachable through the runtime, which rejects `render` when no
+                // toolchain is configured; kept so a direct caller gets an error
+                // rather than a panic.
+                return CommandOutcome::Failed(unsupported(request.kind()));
+            };
+            execute_render(
+                params,
+                token,
+                reporter,
+                toolchain,
+                &JpegFrameReader::default(),
+                &SystemRawVideoSinkFactory,
+            )
         }
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
