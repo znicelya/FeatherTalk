@@ -40,6 +40,7 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
         frame.supported_commands,
         vec![
             TaskKind::ValidateProject,
+            TaskKind::InspectModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render
@@ -52,7 +53,7 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
 }
 
 #[test]
-fn a_worker_without_a_media_toolchain_only_offers_project_validation() {
+fn a_worker_without_a_media_toolchain_only_offers_the_toolchain_free_commands() {
     let config = WorkerConfig::from_values(None, None, None);
     assert!(config.media().is_none());
     assert!(
@@ -62,9 +63,13 @@ fn a_worker_without_a_media_toolchain_only_offers_project_validation() {
     );
     let frame = ready_frame(&config);
     frame.validate().unwrap();
-    assert_eq!(frame.supported_commands, vec![TaskKind::ValidateProject]);
+    // Inspection reads manifests, so it is announced with no toolchain at all.
+    assert_eq!(
+        frame.supported_commands,
+        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+    );
     assert!(!frame.capabilities.ffmpeg);
-    assert_eq!(supported_commands(&config).len(), 1);
+    assert_eq!(supported_commands(&config).len(), 2);
 }
 
 #[test]
@@ -146,6 +151,7 @@ fn a_fully_configured_worker_offers_extract_frames() {
         frame.supported_commands,
         vec![
             TaskKind::ValidateProject,
+            TaskKind::InspectModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -179,7 +185,10 @@ fn models_without_a_media_toolchain_offer_nothing_new() {
         Some(absolute("pfld-test")),
     );
     assert!(config.models().is_some());
-    assert_eq!(supported_commands(&config), vec![TaskKind::ValidateProject]);
+    assert_eq!(
+        supported_commands(&config),
+        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+    );
 }
 
 /// Media, models, and the FeatherHuBERT directory all resolve, so the handshake
@@ -205,6 +214,7 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
         frame.supported_commands,
         vec![
             TaskKind::ValidateProject,
+            TaskKind::InspectModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -242,6 +252,7 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
         supported_commands(&config),
         vec![
             TaskKind::ValidateProject,
+            TaskKind::InspectModel,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage
         ]
@@ -270,7 +281,11 @@ fn a_worker_with_a_vgg19_package_offers_train() {
     frame.validate().unwrap();
     assert_eq!(
         frame.supported_commands,
-        vec![TaskKind::ValidateProject, TaskKind::Train]
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::InspectModel,
+            TaskKind::Train
+        ]
     );
     assert!(frame.capabilities.training);
     // Design section 4: the worker never promises GPU training in this slice.
@@ -297,6 +312,7 @@ fn every_toolchain_plus_vgg19_offers_every_command() {
         frame.supported_commands,
         vec![
             TaskKind::ValidateProject,
+            TaskKind::InspectModel,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
