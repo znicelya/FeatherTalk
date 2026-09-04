@@ -3,11 +3,15 @@ use std::path::{Path, PathBuf};
 use feathertalk_domain::{TrainParams, TrainingMode as DomainTrainingMode, UnetVariant};
 use feathertalk_export::ModelConfiguration;
 use feathertalk_models::unet::{MobileOneUnetConfig, OriginalUnetConfig};
-use feathertalk_training::{TrainingError, TrainingMode};
+use feathertalk_training::{
+    PREVIEW_TENSOR_ELEMENTS, PreviewArtifact, TrainingError, TrainingMetrics, TrainingMode,
+    TrainingSample, read_preview_artifact, read_training_metrics,
+};
 use feathertalk_worker::{
     DEFAULT_BATCH_SIZE, DEFAULT_LEARNING_RATE, MAX_EPOCHS, TRAIN_BACKEND_NAME, TRAINING_SEED,
-    TrainingPaths, WORKER_STATE, checkpoint_descriptor, latest_checkpoint, publish_checkpoint,
-    sample_count, training_config, training_mode,
+    TrainingPaths, WORKER_STATE, checkpoint_descriptor, latest_checkpoint, preview_sample,
+    publish_checkpoint, sample_count, training_config, training_mode, write_metrics_unless_present,
+    write_preview_unless_present,
 };
 
 fn params(mode: DomainTrainingMode, epochs: u32) -> TrainParams {
@@ -305,4 +309,91 @@ fn a_project_that_never_trained_has_no_latest_checkpoint() {
     // An empty directory is the same answer.
     std::fs::create_dir_all(paths.checkpoints()).unwrap();
     assert_eq!(latest_checkpoint(&paths).unwrap(), None);
+}
+
+const MODEL_KIND: &str = "original_unet";
+
+fn metrics_fixture(global_step: u64, total_loss: f64) -> TrainingMetrics {
+    TrainingMetrics::new(
+        TrainingMode::Baseline,
+        1,
+        global_step,
+        total_loss,
+        total_loss,
+        0.01,
+        None,
+        None,
+        None,
+        global_step,
+        2.5,
+        12.0,
+        None,
+        WORKER_STATE,
+    )
+    .expect("the fixture is valid")
+}
+
+fn preview_fixture(global_step: u64, prediction: f32) -> PreviewArtifact {
+    PreviewArtifact::new(
+        0,
+        2,
+        1,
+        global_step,
+        MODEL_KIND,
+        "a".repeat(64),
+        WORKER_STATE,
+        vec![prediction; PREVIEW_TENSOR_ELEMENTS],
+        vec![0.5; PREVIEW_TENSOR_ELEMENTS],
+        vec![1.0; PREVIEW_TENSOR_ELEMENTS],
+    )
+    .expect("the fixture is valid")
+}
+
+#[test]
+fn metrics_are_written_once_per_step() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+
+    assert!(write_metrics_unless_present(&paths, 4, &metrics_fixture(4, 0.5)).unwrap());
+    // A resumed run reaches step 4 again with a different loss.
+    assert!(!write_metrics_unless_present(&paths, 4, &metrics_fixture(4, 0.25)).unwrap());
+
+    let written = read_training_metrics(paths.metrics(4)).expect("the file reads back");
+    // The first write is the one kept.
+    assert_eq!(written.total_loss, 0.5);
+    assert_eq!(written.worker_state, WORKER_STATE);
+}
+
+#[test]
+fn previews_are_written_once_per_step() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TrainingPaths::new(root.path());
+    let sha = "a".repeat(64);
+
+    assert!(write_preview_unless_present(&paths, 8, &preview_fixture(8, 0.25)).unwrap());
+    assert!(!write_preview_unless_present(&paths, 8, &preview_fixture(8, 0.75)).unwrap());
+
+    let (artifact, manifest) =
+        read_preview_artifact(paths.preview(8), MODEL_KIND, &sha).expect("the artifact reads back");
+    assert_eq!(manifest.global_step, 8);
+    assert_eq!(artifact.prediction()[0], 0.25);
+}
+
+#[test]
+fn the_preview_pairs_the_first_frame_with_the_middle_one() {
+    assert_eq!(
+        preview_sample(8),
+        TrainingSample::SingleFrame {
+            target_index: 0,
+            reference_index: 4,
+        }
+    );
+    // A one-frame project has to reference itself, which the dataset allows.
+    assert_eq!(
+        preview_sample(1),
+        TrainingSample::SingleFrame {
+            target_index: 0,
+            reference_index: 0,
+        }
+    );
 }

@@ -7,7 +7,10 @@ use burn::tensor::Device;
 use feathertalk_domain::{TrainParams, TrainingMode as DomainTrainingMode, UnetVariant};
 use feathertalk_export::ModelConfiguration;
 use feathertalk_models::backend::CpuAutodiffBackend;
-use feathertalk_training::{CheckpointDescriptor, TrainingConfig, TrainingError, TrainingMode};
+use feathertalk_training::{
+    CheckpointDescriptor, PreviewArtifact, TrainingConfig, TrainingError, TrainingMetrics,
+    TrainingMode, TrainingSample, write_preview_artifact, write_training_metrics,
+};
 use sha2::{Digest, Sha256};
 
 /// The backend every training run in this slice uses.
@@ -316,4 +319,57 @@ pub fn latest_checkpoint(paths: &TrainingPaths) -> Result<Option<PathBuf>, Train
         }
     }
     Ok(best.map(|(_, path)| path))
+}
+
+/// Writes the metrics file for `global_step`, or reports that one was already
+/// there.
+pub fn write_metrics_unless_present(
+    paths: &TrainingPaths,
+    global_step: u64,
+    metrics: &TrainingMetrics,
+) -> Result<bool, TrainingError> {
+    let path = paths.metrics(global_step);
+    if exists(&path)? {
+        return Ok(false);
+    }
+    write_training_metrics(&path, metrics)?;
+    Ok(true)
+}
+
+/// Writes the preview directory for `global_step`, or reports that one was
+/// already there.
+pub fn write_preview_unless_present(
+    paths: &TrainingPaths,
+    global_step: u64,
+    artifact: &PreviewArtifact,
+) -> Result<bool, TrainingError> {
+    let destination = paths.preview(global_step);
+    if exists(&destination)? {
+        return Ok(false);
+    }
+    write_preview_artifact(&destination, artifact)?;
+    Ok(true)
+}
+
+/// The pair every preview renders: frame zero, driven by the audio and judged
+/// against the ground truth of frame zero, wearing the middle frame of the clip
+/// as its appearance reference.
+///
+/// Fixed rather than sampled, because the whole point of the artifact is to
+/// watch one frame improve from epoch to epoch. A one-frame project references
+/// itself, which is in range and therefore not an error.
+pub fn preview_sample(frame_count: u64) -> TrainingSample {
+    TrainingSample::SingleFrame {
+        target_index: 0,
+        reference_index: frame_count / 2,
+    }
+}
+
+/// Whether `path` is already taken, without following a symlink.
+fn exists(path: &Path) -> Result<bool, TrainingError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(TrainingError::from(error)),
+    }
 }
