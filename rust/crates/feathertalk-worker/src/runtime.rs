@@ -418,6 +418,9 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
         // Training reads a locked project off disk, so the perceptual-loss
         // package is its only wall.
         TaskKind::Train => training_reason(slug, config),
+        // Rendering needs the media toolchain and nothing else, so it shares the
+        // media commands' reason: both tools, both variable names.
+        TaskKind::Render => media_reason(slug, config),
         // Listing `supported_commands` instead of a hard-coded set keeps this
         // message correct as later commands land.
         _ => format!(

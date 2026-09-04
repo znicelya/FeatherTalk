@@ -41,7 +41,8 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
-            TaskKind::NormalizeMedia
+            TaskKind::NormalizeMedia,
+            TaskKind::Render
         ]
     );
     assert!(frame.capabilities.ffmpeg);
@@ -147,6 +148,7 @@ fn a_fully_configured_worker_offers_extract_frames() {
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
+            TaskKind::Render,
             TaskKind::ExtractFrames
         ]
     );
@@ -205,6 +207,7 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
+            TaskKind::Render,
             TaskKind::ExtractFrames,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage
@@ -296,6 +299,7 @@ fn every_toolchain_plus_vgg19_offers_every_command() {
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
+            TaskKind::Render,
             TaskKind::ExtractFrames,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage,
@@ -317,4 +321,29 @@ fn a_worker_without_a_vgg19_package_leaves_train_out() {
     );
     assert!(!supported_commands(&config).contains(&TaskKind::Train));
     assert!(!ready_frame(&config).capabilities.training);
+}
+
+#[test]
+fn a_media_toolchain_alone_offers_render() {
+    let config = configured();
+    // Rendering needs ffmpeg and the locked project, so it is offered without
+    // any model directory at all.
+    assert!(config.models().is_none());
+    assert!(config.features().is_none());
+    assert!(config.training().is_none());
+    let commands = supported_commands(&config);
+    assert!(commands.contains(&TaskKind::Render), "{commands:?}");
+
+    let frame = ready_frame(&config);
+    frame.validate().unwrap();
+    // No new capability flag: `ffmpeg` already reports the same fact.
+    assert!(frame.capabilities.ffmpeg);
+    assert!(!frame.capabilities.training);
+    assert!(!frame.capabilities.wgpu_training);
+}
+
+#[test]
+fn a_worker_without_a_media_toolchain_leaves_render_out() {
+    let config = WorkerConfig::from_values(None, None, None);
+    assert!(!supported_commands(&config).contains(&TaskKind::Render));
 }

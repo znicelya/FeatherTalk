@@ -13,8 +13,8 @@ use std::{
 use feathertalk_domain::{
     CancelFrame, ClientFrame, DomainError, ErrorCode, Event, ExtractFeaturesParams,
     ExtractFramesParams, NormalizeMediaParams, PROTOCOL_VERSION, ProbeMediaParams, Progress,
-    ProjectDirParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId, TaskKind, TaskStage,
-    TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
+    ProjectDirParams, RenderParams, Request, ServerFrame, ShutdownFrame, StartFrame, TaskId,
+    TaskKind, TaskStage, TrainParams, TrainingMode, UnetVariant, decode_line, encode_line,
 };
 use feathertalk_media::{CancellationToken, CommandSpec, MediaError, ProcessOutput, ProcessRunner};
 use feathertalk_worker::{
@@ -223,6 +223,16 @@ fn train_request() -> Request {
         variant: UnetVariant::OriginalUnet,
         epochs: 1,
         resume: false,
+    })
+}
+
+fn render_request() -> Request {
+    Request::Render(RenderParams {
+        project_dir: PathBuf::from("C:/tmp/project"),
+        checkpoint: PathBuf::from("C:/tmp/project/models/unet/checkpoint-00000004"),
+        audio: PathBuf::from("C:/tmp/project/assets/audio_16k_mono.wav"),
+        output: PathBuf::from("C:/tmp/preview.mp4"),
+        max_output_frames: None,
     })
 }
 
@@ -451,7 +461,8 @@ fn a_usable_media_toolchain_enables_probe_media_in_the_handshake() {
         vec![
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
-            TaskKind::NormalizeMedia
+            TaskKind::NormalizeMedia,
+            TaskKind::Render
         ]
     );
 }
@@ -507,6 +518,47 @@ fn a_rejected_training_configuration_explains_itself() {
     assert!(reasons[0].contains("train"), "{}", reasons[0]);
     // A relative path is a rejection, not an absence, so the reason quotes it.
     assert!(reasons[0].contains("absolute"), "{}", reasons[0]);
+}
+
+#[test]
+fn a_render_request_without_media_tools_names_the_missing_variable() {
+    let harness = Harness::start(bare_config(), instant_executor());
+    harness.send(&start(&task("0000000b"), render_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("render"), "{}", reasons[0]);
+    // The reason names the wall an operator hits first, which is the tool the
+    // configuration reports as missing.
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_FFPROBE"),
+        "{}",
+        reasons[0]
+    );
+    assert!(
+        events(&frames).is_empty(),
+        "a rejected start creates no task"
+    );
+}
+
+#[test]
+fn a_render_request_with_only_ffprobe_names_ffmpeg() {
+    // `MediaToolchain::new` wants both tools, so once ffprobe resolves the
+    // second one becomes the wall.
+    let config = WorkerConfig::from_values(Some(absolute("ffprobe-test")), None, None);
+    let harness = Harness::start(config, instant_executor());
+    harness.send(&start(&task("0000000b"), render_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("render"), "{}", reasons[0]);
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_FFMPEG"),
+        "{}",
+        reasons[0]
+    );
 }
 
 /// The executor thread must be the named, big-stack one: burn's autodiff graph
@@ -1009,6 +1061,7 @@ fn a_fully_configured_worker_enables_extract_frames_in_the_handshake() {
             TaskKind::ValidateProject,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
+            TaskKind::Render,
             TaskKind::ExtractFrames
         ]
     );

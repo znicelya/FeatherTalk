@@ -26,6 +26,11 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
     if config.media().is_some() {
         commands.push(TaskKind::ProbeMedia);
         commands.push(TaskKind::NormalizeMedia);
+        // Rendering shells out to ffmpeg and to nothing else: the frames, the
+        // landmarks and the audio features are already inside the locked
+        // project, and inference computes no perceptual loss, so neither the
+        // frame models nor a model package are preconditions.
+        commands.push(TaskKind::Render);
         // Extraction needs the media toolchain *and* both model directories.
         if config.models().is_some() {
             commands.push(TaskKind::ExtractFrames);
