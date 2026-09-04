@@ -64,7 +64,8 @@ impl DataLoaderConfig {
         self.sample_count(frame_count).map(|_| ())
     }
 
-    pub(crate) fn sample_count(&self, frame_count: u64) -> Result<u64, TrainingError> {
+    /// Samples per epoch: `frame_count` for single frames, `frame_count - stride` for pairs.
+    pub fn sample_count(&self, frame_count: u64) -> Result<u64, TrainingError> {
         if self.batch_size == 0 {
             return Err(TrainingError::InvalidDataLoaderConfig(
                 "batch_size must be greater than zero".into(),
@@ -260,6 +261,11 @@ impl<D: TrainingDataset> TrainingDataLoader<D> {
 
     pub fn state(&self) -> &DataLoaderState {
         &self.state
+    }
+
+    /// Lends out the dataset this loader samples from.
+    pub fn dataset(&self) -> &D {
+        &self.dataset
     }
 
     pub fn prepare_next_batch(&self) -> Result<PreparedBatch<D::Item>, TrainingError> {

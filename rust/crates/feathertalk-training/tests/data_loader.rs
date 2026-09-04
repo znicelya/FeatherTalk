@@ -376,3 +376,29 @@ fn dataset_failure_during_prepare_leaves_state_unchanged() {
     assert_eq!(calls.get(), 2);
     assert_eq!(loader.state(), &before);
 }
+
+#[test]
+fn sample_count_is_public_for_each_sampling_kind() {
+    assert_eq!(
+        DataLoaderConfig::single_frame(4, 7)
+            .sample_count(10)
+            .unwrap(),
+        10
+    );
+    assert_eq!(
+        DataLoaderConfig::temporal_pair(4, 7, 3)
+            .sample_count(10)
+            .unwrap(),
+        7
+    );
+}
+
+#[test]
+fn the_loader_lends_out_its_dataset() {
+    let loader = TrainingDataLoader::new(
+        PlanDataset { frames: 6 },
+        DataLoaderConfig::single_frame(2, 7),
+    )
+    .unwrap();
+    assert_eq!(loader.dataset().frame_count(), 6);
+}
