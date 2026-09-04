@@ -4,4 +4,4 @@ mod loss;
 mod step;
 
 pub use loss::LossValues;
-pub use step::{data_loader_config_for, train_single_frame_step};
+pub use step::{data_loader_config_for, train_single_frame_step, train_temporal_step};
