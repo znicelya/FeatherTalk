@@ -18,6 +18,11 @@ use crate::{
     execute, ready_frame, supported_commands,
 };
 
+/// The executor thread's stack. A 160x160 training step builds a deep autodiff
+/// graph and overflows the 2 MiB default in a debug build; 64 MiB is the size
+/// `feathertalk-pfld` and `feathertalk-training-run` already settled on.
+const EXECUTION_STACK_BYTES: usize = 64 * 1024 * 1024;
+
 /// How the runtime reaches command execution.
 ///
 /// Production callers use [`serve`], which passes [`crate::execute`]. Tests
@@ -112,8 +117,16 @@ where
     // a handful of small fields, so it gets its own clone instead of a shared
     // borrow.
     let execution_config = config.clone();
-    let execution =
-        thread::spawn(move || run_jobs(&job_rx, &execution_tx, execution_config, executor));
+    // No `DomainError` variant describes a thread failure, and adding one would
+    // widen the wire protocol for something an operator cannot act on, so the
+    // spawn failure follows the same route as the final flush below.
+    let execution = thread::Builder::new()
+        .name("execution".to_owned())
+        .stack_size(EXECUTION_STACK_BYTES)
+        .spawn(move || run_jobs(&job_rx, &execution_tx, execution_config, executor))
+        .map_err(|error| DomainError::MalformedFrame {
+            reason: format!("cannot start the execution thread: {error}"),
+        })?;
 
     let result = control_loop(&control_rx, &mut writer, &job_tx, config);
 

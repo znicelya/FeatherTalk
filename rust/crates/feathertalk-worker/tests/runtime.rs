@@ -509,6 +509,33 @@ fn a_rejected_training_configuration_explains_itself() {
     assert!(reasons[0].contains("absolute"), "{}", reasons[0]);
 }
 
+/// The executor thread must be the named, big-stack one: burn's autodiff graph
+/// for a 160x160 step does not fit in the 2 MiB a bare `thread::spawn` gives.
+fn thread_name_executor(name: Sender<Option<String>>) -> JobExecutor {
+    Box::new(move |_request, _config, _token, _reporter| {
+        let _ = name.send(thread::current().name().map(str::to_owned));
+        CommandOutcome::Completed(None)
+    })
+}
+
+#[test]
+fn commands_run_on_the_named_execution_thread() {
+    let (name_tx, name_rx) = mpsc::channel();
+    let harness = Harness::start(bare_config(), thread_name_executor(name_tx));
+    harness.send(&start(
+        &task("0000000a"),
+        Request::ValidateProject(ProjectDirParams {
+            project_dir: PathBuf::from("C:/tmp/project"),
+        }),
+    ));
+    let observed = name_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the executor ran");
+    harness.finish();
+
+    assert_eq!(observed.as_deref(), Some("execution"));
+}
+
 #[test]
 fn probe_media_is_rejected_when_the_media_toolchain_is_unavailable() {
     let harness = Harness::start(broken_config(), instant_executor());
