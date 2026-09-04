@@ -1,4 +1,17 @@
-use feathertalk_training::{DataLoaderConfig, TrainingConfig, TrainingError, TrainingMode};
+use burn::{
+    module::AutodiffModule,
+    optim::{GradientsParams, Optimizer},
+    tensor::backend::AutodiffBackend,
+};
+use feathertalk_models::unet::TrainableTalkingHead;
+use feathertalk_training::{
+    BaselineLossConfig, DataLoaderConfig, LossBreakdown, MouthRoiLossConfig,
+    PerceptualFeatureExtractor, TrainingConfig, TrainingError, TrainingMode, baseline_loss,
+    mouth_roi_loss,
+};
+use feathertalk_training_data::SingleFrameBatch;
+
+use crate::LossValues;
 
 /// Derives the data-loader config a training mode needs.
 pub fn data_loader_config_for(
@@ -14,4 +27,65 @@ pub fn data_loader_config_for(
             DataLoaderConfig::temporal_pair(config.batch_size, seed, config.temporal_stride)
         }
     })
+}
+
+fn commit_gradients<B, M, O>(
+    model: M,
+    optimizer: &mut O,
+    breakdown: LossBreakdown<B>,
+    learning_rate: f64,
+) -> Result<(M, LossValues), TrainingError>
+where
+    B: AutodiffBackend,
+    M: AutodiffModule<B>,
+    O: Optimizer<M, B>,
+{
+    let values = LossValues::from_breakdown(&breakdown);
+    values.require_finite()?;
+    let gradients = GradientsParams::from_grads(breakdown.total.backward(), &model);
+    Ok((optimizer.step(learning_rate, model, gradients), values))
+}
+
+/// Runs one optimizer step over a single-frame batch.
+pub fn train_single_frame_step<B, M, O, E>(
+    model: M,
+    optimizer: &mut O,
+    extractor: &E,
+    batch: SingleFrameBatch<B>,
+    config: &TrainingConfig,
+) -> Result<(M, LossValues), TrainingError>
+where
+    B: AutodiffBackend,
+    M: TrainableTalkingHead<B> + AutodiffModule<B>,
+    O: Optimizer<M, B>,
+    E: PerceptualFeatureExtractor<B>,
+{
+    let prediction = model.forward_training(batch.image, batch.audio);
+    let breakdown = match config.mode {
+        TrainingMode::Baseline => {
+            let loss_config = BaselineLossConfig {
+                perceptual_weight: config.perceptual_weight,
+            };
+            baseline_loss(extractor, prediction, batch.target, &loss_config)?
+        }
+        TrainingMode::MouthRoi => {
+            let loss_config = MouthRoiLossConfig {
+                mouth_weight: config.mouth_weight,
+                perceptual_weight: config.perceptual_weight,
+            };
+            mouth_roi_loss(
+                extractor,
+                prediction,
+                batch.target,
+                batch.mouth_mask,
+                &loss_config,
+            )?
+        }
+        TrainingMode::MouthRoiTemporal => {
+            return Err(TrainingError::InvalidConfig(
+                "the temporal mode needs train_temporal_step".to_owned(),
+            ));
+        }
+    };
+    commit_gradients(model, optimizer, breakdown, config.learning_rate)
 }
