@@ -127,8 +127,7 @@ fn validate_request(params: &ImportLegacyModelParams) -> Result<(), ImportLegacy
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .ok_or_else(|| failure(TaskStage::Preparing, "source file name must be valid UTF-8"))?;
-    let lowercase = file_name.to_ascii_lowercase();
-    if !lowercase.ends_with(".pth") && !lowercase.ends_with(".pth.tar") {
+    if !file_name.ends_with(".pth") && !file_name.ends_with(".pth.tar") {
         return Err(failure(
             TaskStage::Preparing,
             "legacy model source must end in .pth or .pth.tar",

@@ -51,6 +51,25 @@ fn import_rejects_unsupported_kind_without_creating_destination() {
 }
 
 #[test]
+fn import_rejects_uppercase_legacy_extension() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("model.PTH");
+    fs::write(&source, b"not-read").unwrap();
+    let error = execute_import_legacy_model(
+        &params(
+            source,
+            LegacyModelKind::FeatherHubert,
+            root.path().join("package"),
+        ),
+        &WorkerConfig::from_values(None, None, None),
+        &CancellationToken::new(),
+        &NoReporter,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains(".pth"));
+}
+
+#[test]
 fn import_honours_cancellation_before_import() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("model.pth");
