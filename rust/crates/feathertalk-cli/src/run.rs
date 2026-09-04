@@ -7,8 +7,9 @@ use feathertalk_client::{
     generate_task_id,
 };
 use feathertalk_domain::{
-    ExtractFeaturesParams, ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams,
-    ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
+    ExtractFeaturesParams, ExtractFramesParams, InspectModelParams, NormalizeMediaParams,
+    ProbeMediaParams, ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode,
+    UnetVariant,
 };
 
 use crate::cli::{Cli, Command, TrainMode, TrainVariant};
@@ -148,6 +149,14 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 audio: audio.clone(),
                 output: output.clone(),
                 max_output_frames: *max_output_frames,
+            })))
+        }
+        Command::InspectModel { source } => {
+            reject_empty(source, "模型目录")?;
+            // Which of the two layouts this directory is, and whether the path is
+            // absolute, is the worker's judgement.
+            Ok(Some(Request::InspectModel(InspectModelParams {
+                source: source.clone(),
             })))
         }
     }
@@ -553,5 +562,29 @@ mod tests {
             panic!("render must build a Render request");
         };
         assert_eq!(params.max_output_frames, None);
+    }
+
+    #[test]
+    fn inspect_model_refuses_an_empty_path_by_name() {
+        let error = build_request(&Command::InspectModel {
+            source: PathBuf::new(),
+        })
+        .expect_err("an empty source is refused");
+        assert_eq!(error, "模型目录不能为空。");
+    }
+
+    #[test]
+    fn inspect_model_carries_the_source_into_the_request() {
+        let request = build_request(&Command::InspectModel {
+            source: PathBuf::from("models/hubert"),
+        })
+        .expect("the arguments are accepted")
+        .expect("inspect-model needs a task");
+        let Request::InspectModel(params) = request else {
+            panic!("inspect-model must build an InspectModel request");
+        };
+        // Relative here, absolute demanded by the worker: whether a path is
+        // usable is the worker's judgement, like every other path in this file.
+        assert_eq!(params.source, PathBuf::from("models/hubert"));
     }
 }

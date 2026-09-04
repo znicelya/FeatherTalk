@@ -105,6 +105,11 @@ pub enum Command {
         #[arg(long, value_name = "N")]
         max_output_frames: Option<u64>,
     },
+    /// 检视模型：读取模型包或训练检查点的清单，报告类型、参数量、哈希与兼容状态
+    InspectModel {
+        /// 模型包目录或训练检查点目录
+        source: PathBuf,
+    },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,
 }
