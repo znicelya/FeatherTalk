@@ -7,12 +7,12 @@ use feathertalk_client::{
     generate_task_id,
 };
 use feathertalk_domain::{
-    ExtractFeaturesParams, ExtractFramesParams, InspectModelParams, NormalizeMediaParams,
-    ProbeMediaParams, ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode,
-    UnetVariant,
+    ExtractFeaturesParams, ExtractFramesParams, ImportLegacyModelParams, InspectModelParams,
+    LegacyModelKind, NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, RenderParams,
+    Request, TaskId, TrainParams, TrainingMode, UnetVariant,
 };
 
-use crate::cli::{Cli, Command, TrainMode, TrainVariant};
+use crate::cli::{Cli, Command, LegacyModelKindArg, TrainMode, TrainVariant};
 use crate::render::{HumanSink, JsonSink, capabilities_report, failure_block, render_client_error};
 
 /// The four exit codes, fixed by the spec. Nothing else is ever returned.
@@ -159,6 +159,19 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 source: source.clone(),
             })))
         }
+        Command::ImportLegacyModel {
+            source,
+            kind,
+            destination,
+        } => {
+            reject_empty(source, "旧模型文件")?;
+            reject_empty(destination, "目标目录")?;
+            Ok(Some(Request::ImportLegacyModel(ImportLegacyModelParams {
+                source: source.clone(),
+                kind: legacy_model_kind(*kind),
+                destination: destination.clone(),
+            })))
+        }
     }
 }
 
@@ -182,6 +195,15 @@ fn unet_variant(variant: TrainVariant) -> UnetVariant {
     match variant {
         TrainVariant::OriginalUnet => UnetVariant::OriginalUnet,
         TrainVariant::MobileOneUnet => UnetVariant::MobileOneUnet,
+    }
+}
+
+fn legacy_model_kind(kind: LegacyModelKindArg) -> LegacyModelKind {
+    match kind {
+        LegacyModelKindArg::FeatherHubert => LegacyModelKind::FeatherHubert,
+        LegacyModelKindArg::Pfld => LegacyModelKind::Pfld,
+        LegacyModelKindArg::OriginalUnet => LegacyModelKind::OriginalUnet,
+        LegacyModelKindArg::MobileOneUnet => LegacyModelKind::MobileOneUnet,
     }
 }
 
@@ -586,5 +608,41 @@ mod tests {
         // Relative here, absolute demanded by the worker: whether a path is
         // usable is the worker's judgement, like every other path in this file.
         assert_eq!(params.source, PathBuf::from("models/hubert"));
+    }
+
+    #[test]
+    fn import_legacy_model_carries_paths_and_kind() {
+        let request = build_request(&Command::ImportLegacyModel {
+            source: PathBuf::from("legacy/model.pth"),
+            kind: LegacyModelKindArg::OriginalUnet,
+            destination: PathBuf::from("models/original"),
+        })
+        .expect("the arguments are accepted")
+        .expect("import needs a task");
+        let Request::ImportLegacyModel(params) = request else {
+            panic!("import-legacy-model must build an ImportLegacyModel request");
+        };
+        assert_eq!(params.source, PathBuf::from("legacy/model.pth"));
+        assert_eq!(params.kind, LegacyModelKind::OriginalUnet);
+        assert_eq!(params.destination, PathBuf::from("models/original"));
+    }
+
+    #[test]
+    fn import_legacy_model_refuses_empty_paths() {
+        let error = build_request(&Command::ImportLegacyModel {
+            source: PathBuf::new(),
+            kind: LegacyModelKindArg::FeatherHubert,
+            destination: PathBuf::from("models/package"),
+        })
+        .expect_err("an empty source is refused");
+        assert_eq!(error, "旧模型文件不能为空。");
+
+        let error = build_request(&Command::ImportLegacyModel {
+            source: PathBuf::from("model.pth"),
+            kind: LegacyModelKindArg::FeatherHubert,
+            destination: PathBuf::new(),
+        })
+        .expect_err("an empty destination is refused");
+        assert_eq!(error, "目标目录不能为空。");
     }
 }

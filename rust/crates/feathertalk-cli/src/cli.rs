@@ -35,7 +35,7 @@ pub struct Cli {
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
 /// `normalize-media`, `extract-frames`, `extract-features`,
-/// `lock-asset-package`, `train`, `capabilities`.
+/// `lock-asset-package`, `train`, `inspect-model`, `import-legacy-model`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -110,6 +110,16 @@ pub enum Command {
         /// 模型包目录或训练检查点目录
         source: PathBuf,
     },
+    /// 将旧版模型权重导入标准模型包
+    ImportLegacyModel {
+        /// 旧版 .pth 或 .pth.tar 文件
+        source: PathBuf,
+        /// 旧模型类型
+        #[arg(value_enum)]
+        kind: LegacyModelKindArg,
+        /// 新模型包目录，必须不存在
+        destination: PathBuf,
+    },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,
 }
@@ -136,6 +146,17 @@ pub enum TrainVariant {
     /// Spelled the way the model is spelled everywhere else -- the checkpoint
     /// manifest and the ONNX export both say `mobileone_unet` -- rather than the
     /// `mobile-one-unet` clap would derive from the variant name.
+    #[value(name = "mobileone-unet")]
+    MobileOneUnet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LegacyModelKindArg {
+    #[value(name = "feather-hubert")]
+    FeatherHubert,
+    Pfld,
+    #[value(name = "original-unet")]
+    OriginalUnet,
     #[value(name = "mobileone-unet")]
     MobileOneUnet,
 }
