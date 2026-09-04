@@ -437,7 +437,7 @@ fn real_audio_becomes_features_end_to_end() {
     std::fs::write(project.path().join("project.json"), "{}")
         .expect("the temporary manifest is writable");
     let audio = assets.join("audio_16k_mono.wav");
-    cut_audio(&ffmpeg, &demo, &audio);
+    cut_audio(&ffmpeg, &demo, &audio, "2");
 
     let project_arg = project.path().to_string_lossy().into_owned();
     let audio_arg = audio.to_string_lossy().into_owned();
@@ -490,26 +490,17 @@ fn real_audio_becomes_features_end_to_end() {
     assert!(narration.contains("进度 1/1"), "{narration}");
 }
 
-/// Two seconds of the demo video's audio, decoded into the one shape the reader
+/// `seconds` of the demo video's audio, decoded into the one shape the reader
 /// admits -- 16 kHz, mono, 16-bit PCM -- and written under the name the pipeline
 /// expects. No offset is needed: unlike a video frame, whose face score decides
-/// whether it is usable, any two seconds of this clip's audio extract alike.
-fn cut_audio(ffmpeg: &Path, demo: &Path, audio: &Path) {
+/// whether it is usable, any cut of this clip's audio extracts alike.
+fn cut_audio(ffmpeg: &Path, demo: &Path, audio: &Path, seconds: &str) {
     let output = Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
         .arg("-i")
         .arg(demo)
-        .args([
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-c:a",
-            "pcm_s16le",
-            "-t",
-            "2",
-        ])
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-t"])
+        .arg(seconds)
         .arg(audio)
         .output()
         .expect("ffmpeg runs");
@@ -545,7 +536,7 @@ fn a_real_package_is_locked_end_to_end() {
     std::fs::write(project.path().join("project.json"), "{}")
         .expect("the temporary manifest is writable");
     let audio = assets.join("audio_16k_mono.wav");
-    cut_audio(&ffmpeg, &demo, &audio);
+    cut_audio(&ffmpeg, &demo, &audio, "2");
     // The lock only stats the video; nothing reads it. It is cut with the same
     // helper the extraction test uses so the package keeps its real shape.
     cut_one_second(&ffmpeg, &demo, &assets.join("video_25fps.mp4"));
@@ -629,12 +620,10 @@ fn a_real_package_is_locked_end_to_end() {
 /// never re-hashes a frame.
 fn write_frame_fixtures(assets: &Path, count: u64) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../feathertalk-frame-adapters/tests/fixtures/demo_frame_v1/frame.jpg");
-    let frame_bytes = std::fs::read(&fixture).expect("the committed frame fixture is readable");
-    let mut landmarks = String::new();
-    for point in 0..110 {
-        landmarks.push_str(&format!("{point} {point}\n"));
-    }
+        .join("../feathertalk-frame-adapters/tests/fixtures/demo_frame_v1");
+    let frame_bytes =
+        std::fs::read(fixture.join("frame.jpg")).expect("the committed frame fixture is readable");
+    let landmarks = fixture_landmarks(&fixture);
     let mut frames = Vec::new();
     for index in 0..count {
         let frame_file = format!("frames/{index:06}.jpg");
@@ -663,4 +652,164 @@ fn write_frame_fixtures(assets: &Path, count: u64) {
     });
     let text = serde_json::to_string_pretty(&report).expect("the report serializes");
     std::fs::write(assets.join("quality.json"), text).expect("the report is writable");
+}
+
+/// The 110 landmarks the fixture records for `frame.jpg`, in the `.lms` shape the
+/// frame pipeline writes: one `x y` line per point, in detection order. The
+/// coordinates have to be the real ones -- points 1, 31 and 52 are the face box a
+/// training run crops to, and 90..110 are the mouth it projects into the inner
+/// crop.
+fn fixture_landmarks(fixture: &Path) -> String {
+    let manifest = std::fs::read_to_string(fixture.join("fixture.json"))
+        .expect("the fixture manifest is readable");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest).expect("the fixture manifest is JSON");
+    let points = manifest["frames"]["sharp"]["landmarks"]
+        .as_array()
+        .expect("the sharp frame records its landmarks");
+    let mut text = String::new();
+    for point in points {
+        let x = point[0].as_f64().expect("a landmark x is a number");
+        let y = point[1].as_f64().expect("a landmark y is a number");
+        text.push_str(&format!("{x} {y}\n"));
+    }
+    text
+}
+
+/// The frames the training test locks, and half the tokens
+/// `TRAINED_AUDIO_SECONDS` extracts: `2 * frame_count` exactly, so the lock fits
+/// the feature file without trimming a token.
+const TRAINED_FRAME_COUNT: u64 = 4;
+
+/// 0.18 s at 16 kHz is 2 880 samples, which the 400-sample kernel and the
+/// 320-sample stride turn into `(2 880 - 80) / 320` = 8 FeatherHuBERT frames and
+/// so into 8 tokens. Every cut from 2 640 to 3 279 samples yields the same 8,
+/// which is the slack this leaves a resampler that hands over a few samples more
+/// or fewer than the arithmetic above.
+const TRAINED_AUDIO_SECONDS: &str = "0.18";
+
+/// A manifest `validate_project_dir` accepts. `extract-features` and
+/// `lock-asset-package` only need the file to exist, which is why the tests
+/// above write `{}`; training opens the project properly and reads every field.
+const PROJECT_MANIFEST: &str = r#"{
+  "schema_version": 1,
+  "project_id": "demo",
+  "display_name": "Demo",
+  "asset_package": "assets/assets.json",
+  "default_model": "original_unet",
+  "task_history": []
+}"#;
+
+/// The whole training command, over a package this test locks itself, and only
+/// when the real ffmpeg, a built FeatherHuBERT package, a built VGG19 package
+/// and the demo clip are all present. Anything missing is a skip rather than a
+/// failure, for the reason the tests above give.
+#[test]
+fn a_real_project_is_trained_end_to_end() {
+    let Some(worker) = worker_or_skip("a_real_project_is_trained_end_to_end") else {
+        return;
+    };
+    let (Some(ffmpeg), Some(hubert), Some(vgg19), Some(demo)) = (
+        real_tool("FFMPEG"),
+        real_dir("HUBERT_DIR"),
+        real_dir("VGG19_DIR"),
+        demo_clip(),
+    ) else {
+        println!(
+            "skipping a_real_project_is_trained_end_to_end: it needs \
+             FEATHERTALK_WORKER_FFMPEG, FEATHERTALK_WORKER_HUBERT_DIR, \
+             FEATHERTALK_WORKER_VGG19_DIR, and \
+             demo/feathertalk_demo_latest_188.mp4"
+        );
+        return;
+    };
+    let project = TempDir::new().expect("a temporary directory is available");
+    let assets = project.path().join("assets");
+    for directory in ["frames", "landmarks"] {
+        std::fs::create_dir_all(assets.join(directory)).expect("the assets tree is writable");
+    }
+    std::fs::write(project.path().join("project.json"), PROJECT_MANIFEST)
+        .expect("the temporary manifest is writable");
+    let audio = assets.join("audio_16k_mono.wav");
+    cut_audio(&ffmpeg, &demo, &audio, TRAINED_AUDIO_SECONDS);
+    // Nothing reads the video: the lock stats it and so does the project
+    // validation the dataset runs. It is cut with the helper the tests above use.
+    cut_one_second(&ffmpeg, &demo, &assets.join("video_25fps.mp4"));
+
+    let project_arg = project.path().to_string_lossy().into_owned();
+    let audio_arg = audio.to_string_lossy().into_owned();
+    let hubert_arg = hubert.to_string_lossy().into_owned();
+    let vgg19_arg = vgg19.to_string_lossy().into_owned();
+    let hubert_env = [("FEATHERTALK_WORKER_HUBERT_DIR", hubert_arg.as_str())];
+    let output = run(
+        &worker,
+        &["extract-features", &project_arg, &audio_arg],
+        &hubert_env,
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let extracted: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    // The audio cut is pinned here rather than left to a comment: if a resampler
+    // ever moves the sample count out of the window above, this is the assertion
+    // that names the number.
+    assert_eq!(extracted["tokens"], 8);
+    assert_eq!(extracted["frame_count"], TRAINED_FRAME_COUNT);
+
+    write_frame_fixtures(&assets, TRAINED_FRAME_COUNT);
+    let output = run(&worker, &["lock-asset-package", &project_arg], &hubert_env);
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let locked: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(locked["frame_count"], TRAINED_FRAME_COUNT);
+    assert_eq!(locked["token_adjustment"], 0);
+
+    let output = run(
+        &worker,
+        &["train", &project_arg, "--mode", "baseline", "--epochs", "1"],
+        &[("FEATHERTALK_WORKER_VGG19_DIR", vgg19_arg.as_str())],
+    );
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(result["mode"], "baseline");
+    assert_eq!(result["variant"], "original_unet");
+    assert_eq!(result["model_kind"], "original_unet");
+    assert_eq!(result["backend"], "ndarray-cpu");
+    assert_eq!(result["model_config_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(result["frame_count"], TRAINED_FRAME_COUNT);
+    assert_eq!(result["epochs_requested"], 1);
+    assert_eq!(result["epochs_completed"], 1);
+    // One step per frame, and the one epoch boundary is the only publish point.
+    assert_eq!(result["global_step"], TRAINED_FRAME_COUNT);
+    assert_eq!(result["samples_seen"], TRAINED_FRAME_COUNT);
+    assert_eq!(result["resumed_from"], serde_json::Value::Null);
+    assert_eq!(result["checkpoints_written"], 1);
+    assert_eq!(result["metrics_written"], 1);
+    assert_eq!(result["previews_written"], 1);
+    let loss = result["total_loss"]
+        .as_f64()
+        .expect("a finished run reports the loss it last saw");
+    assert!(loss.is_finite() && loss >= 0.0, "{loss}");
+
+    // The three artifacts a publish writes, every one of them named by the same
+    // global step. The checkpoint is joined one component at a time because the
+    // worker reports a native path and `join` keeps a forward slash as written.
+    let checkpoint = project
+        .path()
+        .join("models")
+        .join("unet")
+        .join("checkpoint-00000004");
+    assert_eq!(result["checkpoint_dir"], checkpoint.display().to_string());
+    assert!(checkpoint.join("manifest.json").is_file());
+    let outputs = project.path().join("outputs");
+    assert!(outputs.join("metrics/step-00000004.json").is_file());
+    assert!(
+        outputs
+            .join("preview/step-00000004/manifest.json")
+            .is_file()
+    );
+
+    let narration = stderr(&output);
+    assert!(narration.contains("正在训练"), "{narration}");
+    assert!(narration.contains("进度 4/4"), "{narration}");
 }
