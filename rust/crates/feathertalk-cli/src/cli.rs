@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// The command line. Help text is Chinese, because the user is.
 #[derive(Debug, Parser)]
@@ -35,7 +35,7 @@ pub struct Cli {
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
 /// `normalize-media`, `extract-frames`, `extract-features`,
-/// `lock-asset-package`, `capabilities`.
+/// `lock-asset-package`, `train`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -74,6 +74,49 @@ pub enum Command {
         /// 工程目录
         project_dir: PathBuf,
     },
+    /// 训练 U-Net：读取已加锁的工程，按轮数训练并写出检查点与诊断产物
+    Train {
+        /// 工程目录
+        project_dir: PathBuf,
+        /// 训练模式
+        #[arg(long, value_enum, default_value_t = TrainMode::Baseline)]
+        mode: TrainMode,
+        /// 模型变体
+        #[arg(long, value_enum, default_value_t = TrainVariant::OriginalUnet)]
+        variant: TrainVariant,
+        /// 训练轮数
+        #[arg(long)]
+        epochs: u32,
+        /// 从最新检查点继续训练，没有检查点时报错
+        #[arg(long)]
+        resume: bool,
+    },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,
+}
+
+/// The training modes, mirrored from `feathertalk-domain` because `ValueEnum`
+/// has to be derived on a local type. `run.rs` maps them onto the domain enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TrainMode {
+    /// 基线：整幅 L1 加感知损失
+    Baseline,
+    /// 基线之上加嘴部 ROI 权重
+    MouthRoi,
+    /// 嘴部 ROI 之上加相邻帧的时序一致性
+    Temporal,
+}
+
+/// The U-Net variants, mirrored for the same reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TrainVariant {
+    /// 原版 U-Net
+    OriginalUnet,
+    /// MobileOne U-Net
+    ///
+    /// Spelled the way the model is spelled everywhere else -- the checkpoint
+    /// manifest and the ONNX export both say `mobileone_unet` -- rather than the
+    /// `mobile-one-unet` clap would derive from the variant name.
+    #[value(name = "mobileone-unet")]
+    MobileOneUnet,
 }

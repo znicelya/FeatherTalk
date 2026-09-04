@@ -8,10 +8,10 @@ use feathertalk_client::{
 };
 use feathertalk_domain::{
     ExtractFeaturesParams, ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams,
-    ProjectDirParams, Request, TaskId,
+    ProjectDirParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
 };
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, TrainMode, TrainVariant};
 use crate::render::{HumanSink, JsonSink, capabilities_report, failure_block, render_client_error};
 
 /// The four exit codes, fixed by the spec. Nothing else is ever returned.
@@ -112,6 +112,23 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 project_dir: project_dir.clone(),
             })))
         }
+        Command::Train {
+            project_dir,
+            mode,
+            variant,
+            epochs,
+            resume,
+        } => {
+            reject_empty(project_dir, "工程目录")?;
+            // The epoch range is the worker's judgement, like every path here.
+            Ok(Some(Request::Train(TrainParams {
+                project_dir: project_dir.clone(),
+                mode: training_mode(*mode),
+                variant: unet_variant(*variant),
+                epochs: *epochs,
+                resume: *resume,
+            })))
+        }
     }
 }
 
@@ -120,6 +137,22 @@ fn reject_empty(path: &Path, label: &str) -> Result<(), String> {
         return Err(format!("{label}不能为空。"));
     }
     Ok(())
+}
+
+/// The only place where clap's kebab-cased values meet the domain enums.
+fn training_mode(mode: TrainMode) -> TrainingMode {
+    match mode {
+        TrainMode::Baseline => TrainingMode::Baseline,
+        TrainMode::MouthRoi => TrainingMode::MouthRoi,
+        TrainMode::Temporal => TrainingMode::Temporal,
+    }
+}
+
+fn unet_variant(variant: TrainVariant) -> UnetVariant {
+    match variant {
+        TrainVariant::OriginalUnet => UnetVariant::OriginalUnet,
+        TrainVariant::MobileOneUnet => UnetVariant::MobileOneUnet,
+    }
 }
 
 fn run_task(session: &mut WorkerSession, cli: &Cli, request: Request) -> i32 {
@@ -328,5 +361,69 @@ mod tests {
         let error = resolve_task_id(Some("nope")).expect_err("a short id is refused");
         assert!(error.contains("任务 ID 无效"), "{error}");
         assert!(error.contains("13 位毫秒时间戳"), "{error}");
+    }
+
+    #[test]
+    fn train_refuses_an_empty_project_directory() {
+        let error = build_request(&Command::Train {
+            project_dir: PathBuf::new(),
+            mode: TrainMode::Baseline,
+            variant: TrainVariant::OriginalUnet,
+            epochs: 1,
+            resume: false,
+        })
+        .expect_err("an empty project directory is refused");
+        assert_eq!(error, "工程目录不能为空。");
+    }
+
+    #[test]
+    fn train_carries_every_flag_into_the_request() {
+        let request = build_request(&Command::Train {
+            project_dir: PathBuf::from("project"),
+            mode: TrainMode::Temporal,
+            variant: TrainVariant::MobileOneUnet,
+            epochs: 3,
+            resume: true,
+        })
+        .expect("the arguments are accepted")
+        .expect("train needs a task");
+        let Request::Train(params) = request else {
+            panic!("train must build a Train request");
+        };
+        assert_eq!(params.project_dir, PathBuf::from("project"));
+        assert_eq!(params.mode, TrainingMode::Temporal);
+        assert_eq!(params.variant, UnetVariant::MobileOneUnet);
+        assert_eq!(params.epochs, 3);
+        assert!(params.resume);
+    }
+
+    #[test]
+    fn an_out_of_range_epoch_count_is_left_to_the_worker() {
+        // The CLI does not know `MAX_EPOCHS`, and two answers that can disagree
+        // are worse than one; the worker rejects it with a Chinese summary.
+        let request = build_request(&Command::Train {
+            project_dir: PathBuf::from("project"),
+            mode: TrainMode::Baseline,
+            variant: TrainVariant::OriginalUnet,
+            epochs: 0,
+            resume: false,
+        })
+        .expect("zero epochs still builds a request");
+        assert!(request.is_some());
+    }
+
+    #[test]
+    fn every_mirrored_value_maps_onto_the_domain() {
+        assert_eq!(training_mode(TrainMode::Baseline), TrainingMode::Baseline);
+        assert_eq!(training_mode(TrainMode::MouthRoi), TrainingMode::MouthRoi);
+        assert_eq!(training_mode(TrainMode::Temporal), TrainingMode::Temporal);
+        assert_eq!(
+            unet_variant(TrainVariant::OriginalUnet),
+            UnetVariant::OriginalUnet
+        );
+        assert_eq!(
+            unet_variant(TrainVariant::MobileOneUnet),
+            UnetVariant::MobileOneUnet
+        );
     }
 }

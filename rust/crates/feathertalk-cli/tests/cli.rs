@@ -201,3 +201,34 @@ fn an_unsupported_lock_asset_package_names_the_hubert_variable() {
     assert!(text.contains("lock_asset_package"), "{text}");
     assert!(text.contains("FEATHERTALK_WORKER_HUBERT_DIR"), "{text}");
 }
+
+#[test]
+fn an_unsupported_train_names_the_vgg19_variable() {
+    // The fake worker advertises `validate_project` alone, so the client's
+    // capability gate answers before any task starts.
+    let output = run("only-validate", &["train", "p", "--epochs", "1"]);
+    assert_eq!(code(&output), 3);
+    let text = stderr(&output);
+    assert!(text.contains("train"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_VGG19_DIR"), "{text}");
+}
+
+#[test]
+fn an_unknown_training_mode_is_refused_with_the_choices() {
+    let output = run(
+        "ready-complete",
+        &["train", "p", "--epochs", "1", "--mode", "mouth"],
+    );
+    assert_eq!(code(&output), 3, "a usage error is a session error");
+    // Clap owns this message, which is exactly why the enums are mirrored.
+    let text = stderr(&output);
+    assert!(text.contains("mouth-roi"), "{text}");
+    assert!(text.contains("temporal"), "{text}");
+}
+
+#[test]
+fn train_needs_an_epoch_count() {
+    let output = run("ready-complete", &["train", "p"]);
+    assert_eq!(code(&output), 3);
+    assert!(stderr(&output).contains("--epochs"), "{}", stderr(&output));
+}

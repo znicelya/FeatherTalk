@@ -26,6 +26,11 @@ const ENV_WORKER_PFLD_DIR: &str = "FEATHERTALK_WORKER_PFLD_DIR";
 /// truth for this name.
 const ENV_WORKER_HUBERT_DIR: &str = "FEATHERTALK_WORKER_HUBERT_DIR";
 
+/// The worker's variable for the VGG19 package directory, a literal for the same
+/// reason as the others: `feathertalk-worker`'s `ENV_VGG19_DIR` is the source of
+/// truth for this name.
+const ENV_WORKER_VGG19_DIR: &str = "FEATHERTALK_WORKER_VGG19_DIR";
+
 /// The Chinese name of every stage.
 ///
 /// No `_` arm on purpose: adding a stage to the protocol must break this match.
@@ -299,6 +304,11 @@ pub fn render_client_error(error: &ClientError) -> String {
                 text.push_str(&format!(
                     "\n{requested} 需要 FeatherHuBERT 模型包来记录编码器摘要。\
                      请用环境变量 {ENV_WORKER_HUBERT_DIR} 指定模型包目录的完整路径。"
+                ));
+            } else if *requested == "train" {
+                text.push_str(&format!(
+                    "\n{requested} 需要 VGG19 感知损失模型包。请用环境变量 \
+                     {ENV_WORKER_VGG19_DIR} 指定模型包目录的完整路径。"
                 ));
             }
             text
