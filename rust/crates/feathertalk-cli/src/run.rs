@@ -8,7 +8,7 @@ use feathertalk_client::{
 };
 use feathertalk_domain::{
     ExtractFeaturesParams, ExtractFramesParams, NormalizeMediaParams, ProbeMediaParams,
-    ProjectDirParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
+    ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
 };
 
 use crate::cli::{Cli, Command, TrainMode, TrainVariant};
@@ -127,6 +127,27 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 variant: unet_variant(*variant),
                 epochs: *epochs,
                 resume: *resume,
+            })))
+        }
+        Command::Render {
+            project_dir,
+            checkpoint,
+            audio,
+            output,
+            max_output_frames,
+        } => {
+            reject_empty(project_dir, "工程目录")?;
+            reject_empty(checkpoint, "检查点目录")?;
+            reject_empty(audio, "音频文件")?;
+            reject_empty(output, "输出文件")?;
+            // Whether these paths are absolute, and whether the cap is a number
+            // this machine can render, is the worker's judgement.
+            Ok(Some(Request::Render(RenderParams {
+                project_dir: project_dir.clone(),
+                checkpoint: checkpoint.clone(),
+                audio: audio.clone(),
+                output: output.clone(),
+                max_output_frames: *max_output_frames,
             })))
         }
     }
@@ -425,5 +446,112 @@ mod tests {
             unet_variant(TrainVariant::MobileOneUnet),
             UnetVariant::MobileOneUnet
         );
+    }
+
+    /// The four paths a render names, with one of them blanked out.
+    fn render_with(
+        project_dir: PathBuf,
+        checkpoint: PathBuf,
+        audio: PathBuf,
+        output: PathBuf,
+    ) -> Command {
+        Command::Render {
+            project_dir,
+            checkpoint,
+            audio,
+            output,
+            max_output_frames: None,
+        }
+    }
+
+    #[test]
+    fn render_refuses_an_empty_path_by_name() {
+        // One case per path, because the label is what tells the operator which
+        // of four arguments was the empty one.
+        let cases = [
+            (
+                render_with(
+                    PathBuf::new(),
+                    PathBuf::from("checkpoint"),
+                    PathBuf::from("voice.wav"),
+                    PathBuf::from("preview.mp4"),
+                ),
+                "工程目录不能为空。",
+            ),
+            (
+                render_with(
+                    PathBuf::from("project"),
+                    PathBuf::new(),
+                    PathBuf::from("voice.wav"),
+                    PathBuf::from("preview.mp4"),
+                ),
+                "检查点目录不能为空。",
+            ),
+            (
+                render_with(
+                    PathBuf::from("project"),
+                    PathBuf::from("checkpoint"),
+                    PathBuf::new(),
+                    PathBuf::from("preview.mp4"),
+                ),
+                "音频文件不能为空。",
+            ),
+            (
+                render_with(
+                    PathBuf::from("project"),
+                    PathBuf::from("checkpoint"),
+                    PathBuf::from("voice.wav"),
+                    PathBuf::new(),
+                ),
+                "输出文件不能为空。",
+            ),
+        ];
+
+        for (command, expected) in cases {
+            let error = build_request(&command).expect_err("an empty path is refused");
+            assert_eq!(error, expected);
+        }
+    }
+
+    #[test]
+    fn render_carries_every_flag_into_the_request() {
+        let request = build_request(&Command::Render {
+            project_dir: PathBuf::from("project"),
+            checkpoint: PathBuf::from("project/models/unet/checkpoint-00000004"),
+            audio: PathBuf::from("voice.wav"),
+            output: PathBuf::from("preview.mp4"),
+            max_output_frames: Some(2),
+        })
+        .expect("the arguments are accepted")
+        .expect("render needs a task");
+        let Request::Render(params) = request else {
+            panic!("render must build a Render request");
+        };
+        assert_eq!(params.project_dir, PathBuf::from("project"));
+        assert_eq!(
+            params.checkpoint,
+            PathBuf::from("project/models/unet/checkpoint-00000004")
+        );
+        assert_eq!(params.audio, PathBuf::from("voice.wav"));
+        assert_eq!(params.output, PathBuf::from("preview.mp4"));
+        // The cap passes through untouched: whether a number is acceptable is the
+        // worker's judgement, like every path here.
+        assert_eq!(params.max_output_frames, Some(2));
+    }
+
+    #[test]
+    fn a_render_without_a_cap_asks_for_the_whole_project() {
+        let request = build_request(&render_with(
+            PathBuf::from("project"),
+            PathBuf::from("checkpoint"),
+            PathBuf::from("voice.wav"),
+            PathBuf::from("preview.mp4"),
+        ))
+        .expect("the arguments are accepted")
+        .expect("render needs a task");
+        let Request::Render(params) = request else {
+            panic!("render must build a Render request");
+        };
+        assert_eq!(params.max_output_frames, None);
     }
 }

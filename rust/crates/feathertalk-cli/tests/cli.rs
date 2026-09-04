@@ -214,6 +214,18 @@ fn an_unsupported_train_names_the_vgg19_variable() {
 }
 
 #[test]
+fn an_unsupported_render_names_the_media_variables() {
+    // The fake worker advertises `validate_project` alone, so the client's
+    // capability gate answers before any task starts.
+    let output = run("only-validate", &["render", "p", "c", "a.wav", "o.mp4"]);
+    assert_eq!(code(&output), 3);
+    let text = stderr(&output);
+    assert!(text.contains("render"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_FFPROBE"), "{text}");
+    assert!(text.contains("FEATHERTALK_WORKER_FFMPEG"), "{text}");
+}
+
+#[test]
 fn an_unknown_training_mode_is_refused_with_the_choices() {
     let output = run(
         "ready-complete",

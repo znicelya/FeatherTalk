@@ -310,6 +310,12 @@ pub fn render_client_error(error: &ClientError) -> String {
                     "\n{requested} 需要 VGG19 感知损失模型包。请用环境变量 \
                      {ENV_WORKER_VGG19_DIR} 指定模型包目录的完整路径。"
                 ));
+            } else if *requested == "render" {
+                text.push_str(&format!(
+                    "\n{requested} 需要可用的 ffprobe 与 ffmpeg 来写出视频。请安装 ffmpeg，\
+                     或用环境变量 {ENV_WORKER_FFPROBE} 与 {ENV_WORKER_FFMPEG} \
+                     指定它们的完整路径。"
+                ));
             }
             text
         }

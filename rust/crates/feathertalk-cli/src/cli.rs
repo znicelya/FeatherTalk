@@ -91,6 +91,20 @@ pub enum Command {
         #[arg(long)]
         resume: bool,
     },
+    /// 渲染视频：用检查点权重逐帧推理，并混入指定音轨
+    Render {
+        /// 工程目录
+        project_dir: PathBuf,
+        /// 检查点目录，例如 models/unet/checkpoint-00000004
+        checkpoint: PathBuf,
+        /// 混入输出视频的音频文件
+        audio: PathBuf,
+        /// 输出的 mp4 文件，不能已存在
+        output: PathBuf,
+        /// 最多渲染多少帧，默认渲染整个工程
+        #[arg(long, value_name = "N")]
+        max_output_frames: Option<u64>,
+    },
     /// 打印工作进程的握手信息：后端、设备、支持的命令
     Capabilities,
 }
