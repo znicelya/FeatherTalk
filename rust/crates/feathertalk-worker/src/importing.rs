@@ -139,11 +139,15 @@ fn validate_request(params: &ImportLegacyModelParams) -> Result<(), ImportLegacy
             "destination path must be absolute",
         ));
     }
-    if fs::symlink_metadata(&params.destination).is_ok() {
-        return Err(failure(
-            TaskStage::Preparing,
-            "destination must not already exist",
-        ));
+    match fs::symlink_metadata(&params.destination) {
+        Ok(_) => {
+            return Err(failure(
+                TaskStage::Preparing,
+                "destination must not already exist",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(failure(TaskStage::Preparing, error.to_string())),
     }
     let parent = params
         .destination
