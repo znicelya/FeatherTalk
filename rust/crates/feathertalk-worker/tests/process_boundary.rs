@@ -35,7 +35,12 @@ fn the_binary_announces_itself_and_exits_zero_on_shutdown() {
         panic!("the first frame must be ready: {ready_line}");
     };
     assert_eq!(ready.protocol_version, PROTOCOL_VERSION);
-    assert_eq!(ready.supported_commands, vec![TaskKind::ValidateProject]);
+    // The two commands that need no toolchain, which is all a cleared
+    // environment can offer.
+    assert_eq!(
+        ready.supported_commands,
+        vec![TaskKind::ValidateProject, TaskKind::InspectModel]
+    );
 
     let shutdown = ClientFrame::Shutdown(ShutdownFrame {
         protocol_version: PROTOCOL_VERSION,

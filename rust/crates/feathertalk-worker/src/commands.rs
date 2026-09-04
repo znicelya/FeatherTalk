@@ -11,8 +11,8 @@ use feathertalk_project::validate_project_dir;
 
 use crate::{
     FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
-    execute_extract_frames, execute_lock_asset_package, execute_render, execute_train,
-    is_media_cancellation, media_task_error, normalize_to_json, package_task_error,
+    execute_extract_frames, execute_inspect_model, execute_lock_asset_package, execute_render,
+    execute_train, is_media_cancellation, media_task_error, normalize_to_json, package_task_error,
     pipeline_task_error, probe_to_json, project_task_error,
 };
 
@@ -173,6 +173,9 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 &SystemRawVideoSinkFactory,
             )
         }
+        // No toolchain guard: inspection reads manifests, so the handshake
+        // announces it unconditionally and there is nothing to reject on.
+        Request::InspectModel(params) => execute_inspect_model(params, config, token),
         other => CommandOutcome::Failed(unsupported(other.kind())),
     }
 }
