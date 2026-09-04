@@ -3,7 +3,7 @@ use std::time::Duration;
 use feathertalk_domain::{AdapterKind, Backend, TaskKind};
 use feathertalk_worker::{
     CPU_ADAPTER_ID, DEFAULT_MEDIA_TIMEOUT_MS, ENV_FFPROBE, ENV_HUBERT_DIR, ENV_MEDIA_TIMEOUT_MS,
-    ENV_SCRFD_DIR, WorkerConfig, ready_frame, supported_commands,
+    ENV_SCRFD_DIR, ENV_VGG19_DIR, WorkerConfig, ready_frame, supported_commands,
 };
 
 fn absolute(name: &str) -> String {
@@ -243,4 +243,78 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
             TaskKind::LockAssetPackage
         ]
     );
+}
+
+/// Training is orthogonal to media and models: the VGG19 package alone is
+/// enough to offer `train`.
+fn training_only() -> WorkerConfig {
+    WorkerConfig::from_values_with_training(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(absolute("vgg19-test")),
+    )
+}
+
+#[test]
+fn a_worker_with_a_vgg19_package_offers_train() {
+    let config = training_only();
+    assert_eq!(config.training_rejection(), None);
+    let frame = ready_frame(&config);
+    frame.validate().unwrap();
+    assert_eq!(
+        frame.supported_commands,
+        vec![TaskKind::ValidateProject, TaskKind::Train]
+    );
+    assert!(frame.capabilities.training);
+    // Design section 4: the worker never promises GPU training in this slice.
+    assert!(!frame.capabilities.wgpu_training);
+    assert_eq!(frame.backends, vec![Backend::Cpu]);
+    assert_eq!(frame.adapters.len(), 1);
+    assert_eq!(frame.adapters[0].id, CPU_ADAPTER_ID);
+}
+
+#[test]
+fn every_toolchain_plus_vgg19_offers_every_command() {
+    let config = WorkerConfig::from_values_with_training(
+        Some(absolute("ffprobe-test")),
+        Some(absolute("ffmpeg-test")),
+        None,
+        Some(absolute("scrfd-test")),
+        Some(absolute("pfld-test")),
+        Some(absolute("hubert-test")),
+        Some(absolute("vgg19-test")),
+    );
+    let frame = ready_frame(&config);
+    frame.validate().unwrap();
+    assert_eq!(
+        frame.supported_commands,
+        vec![
+            TaskKind::ValidateProject,
+            TaskKind::ProbeMedia,
+            TaskKind::NormalizeMedia,
+            TaskKind::ExtractFrames,
+            TaskKind::ExtractFeatures,
+            TaskKind::LockAssetPackage,
+            TaskKind::Train
+        ]
+    );
+    assert!(frame.capabilities.training);
+    assert!(frame.capabilities.ffmpeg);
+}
+
+#[test]
+fn a_worker_without_a_vgg19_package_leaves_train_out() {
+    let config = every_toolchain();
+    assert!(config.training().is_none());
+    assert!(
+        config
+            .training_rejection()
+            .is_some_and(|reason| reason.contains(ENV_VGG19_DIR))
+    );
+    assert!(!supported_commands(&config).contains(&TaskKind::Train));
+    assert!(!ready_frame(&config).capabilities.training);
 }

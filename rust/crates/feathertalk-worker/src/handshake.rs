@@ -40,6 +40,12 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
         // `assets.json`, which is what later runs compare against.
         commands.push(TaskKind::LockAssetPackage);
     }
+    // Training needs no media tools and no frame models: the frames, landmarks
+    // and audio features are already inside the locked project, so the
+    // perceptual-loss package is its only requirement.
+    if config.training().is_some() {
+        commands.push(TaskKind::Train);
+    }
     commands
 }
 
@@ -51,7 +57,7 @@ pub fn ready_frame(config: &WorkerConfig) -> ReadyFrame {
         adapters: vec![cpu_adapter()],
         supported_commands: supported_commands(config),
         capabilities: Capabilities {
-            training: false,
+            training: config.training().is_some(),
             wgpu_training: false,
             onnx_validation: false,
             ffmpeg: config.media().is_some(),

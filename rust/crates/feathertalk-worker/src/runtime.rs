@@ -14,8 +14,8 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     AdapterLockError, AdapterLocks, CPU_ADAPTER_ID, CommandOutcome, ENV_FFMPEG, ENV_FFPROBE,
-    ENV_HUBERT_DIR, ENV_PFLD_DIR, ENV_SCRFD_DIR, TaskReporter, WorkerConfig, execute, ready_frame,
-    supported_commands,
+    ENV_HUBERT_DIR, ENV_PFLD_DIR, ENV_SCRFD_DIR, ENV_VGG19_DIR, TaskReporter, WorkerConfig,
+    execute, ready_frame, supported_commands,
 };
 
 /// How the runtime reaches command execution.
@@ -402,6 +402,9 @@ fn unsupported_reason(request: &Request, config: &WorkerConfig) -> String {
         // The lock reads files the earlier commands already wrote, so the
         // package directory is its only wall too.
         TaskKind::LockAssetPackage => feature_reason(slug, config),
+        // Training reads a locked project off disk, so the perceptual-loss
+        // package is its only wall.
+        TaskKind::Train => training_reason(slug, config),
         // Listing `supported_commands` instead of a hard-coded set keeps this
         // message correct as later commands land.
         _ => format!(
@@ -446,6 +449,17 @@ fn feature_reason(slug: &str, config: &WorkerConfig) -> String {
         None => format!(
             "命令 {slug} 需要 FeatherHuBERT 特征模型，请设置 {ENV_HUBERT_DIR} 后重启 worker。"
         ),
+    }
+}
+
+fn training_reason(slug: &str, config: &WorkerConfig) -> String {
+    match config.training_rejection() {
+        Some(rejection) => format!(
+            "命令 {slug} 需要可用的感知损失模型目录，当前配置被拒绝：{rejection}。修正后重启 worker。"
+        ),
+        None => {
+            format!("命令 {slug} 需要 VGG19 感知损失模型，请设置 {ENV_VGG19_DIR} 后重启 worker。")
+        }
     }
 }
 

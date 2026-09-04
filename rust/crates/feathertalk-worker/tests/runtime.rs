@@ -475,10 +475,38 @@ fn an_unsupported_command_is_rejected_without_creating_a_task() {
     let reasons = rejections(&frames);
     assert_eq!(reasons.len(), 1, "{frames:?}");
     assert!(reasons[0].contains("train"), "{}", reasons[0]);
+    // The reason has to name the variable an operator can fix.
+    assert!(
+        reasons[0].contains("FEATHERTALK_WORKER_VGG19_DIR"),
+        "{}",
+        reasons[0]
+    );
     assert!(
         events(&frames).is_empty(),
         "a rejected start creates no task"
     );
+}
+
+#[test]
+fn a_rejected_training_configuration_explains_itself() {
+    let config = WorkerConfig::from_values_with_training(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("vgg19".to_owned()),
+    );
+    let harness = Harness::start(config, instant_executor());
+    harness.send(&start(&task("0000000a"), train_request()));
+    let frames = harness.finish();
+
+    let reasons = rejections(&frames);
+    assert_eq!(reasons.len(), 1, "{frames:?}");
+    assert!(reasons[0].contains("train"), "{}", reasons[0]);
+    // A relative path is a rejection, not an absence, so the reason quotes it.
+    assert!(reasons[0].contains("absolute"), "{}", reasons[0]);
 }
 
 #[test]
