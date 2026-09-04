@@ -507,6 +507,93 @@ where
     })
 }
 
+/// Everything a checkpoint says about itself, with no Burn record read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrainingCheckpointMetadata {
+    pub manifest: TrainingCheckpointManifest,
+    pub state: TrainingCheckpointState,
+}
+
+/// A model restored from a checkpoint, next to the metadata that described it.
+#[derive(Debug, Clone)]
+pub struct RestoredCheckpointModel<M> {
+    pub model: M,
+    pub metadata: TrainingCheckpointMetadata,
+}
+
+/// Reads a checkpoint's manifest and training state, and nothing else.
+///
+/// The preflight is `load_training_checkpoint`'s, in the same order and with the
+/// same bounds: no symbolic link on the path, a validated checkpoint directory,
+/// then the two JSON documents read under their size caps and validated.
+///
+/// This exists for a caller that cannot build a model template yet, because the
+/// template depends on the model variant and the variant is only written in the
+/// manifest. Rendering reads this first, picks the configuration it names, and
+/// then calls [`load_training_checkpoint_model`].
+pub fn read_training_checkpoint(
+    directory: impl AsRef<Path>,
+) -> Result<TrainingCheckpointMetadata, TrainingError> {
+    let directory = directory.as_ref();
+    crate::checkpoint_io::reject_symlink_components(directory)?;
+    crate::checkpoint_io::validate_checkpoint_directory(directory)?;
+    let manifest: TrainingCheckpointManifest = read_checkpoint_json(
+        &directory.join(CHECKPOINT_MANIFEST_FILE_NAME),
+        crate::checkpoint_io::MANIFEST_MAX_BYTES,
+        "checkpoint manifest",
+    )?;
+    manifest.validate()?;
+    let state: TrainingCheckpointState = read_checkpoint_json(
+        &directory.join(CHECKPOINT_STATE_FILE_NAME),
+        crate::checkpoint_io::STATE_MAX_BYTES,
+        "training checkpoint state",
+    )?;
+    state.validate()?;
+    Ok(TrainingCheckpointMetadata { manifest, state })
+}
+
+/// Restores only the model record of a checkpoint.
+///
+/// Inference has no optimizer to continue and no training configuration to
+/// match, so the compatibility gate is the descriptor alone: the model kind, the
+/// architecture version and the digest of the model configuration all have to be
+/// the ones the caller expects, or the weights would be poured into the wrong
+/// shapes and the failure would be a bad video rather than an error.
+///
+/// The `AutodiffBackend` bound is not decoration: the record was written by a
+/// module on `Autodiff<_>`, so reading it back with the same types is what makes
+/// it certainly compatible instead of probably compatible. The caller drops the
+/// autodiff shell afterwards with `AutodiffModule::valid`.
+///
+/// The template is only ever cloned. A failed load leaves the caller's template
+/// untouched, the same rule `load_training_checkpoint` follows.
+pub fn load_training_checkpoint_model<B, M>(
+    directory: impl AsRef<Path>,
+    model_template: &M,
+    device: &B::Device,
+    expected: &CheckpointDescriptor,
+) -> Result<RestoredCheckpointModel<M>, TrainingError>
+where
+    B: AutodiffBackend,
+    M: AutodiffModule<B> + Clone,
+{
+    let directory = directory.as_ref();
+    let metadata = read_training_checkpoint(directory)?;
+    if metadata.manifest.descriptor() != *expected {
+        return Err(TrainingError::CheckpointCompatibility(
+            "checkpoint descriptor does not match the expected model".to_owned(),
+        ));
+    }
+    let model_path = directory.join(CHECKPOINT_MODEL_FILE_NAME);
+    crate::checkpoint_io::validate_declared_file(&model_path, &metadata.manifest.model)?;
+    let model = crate::checkpoint_io::load_model_record::<B, M>(
+        model_template.clone(),
+        &model_path,
+        device,
+    )?;
+    Ok(RestoredCheckpointModel { model, metadata })
+}
+
 fn read_checkpoint_json<T>(path: &Path, max_bytes: u64, label: &str) -> Result<T, TrainingError>
 where
     T: DeserializeOwned,

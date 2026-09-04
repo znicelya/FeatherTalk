@@ -4,15 +4,16 @@ use burn::{
     optim::{AdamConfig, GradientsParams, Optimizer},
     record::{BinBytesRecorder, FullPrecisionSettings, Recorder},
     tensor::{
-        Tensor,
+        Device, Tensor,
         backend::{AutodiffBackend, Backend},
     },
 };
 use feathertalk_training::{
     CheckpointCompatibility, CheckpointDescriptor, DATA_LOADER_STATE_SCHEMA_VERSION,
-    DataLoaderConfig, DataLoaderState, Provenance, RandomAlgorithm, RestoredTrainingState,
-    SamplingConfig, SamplingKind, TRAINING_STATE_SCHEMA_VERSION, TrainingCheckpointState,
-    TrainingConfig, TrainingMode, load_training_checkpoint, save_training_checkpoint,
+    DataLoaderConfig, DataLoaderState, Provenance, RandomAlgorithm, RestoredCheckpointModel,
+    RestoredTrainingState, SamplingConfig, SamplingKind, TRAINING_STATE_SCHEMA_VERSION,
+    TrainingCheckpointState, TrainingConfig, TrainingMode, load_training_checkpoint,
+    load_training_checkpoint_model, read_training_checkpoint, save_training_checkpoint,
 };
 use std::collections::BTreeMap;
 
@@ -320,4 +321,142 @@ fn progress_state() -> TrainingCheckpointState {
             entries: BTreeMap::new(),
         },
     }
+}
+
+/// A checkpoint of a model that has taken one step, so its parameters differ
+/// from a fresh `deterministic` template and a restore is visible.
+fn saved_checkpoint(
+    device: &Device<CpuAutodiffBackend>,
+    directory: &std::path::Path,
+) -> (CheckpointDescriptor, TinyModel<CpuAutodiffBackend>) {
+    let model = TinyModel::<CpuAutodiffBackend>::deterministic(device);
+    let mut optimizer = AdamConfig::new().init();
+    let (model, _) = train_step(model, &mut optimizer, [[1.0, -2.0]], [[0.5]], device);
+    let descriptor = CheckpointDescriptor::new("tiny", "tiny-v1", "0".repeat(64));
+    save_training_checkpoint::<CpuAutodiffBackend, _, _>(
+        directory,
+        &model,
+        &optimizer,
+        descriptor.clone(),
+        state(),
+    )
+    .unwrap();
+    (descriptor, model)
+}
+
+#[test]
+fn a_checkpoint_reports_its_manifest_and_state_without_a_record() {
+    let device = Default::default();
+    let root = tempfile::tempdir().unwrap();
+    let checkpoint = root.path().join("checkpoint-000001");
+    let (descriptor, _) = saved_checkpoint(&device, &checkpoint);
+
+    let metadata = read_training_checkpoint(&checkpoint).unwrap();
+
+    assert_eq!(metadata.manifest.descriptor(), descriptor);
+    assert_eq!(metadata.manifest.model.file_name, "model.bin");
+    assert_eq!(metadata.state, state());
+    assert_eq!(metadata.state.global_step, 1);
+}
+
+#[test]
+fn a_model_only_load_restores_the_weights_and_leaves_the_template_alone() {
+    let device = Default::default();
+    let root = tempfile::tempdir().unwrap();
+    let checkpoint = root.path().join("checkpoint-000001");
+    let (descriptor, saved) = saved_checkpoint(&device, &checkpoint);
+    let template = TinyModel::<CpuAutodiffBackend>::deterministic(&device);
+    let fresh_values = model_parameter_values(&template);
+
+    let restored = load_training_checkpoint_model::<CpuAutodiffBackend, _>(
+        &checkpoint,
+        &template,
+        &device,
+        &descriptor,
+    )
+    .unwrap();
+
+    assert_eq!(
+        model_parameter_values(&restored.model),
+        model_parameter_values(&saved)
+    );
+    assert_eq!(model_parameter_values(&template), fresh_values);
+    assert_eq!(restored.metadata.state.global_step, 1);
+    assert_eq!(restored.metadata.manifest.descriptor(), descriptor);
+}
+
+#[test]
+fn a_model_only_load_refuses_a_descriptor_that_does_not_match() {
+    let device = Default::default();
+    let root = tempfile::tempdir().unwrap();
+    let checkpoint = root.path().join("checkpoint-000001");
+    let (_, _) = saved_checkpoint(&device, &checkpoint);
+    let template = TinyModel::<CpuAutodiffBackend>::deterministic(&device);
+    let other = CheckpointDescriptor::new("other", "tiny-v1", "0".repeat(64));
+
+    let error = load_training_checkpoint_model::<CpuAutodiffBackend, _>(
+        &checkpoint,
+        &template,
+        &device,
+        &other,
+    )
+    .expect_err("a checkpoint of another model is refused");
+
+    assert!(
+        matches!(
+            error,
+            feathertalk_training::TrainingError::CheckpointCompatibility(_)
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_model_only_load_refuses_a_checkpoint_without_its_record() {
+    let device = Default::default();
+    let root = tempfile::tempdir().unwrap();
+    let checkpoint = root.path().join("checkpoint-000001");
+    let (descriptor, _) = saved_checkpoint(&device, &checkpoint);
+    std::fs::remove_file(checkpoint.join("model.bin")).unwrap();
+    let template = TinyModel::<CpuAutodiffBackend>::deterministic(&device);
+
+    // The directory contract is checked before a single byte is read, so a
+    // checkpoint missing its record is refused by the preflight rather than by
+    // the reader -- and the metadata read refuses it too, for the same reason.
+    let refused = read_training_checkpoint(&checkpoint)
+        .expect_err("a checkpoint without its record is not a checkpoint");
+    assert!(refused.to_string().contains("model.bin"), "{refused}");
+    let error = load_training_checkpoint_model::<CpuAutodiffBackend, _>(
+        &checkpoint,
+        &template,
+        &device,
+        &descriptor,
+    )
+    .expect_err("a missing model record is refused");
+
+    let message = error.to_string();
+    assert!(message.contains("model.bin"), "{message}");
+}
+
+#[test]
+fn a_model_only_load_of_a_restored_checkpoint_carries_the_metadata_type() {
+    let device = Default::default();
+    let root = tempfile::tempdir().unwrap();
+    let checkpoint = root.path().join("checkpoint-000001");
+    let (descriptor, _) = saved_checkpoint(&device, &checkpoint);
+    let template = TinyModel::<CpuAutodiffBackend>::deterministic(&device);
+
+    let restored: RestoredCheckpointModel<TinyModel<CpuAutodiffBackend>> =
+        load_training_checkpoint_model::<CpuAutodiffBackend, _>(
+            &checkpoint,
+            &template,
+            &device,
+            &descriptor,
+        )
+        .unwrap();
+
+    assert_eq!(
+        restored.metadata,
+        read_training_checkpoint(&checkpoint).unwrap()
+    );
 }
