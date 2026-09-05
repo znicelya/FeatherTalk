@@ -39,63 +39,63 @@ rust/crates/feathertalk-cli/tests/real_worker.rs      gated real-package e2e
 
 **Files:** Modify `worker/src/handshake.rs`, `worker/src/runtime.rs`, `worker/tests/process_boundary.rs`, and any exact supported-command vectors in worker tests.
 
-- [ ] Add a failing test asserting `TaskKind::ImportLegacyModel` is present for an empty configuration and in the JSON ready frame.
-- [ ] Run the focused handshake/process-boundary tests and observe the missing command.
-- [ ] Insert `TaskKind::ImportLegacyModel` immediately after `InspectModel` in `supported_commands`; update all exact vectors.
-- [ ] Run `cargo test -p feathertalk-worker --test process_boundary --test runtime` and `cargo fmt --all -- --check`.
-- [ ] Commit `git add rust/crates/feathertalk-worker/src/handshake.rs rust/crates/feathertalk-worker/src/runtime.rs rust/crates/feathertalk-worker/tests/process_boundary.rs rust/crates/feathertalk-worker/tests/runtime.rs; git commit -m "feat(worker): announce the import-legacy-model command"`.
+- [x] Add a failing test asserting `TaskKind::ImportLegacyModel` is present for an empty configuration and in the JSON ready frame.
+- [x] Run the focused handshake/process-boundary tests and observe the missing command.
+- [x] Insert `TaskKind::ImportLegacyModel` immediately after `InspectModel` in `supported_commands`; update all exact vectors.
+- [x] Run `cargo test -p feathertalk-worker --test process_boundary --test runtime` and `cargo fmt --all -- --check`.
+- [x] Commit `git add rust/crates/feathertalk-worker/src/handshake.rs rust/crates/feathertalk-worker/src/runtime.rs rust/crates/feathertalk-worker/tests/process_boundary.rs rust/crates/feathertalk-worker/tests/runtime.rs; git commit -m "feat(worker): announce the import-legacy-model command"`.
 
 ### Task 2: Map legacy import failures
 
 **Files:** Modify `worker/src/error_map.rs` and `worker/src/lib.rs`; test in `worker/tests/importing.rs` or a focused error-map test.
 
-- [ ] Add failing assertions that a legacy `WeightImportError` and `PackageError` map to `ErrorCode::ModelIncompatible`, summary `模型导入失败`, recovery `ReimportModel`, and the requested `TaskStage`.
-- [ ] Run the focused test and verify the mapper does not exist.
-- [ ] Implement `legacy_task_error(error: &impl Display, stage: TaskStage) -> TaskError`, preserving bounded English technical detail and mapping both importer/package errors through it; export it from `lib.rs`.
-- [ ] Run the focused worker tests, format, and clippy for the worker crate.
-- [ ] Commit `git add rust/crates/feathertalk-worker/src/error_map.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/tests/importing.rs; git commit -m "feat(worker): map legacy import failures"`.
+- [x] Add failing assertions that a legacy `WeightImportError` and `PackageError` map to `ErrorCode::ModelIncompatible`, summary `模型导入失败`, recovery `ReimportModel`, and the requested `TaskStage`.
+- [x] Run the focused test and verify the mapper does not exist.
+- [x] Implement `legacy_task_error(error: &impl Display, stage: TaskStage) -> TaskError`, preserving bounded English technical detail and mapping both importer/package errors through it; export it from `lib.rs`.
+- [x] Run the focused worker tests, format, and clippy for the worker crate.
+- [x] Commit `git add rust/crates/feathertalk-worker/src/error_map.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/tests/importing.rs; git commit -m "feat(worker): map legacy import failures"`.
 
 ### Task 3: Import legacy models into packages
 
 **Files:** Create `worker/src/importing.rs`; modify `worker/src/lib.rs`; create `worker/tests/importing.rs` fixtures/tests.
 
-- [ ] Write failing tests for relative source, symlink source, wrong extension, missing licenses, existing destination, unsupported `Pfld`/`MobileOneUnet`, and successful FeatherHuBERT/Original UNet package reports. Build tiny valid fixtures with existing weights/export APIs; never read the protected `.MOV`.
-- [ ] Run the importer tests and confirm they fail before the module exists.
-- [ ] Implement `execute_import_legacy_model(params, config, token, reporter) -> Result<ImportLegacyModelReport, ImportLegacyModelError>` (or equivalent worker-internal result): validate paths and kind, check cancellation before import and before publication, report `Importing`, load `LICENSES.json`, use `OffsetDateTime::now_utc().format(&Rfc3339)`, and pass `config.worker_version()`.
-- [ ] For FeatherHuBERT call `build_feather_hubert_package(&FeatherHubertPackageRequest { source, licenses, destination, created_at, minimum_app_version })`; for Original UNet initialize `OriginalUnetConfig::production()`, call `import_into::<CpuBackend, OriginalUnet<CpuBackend>>` with `LegacyImportRequest`, then call `write_model_package` with the production config factory. Return source hash, model hash, tensor count, total elements, model kind, and architecture version from the published manifest/report.
-- [ ] Ensure unsupported kinds and all validation/import/package failures return the Task 2 mapping without creating destination directories; add a JSON conversion helper for the nine-field completed payload.
-- [ ] Run `cargo test -p feathertalk-worker --test importing`, then worker all-target tests, format, and clippy.
-- [ ] Commit `git add rust/crates/feathertalk-worker/src/importing.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/tests/importing.rs; git commit -m "feat(worker): import legacy models into packages"`.
+- [x] Write failing tests for relative source, symlink source, wrong extension, missing licenses, existing destination, unsupported `Pfld`/`MobileOneUnet`, and successful FeatherHuBERT/Original UNet package reports. Build tiny valid fixtures with existing weights/export APIs; never read the protected `.MOV`.
+- [x] Run the importer tests and confirm they fail before the module exists.
+- [x] Implement `execute_import_legacy_model(params, config, token, reporter) -> Result<ImportLegacyModelReport, ImportLegacyModelError>` (or equivalent worker-internal result): validate paths and kind, check cancellation before import and before publication, report `Importing`, load `LICENSES.json`, use `OffsetDateTime::now_utc().format(&Rfc3339)`, and pass `config.worker_version()`.
+- [x] For FeatherHuBERT call `build_feather_hubert_package(&FeatherHubertPackageRequest { source, licenses, destination, created_at, minimum_app_version })`; for Original UNet initialize `OriginalUnetConfig::production()`, call `import_into::<CpuBackend, OriginalUnet<CpuBackend>>` with `LegacyImportRequest`, then call `write_model_package` with the production config factory. Return source hash, model hash, tensor count, total elements, model kind, and architecture version from the published manifest/report.
+- [x] Ensure unsupported kinds and all validation/import/package failures return the Task 2 mapping without creating destination directories; add a JSON conversion helper for the nine-field completed payload.
+- [x] Run `cargo test -p feathertalk-worker --test importing`, then worker all-target tests, format, and clippy.
+- [x] Commit `git add rust/crates/feathertalk-worker/src/importing.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/tests/importing.rs; git commit -m "feat(worker): import legacy models into packages"`.
 
 ### Task 4: Execute the worker command
 
 **Files:** Modify `worker/src/commands.rs`, `worker/src/lib.rs`, and `worker/src/runtime.rs` if reporter wiring requires a helper.
 
-- [ ] Add a failing command test constructing `Request::ImportLegacyModel` with a valid fixture and asserting `Preparing`, `Importing`, then `Completed` payload; add cancellation-before-import and cancellation-before-publish tests.
-- [ ] Run the focused command tests and observe the unsupported/missing dispatch.
-- [ ] Add the `Request::ImportLegacyModel(params)` match arm, call the importer with the runtime token/reporter, map cancellation to `CommandOutcome::Cancelled`, and map failures through `legacy_task_error` at the correct stage.
-- [ ] Run worker command/runtime tests, format, and clippy.
-- [ ] Commit `git add rust/crates/feathertalk-worker/src/commands.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/src/runtime.rs rust/crates/feathertalk-worker/tests/importing.rs rust/crates/feathertalk-worker/tests/runtime.rs; git commit -m "feat(worker): execute the import-legacy-model command"`.
+- [x] Add a failing command test constructing `Request::ImportLegacyModel` with a valid fixture and asserting `Preparing`, `Importing`, then `Completed` payload; add cancellation-before-import and cancellation-before-publish tests.
+- [x] Run the focused command tests and observe the unsupported/missing dispatch.
+- [x] Add the `Request::ImportLegacyModel(params)` match arm, call the importer with the runtime token/reporter, map cancellation to `CommandOutcome::Cancelled`, and map failures through `legacy_task_error` at the correct stage.
+- [x] Run worker command/runtime tests, format, and clippy.
+- [x] Commit `git add rust/crates/feathertalk-worker/src/commands.rs rust/crates/feathertalk-worker/src/lib.rs rust/crates/feathertalk-worker/src/runtime.rs rust/crates/feathertalk-worker/tests/importing.rs rust/crates/feathertalk-worker/tests/runtime.rs; git commit -m "feat(worker): execute the import-legacy-model command"`.
 
 ### Task 5: Add the CLI subcommand
 
 **Files:** Modify `cli/src/cli.rs`, `cli/src/run.rs`, and CLI unit tests.
 
-- [ ] Add failing parser tests for `import-legacy-model SOURCE feather-hubert DEST`, all four accepted kind spellings, missing/relative arguments, and exact request path preservation.
-- [ ] Run focused CLI tests and verify clap reports the unknown command/request mismatch.
-- [ ] Add `Command::ImportLegacyModel { source, kind, destination }` and a local `LegacyModelKindArg` `ValueEnum`; map `feather-hubert`, `pfld`, `original-unet`, and `mobileone-unet` to domain kinds and construct `Request::ImportLegacyModel` without canonicalizing paths.
-- [ ] Wire normal JSON/progress/error exit handling through the existing CLI runner; keep user-facing help and rejection text Chinese.
-- [ ] Run `cargo test -p feathertalk-cli --lib`, format, and clippy.
-- [ ] Commit `git add rust/crates/feathertalk-cli/src/cli.rs rust/crates/feathertalk-cli/src/run.rs rust/crates/feathertalk-cli/tests; git commit -m "feat(cli): add the import-legacy-model subcommand"`.
+- [x] Add failing parser tests for `import-legacy-model SOURCE feather-hubert DEST`, all four accepted kind spellings, missing/relative arguments, and exact request path preservation.
+- [x] Run focused CLI tests and verify clap reports the unknown command/request mismatch.
+- [x] Add `Command::ImportLegacyModel { source, kind, destination }` and a local `LegacyModelKindArg` `ValueEnum`; map `feather-hubert`, `pfld`, `original-unet`, and `mobileone-unet` to domain kinds and construct `Request::ImportLegacyModel` without canonicalizing paths.
+- [x] Wire normal JSON/progress/error exit handling through the existing CLI runner; keep user-facing help and rejection text Chinese.
+- [x] Run `cargo test -p feathertalk-cli --lib`, format, and clippy.
+- [x] Commit `git add rust/crates/feathertalk-cli/src/cli.rs rust/crates/feathertalk-cli/src/run.rs rust/crates/feathertalk-cli/tests; git commit -m "feat(cli): add the import-legacy-model subcommand"`.
 
 ### Task 6: Import a real model end to end
 
 **Files:** Modify `cli/tests/real_worker.rs` only.
 
-- [ ] Add a gated test that reads an explicit source path from `FEATHERTALK_WORKER_LEGACY_MODEL`, uses a sibling `LICENSES.json`, creates a fresh destination under a temp directory, runs `feathertalk import-legacy-model`, parses one completed JSON object, checks source hash preservation, manifest hashes/architecture, tensor statistics, and destination no-clobber behavior. If the variable or license file is absent, print a clear skip. Never discover or open `.MOV` files.
-- [ ] Run the test before implementation/build and capture the expected skip or failure; then build release worker/CLI and run it with an explicit `.pth` source when available.
-- [ ] Verify the complete workspace: `cargo test --workspace --all-targets`, `cargo fmt --all -- --check`, and `cargo clippy --workspace --all-targets -- -D warnings`.
-- [ ] Commit `git add rust/crates/feathertalk-cli/tests/real_worker.rs; git commit -m "test(cli): import a legacy model end to end"`.
+- [x] Add a gated test that reads an explicit source path from `FEATHERTALK_WORKER_LEGACY_MODEL`, uses a sibling `LICENSES.json`, creates a fresh destination under a temp directory, runs `feathertalk import-legacy-model`, parses one completed JSON object, checks source hash preservation, manifest hashes/architecture, tensor statistics, and destination no-clobber behavior. If the variable or license file is absent, print a clear skip. Never discover or open `.MOV` files.
+- [x] Run the test before implementation/build and capture the expected skip or failure; then build release worker/CLI and run it with an explicit `.pth` source when available.
+- [x] Verify the complete workspace: `cargo test --workspace --all-targets`, `cargo fmt --all -- --check`, and `cargo clippy --workspace --all-targets -- -D warnings`.
+- [x] Commit `git add rust/crates/feathertalk-cli/tests/real_worker.rs; git commit -m "test(cli): import a legacy model end to end"`.
 
 ## Final verification
 
