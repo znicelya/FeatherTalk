@@ -91,11 +91,12 @@ fn capabilities_reports_the_real_handshake() {
     let output = run(&worker, &["capabilities"], &[]);
     assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
     let text = stdout(&output);
-    // `CPU_ADAPTER_ID` and the three commands the worker always advertises.
+    // `CPU_ADAPTER_ID` and the four commands the worker always advertises.
     assert!(text.contains("cpu-0"), "{text}");
     assert!(text.contains("validate_project"), "{text}");
     assert!(text.contains("inspect_model"), "{text}");
     assert!(text.contains("import_legacy_model"), "{text}");
+    assert!(text.contains("migrate_legacy_features"), "{text}");
 }
 
 #[test]
@@ -165,6 +166,95 @@ fn a_real_legacy_model_is_imported_end_to_end() {
     );
     assert!(destination.join("model.safetensors").is_file());
     assert!(destination.join("LICENSES.json").is_file());
+}
+
+/// The legacy feature migration, through the real worker.
+///
+/// The fixture is written by this test rather than taken from the machine: the
+/// NPY container is eight bytes of magic, a padded header line and raw
+/// little-endian `f32`, so the test can produce a legitimate one without a new
+/// dependency and without reading anything under `demo/`.
+#[test]
+fn real_legacy_features_are_migrated_end_to_end() {
+    let Some(worker) = worker_or_skip("real_legacy_features_are_migrated_end_to_end") else {
+        return;
+    };
+    let root = TempDir::new().expect("a temporary directory is available");
+    let source = root.path().join("aud_hu.npy");
+    let destination = root.path().join("features.f32");
+    let frames = 3_usize;
+    write_legacy_npy(&source, frames);
+    let source_arg = source.to_string_lossy().into_owned();
+    let destination_arg = destination.to_string_lossy().into_owned();
+
+    let output = run(
+        &worker,
+        &["migrate-legacy-features", &source_arg, &destination_arg],
+        &[],
+    );
+
+    assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("stdout is exactly one JSON document");
+    assert_eq!(result["kind"], "migrate_legacy_features");
+    assert_eq!(result["source"], source.display().to_string());
+    assert_eq!(result["destination"], destination.display().to_string());
+    assert_eq!(result["source_shape"], serde_json::json!([frames, 2, 1024]));
+    assert_eq!(result["tokens"], frames * 2);
+    assert_eq!(result["dims"], 1024);
+    assert_eq!(
+        result["sha256"]
+            .as_str()
+            .expect("the digest is a string")
+            .len(),
+        64
+    );
+    let published = std::fs::read(&destination).expect("the artifact is published");
+    assert_eq!(
+        result["bytes"].as_u64().expect("the size is numeric"),
+        published.len() as u64
+    );
+    // The versioned container, not a copy of the NPY.
+    assert_eq!(&published[..8], b"FTF32\0\0\0");
+
+    // The destination is published once and never overwritten.
+    let again = run(
+        &worker,
+        &["migrate-legacy-features", &source_arg, &destination_arg],
+        &[],
+    );
+    assert_eq!(code(&again), 1, "stdout was: {}", stdout(&again));
+    assert_eq!(
+        std::fs::read(&destination).expect("the artifact survives"),
+        published
+    );
+}
+
+/// Write a rank-three `f32` NPY file shaped `[frames, 2, 1024]`.
+fn write_legacy_npy(path: &Path, frames: usize) {
+    let header =
+        format!("{{'descr': '<f4', 'fortran_order': False, 'shape': ({frames}, 2, 1024), }}");
+    // The format demands the data start on a 64-byte boundary, counting the six
+    // magic bytes, the two version bytes and the two header-length bytes.
+    let prefix = 10 + header.len() + 1;
+    let padding = (64 - prefix % 64) % 64;
+    let mut header_bytes = header.into_bytes();
+    header_bytes.extend(std::iter::repeat_n(b' ', padding));
+    header_bytes.push(b'\n');
+    let mut bytes = Vec::with_capacity(10 + header_bytes.len() + frames * 2 * 1024 * 4);
+    bytes.extend_from_slice(b"\x93NUMPY");
+    bytes.push(1);
+    bytes.push(0);
+    bytes.extend_from_slice(
+        &u16::try_from(header_bytes.len())
+            .expect("the header fits in a v1.0 length")
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(&header_bytes);
+    for index in 0..frames * 2 * 1024 {
+        bytes.extend_from_slice(&(index as f32 / 32.0).to_le_bytes());
+    }
+    std::fs::write(path, bytes).expect("the NPY fixture is written");
 }
 
 /// The real FeatherHuBERT package, read through the real protocol. No ffmpeg and
