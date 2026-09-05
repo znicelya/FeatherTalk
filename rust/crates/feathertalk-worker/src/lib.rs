@@ -46,10 +46,10 @@ pub use config::{
     TrainingToolchain, WorkerConfig,
 };
 pub use error_map::{
-    audio_task_error, is_audio_cancellation, is_inference_cancellation, is_media_cancellation,
-    is_pipeline_cancellation, legacy_feature_task_error, legacy_task_error, media_task_error,
-    package_task_error, pipeline_task_error, project_task_error, quality_task_error,
-    render_task_error, training_data_task_error, training_task_error,
+    audio_task_error, export_task_error, is_audio_cancellation, is_inference_cancellation,
+    is_media_cancellation, is_pipeline_cancellation, legacy_feature_task_error, legacy_task_error,
+    media_task_error, package_task_error, pipeline_task_error, project_task_error,
+    quality_task_error, render_task_error, training_data_task_error, training_task_error,
 };
 pub use exporting::{
     ExportModelPackageError, ExportPlan, execute_export_model_package, export_plan,

@@ -2,7 +2,7 @@
 
 use std::{fs, path::Path};
 
-use feathertalk_domain::{ExportModelPackageParams, Progress, TaskStage};
+use feathertalk_domain::{ErrorCode, ExportModelPackageParams, Progress, Request, TaskStage};
 use feathertalk_export::{
     LICENSE_FILE_NAME, LicenseBundle, LicenseEntry, MANIFEST_FILE_NAME, MODEL_FILE_NAME,
     ModelConfiguration, TrainingMode as PackageTrainingMode, read_package_manifest,
@@ -13,8 +13,8 @@ use feathertalk_training::{
     CHECKPOINT_MODEL_FILE_NAME, CheckpointDescriptor, read_training_checkpoint,
 };
 use feathertalk_worker::{
-    NoReporter, RenderVariant, WorkerConfig, checkpoint_descriptor, execute_export_model_package,
-    export_plan, publish_checkpoint_package,
+    CommandOutcome, NoReporter, RenderVariant, WorkerConfig, checkpoint_descriptor, execute,
+    execute_export_model_package, export_plan, publish_checkpoint_package,
 };
 
 #[path = "support/mod.rs"]
@@ -328,4 +328,46 @@ fn a_micro_checkpoint_becomes_a_published_package() {
             ),
         ]
     );
+}
+
+#[test]
+fn the_command_maps_an_export_failure_to_model_incompatible() {
+    let root = tempfile::tempdir().expect("a temporary directory is available");
+    let destination = root.path().join("package");
+    let outcome = execute(
+        &Request::ExportModelPackage(params(Path::new("checkpoints/epoch-1"), &destination)),
+        &WorkerConfig::from_values(None, None, None),
+        &CancellationToken::new(),
+        &NoReporter,
+    );
+    let CommandOutcome::Failed(error) = outcome else {
+        panic!("an unreadable source is a task failure, got {outcome:?}");
+    };
+    assert_eq!(error.code, ErrorCode::ModelIncompatible);
+    assert_eq!(error.summary, "模型导出失败");
+    assert_eq!(error.stage, TaskStage::Preparing);
+    assert!(error.detail.contains("absolute"), "{}", error.detail);
+    assert!(!destination.exists());
+}
+
+#[test]
+fn the_command_reports_a_cancelled_export_as_cancelled() {
+    let root = tempfile::tempdir().expect("a temporary directory is available");
+    let checkpoint = root.path().join("epoch-1");
+    write_checkpoint(&checkpoint, micro_descriptor());
+    write_licenses(root.path());
+    let destination = root.path().join("package");
+    let token = CancellationToken::new();
+    token.cancel();
+    let outcome = execute(
+        &Request::ExportModelPackage(params(&checkpoint, &destination)),
+        &WorkerConfig::from_values(None, None, None),
+        &token,
+        &NoReporter,
+    );
+    assert!(
+        matches!(outcome, CommandOutcome::Cancelled),
+        "got {outcome:?}"
+    );
+    assert!(!destination.exists());
 }

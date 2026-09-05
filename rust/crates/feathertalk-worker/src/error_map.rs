@@ -134,6 +134,20 @@ pub fn legacy_feature_task_error(error: &impl Display, stage: TaskStage) -> Task
     )
 }
 
+/// Maps a model package export failure onto the model recovery contract.
+///
+/// The stage is a parameter for the same reason the legacy mappers take one: an
+/// export that fails while reading the checkpoint is `Preparing`, and one that
+/// fails while publishing is `Exporting`.
+pub fn export_task_error(error: &impl Display, stage: TaskStage) -> TaskError {
+    TaskError::new(
+        ErrorCode::ModelIncompatible,
+        "模型导出失败",
+        &clamp(&error.to_string()),
+        stage,
+    )
+}
+
 /// Maps a training failure onto the wire.
 ///
 /// The stage is a parameter, unlike every other mapper in this file: a run that

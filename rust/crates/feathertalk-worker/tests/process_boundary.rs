@@ -44,6 +44,7 @@ fn the_binary_announces_itself_and_exits_zero_on_shutdown() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
         ]
     );
 

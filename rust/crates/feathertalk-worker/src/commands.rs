@@ -10,11 +10,12 @@ use feathertalk_media::{
 use feathertalk_project::validate_project_dir;
 
 use crate::{
-    FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_extract_features,
-    execute_extract_frames, execute_import_legacy_model, execute_inspect_model,
-    execute_lock_asset_package, execute_migrate_legacy_features, execute_render, execute_train,
-    is_media_cancellation, legacy_feature_task_error, legacy_task_error, media_task_error,
-    normalize_to_json, package_task_error, pipeline_task_error, probe_to_json, project_task_error,
+    FeatureModel, FrameModels, TaskReporter, WorkerConfig, execute_export_model_package,
+    execute_extract_features, execute_extract_frames, execute_import_legacy_model,
+    execute_inspect_model, execute_lock_asset_package, execute_migrate_legacy_features,
+    execute_render, execute_train, export_task_error, is_media_cancellation,
+    legacy_feature_task_error, legacy_task_error, media_task_error, normalize_to_json,
+    package_task_error, pipeline_task_error, probe_to_json, project_task_error,
 };
 
 /// How many progress steps `normalize_media` reports. Verification and the
@@ -191,6 +192,15 @@ pub fn execute_with_runner<R: ProcessRunner + ?Sized>(
                 Err(error) => {
                     CommandOutcome::Failed(legacy_feature_task_error(&error, error.stage()))
                 }
+            }
+        }
+        // No toolchain guard either: the export reads a checkpoint and writes a
+        // package directory, so the handshake announces it unconditionally.
+        Request::ExportModelPackage(params) => {
+            match execute_export_model_package(params, config, token, reporter) {
+                Ok(payload) => CommandOutcome::Completed(Some(payload)),
+                Err(error) if error.is_cancelled() => CommandOutcome::Cancelled,
+                Err(error) => CommandOutcome::Failed(export_task_error(&error, error.stage())),
             }
         }
         other => CommandOutcome::Failed(unsupported(other.kind())),

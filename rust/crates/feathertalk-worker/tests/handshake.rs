@@ -43,6 +43,7 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render
@@ -73,10 +74,11 @@ fn a_worker_without_a_media_toolchain_only_offers_the_toolchain_free_commands() 
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
         ]
     );
     assert!(!frame.capabilities.ffmpeg);
-    assert_eq!(supported_commands(&config).len(), 4);
+    assert_eq!(supported_commands(&config).len(), 5);
 }
 
 #[test]
@@ -100,6 +102,19 @@ fn a_worker_always_announces_legacy_feature_migration() {
         ready_frame(&config)
             .supported_commands
             .contains(&TaskKind::MigrateLegacyFeatures)
+    );
+}
+
+/// Publishing a package reads a checkpoint and writes a directory beside it, so
+/// no toolchain gates it either.
+#[test]
+fn a_worker_always_announces_model_package_export() {
+    let config = WorkerConfig::from_values(None, None, None);
+    assert!(supported_commands(&config).contains(&TaskKind::ExportModelPackage));
+    assert!(
+        ready_frame(&config)
+            .supported_commands
+            .contains(&TaskKind::ExportModelPackage)
     );
 }
 
@@ -185,6 +200,7 @@ fn a_fully_configured_worker_offers_extract_frames() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -225,6 +241,7 @@ fn models_without_a_media_toolchain_offer_nothing_new() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
         ]
     );
 }
@@ -255,6 +272,7 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -295,6 +313,7 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage
         ]
@@ -328,6 +347,7 @@ fn a_worker_with_a_vgg19_package_offers_train() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::Train
         ]
     );
@@ -359,6 +379,7 @@ fn every_toolchain_plus_vgg19_offers_every_command() {
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
             TaskKind::MigrateLegacyFeatures,
+            TaskKind::ExportModelPackage,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
