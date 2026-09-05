@@ -91,12 +91,13 @@ fn capabilities_reports_the_real_handshake() {
     let output = run(&worker, &["capabilities"], &[]);
     assert_eq!(code(&output), 0, "stderr was: {}", stderr(&output));
     let text = stdout(&output);
-    // `CPU_ADAPTER_ID` and the four commands the worker always advertises.
+    // `CPU_ADAPTER_ID` and the five commands the worker always advertises.
     assert!(text.contains("cpu-0"), "{text}");
     assert!(text.contains("validate_project"), "{text}");
     assert!(text.contains("inspect_model"), "{text}");
     assert!(text.contains("import_legacy_model"), "{text}");
     assert!(text.contains("migrate_legacy_features"), "{text}");
+    assert!(text.contains("export_model_package"), "{text}");
 }
 
 #[test]
@@ -317,6 +318,54 @@ fn a_real_model_package_is_inspected_end_to_end() {
             .expect("incompatibilities is an array")
             .len(),
         0
+    );
+}
+
+/// Model package export across the real process boundary.
+///
+/// A successful export needs a production-sized checkpoint: the architecture is
+/// resolved from the kind the checkpoint recorded, so the weights on disk have
+/// to match the released configuration, which no test can conjure. What is
+/// pinned here is the gate every request passes first -- a published package is
+/// not an export source -- and how that refusal reaches the client. No ffmpeg,
+/// no model directories, nothing under `demo/`.
+#[test]
+fn exporting_a_published_package_is_a_task_failure() {
+    let Some(worker) = worker_or_skip("exporting_a_published_package_is_a_task_failure") else {
+        return;
+    };
+    let root = TempDir::new().expect("a temporary directory is available");
+    let source = root.path().join("original_unet_v1");
+    std::fs::create_dir(&source).expect("the temporary package directory is writable");
+    // Which of the two layouts a directory is comes from the model file it
+    // holds, so these two entries are enough to make it a package: the contents
+    // are never read, because the request is refused before any reader runs.
+    std::fs::write(source.join("manifest.json"), "{}").expect("the manifest is writable");
+    std::fs::write(source.join("model.safetensors"), b"not weights")
+        .expect("the model file is writable");
+    let destination = root.path().join("exported");
+    let source_arg = source.to_string_lossy().into_owned();
+    let destination_arg = destination.to_string_lossy().into_owned();
+
+    let output = run(
+        &worker,
+        &["export-model-package", &source_arg, &destination_arg],
+        &[],
+    );
+
+    assert_eq!(code(&output), 1, "stdout was: {}", stdout(&output));
+    let text = stderr(&output);
+    assert!(text.contains("模型导出失败"), "{text}");
+    assert!(text.contains("MODEL_INCOMPATIBLE"), "{text}");
+    assert!(
+        text.contains("export requires a training checkpoint"),
+        "the refusal names the gate it failed: {text}"
+    );
+    // A refused request publishes nothing.
+    assert!(
+        !destination.exists(),
+        "the destination stays absent: {}",
+        destination.display()
     );
 }
 
