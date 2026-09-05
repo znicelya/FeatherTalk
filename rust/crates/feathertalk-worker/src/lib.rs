@@ -12,6 +12,7 @@ mod asset_scan;
 mod commands;
 mod config;
 mod error_map;
+mod exporting;
 mod extract_features;
 mod extract_frames;
 mod feature_result;
@@ -49,6 +50,10 @@ pub use error_map::{
     is_pipeline_cancellation, legacy_feature_task_error, legacy_task_error, media_task_error,
     package_task_error, pipeline_task_error, project_task_error, quality_task_error,
     render_task_error, training_data_task_error, training_task_error,
+};
+pub use exporting::{
+    ExportModelPackageError, ExportPlan, execute_export_model_package, export_plan,
+    publish_checkpoint_package,
 };
 pub use extract_features::execute_extract_features;
 pub use extract_frames::execute_extract_frames;

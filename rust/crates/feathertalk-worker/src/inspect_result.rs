@@ -125,7 +125,7 @@ fn files_json(files: &[InspectedFile]) -> Value {
 
 /// Matched exhaustively rather than serialised, so a fifth mode is a compile error
 /// here instead of a surprise string in the payload.
-fn package_mode_slug(mode: PackageTrainingMode) -> &'static str {
+pub(crate) fn package_mode_slug(mode: PackageTrainingMode) -> &'static str {
     match mode {
         PackageTrainingMode::Inference => "inference",
         PackageTrainingMode::Baseline => "baseline",
