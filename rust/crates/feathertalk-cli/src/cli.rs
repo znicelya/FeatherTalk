@@ -35,7 +35,8 @@ pub struct Cli {
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
 /// `normalize-media`, `extract-frames`, `extract-features`,
-/// `lock-asset-package`, `train`, `inspect-model`, `import-legacy-model`, `capabilities`.
+/// `lock-asset-package`, `train`, `inspect-model`, `import-legacy-model`,
+/// `migrate-legacy-features`, `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -118,6 +119,13 @@ pub enum Command {
         #[arg(value_enum)]
         kind: LegacyModelKindArg,
         /// 新模型包目录，必须不存在
+        destination: PathBuf,
+    },
+    /// 将旧版 NumPy 音频特征迁移为标准特征文件
+    MigrateLegacyFeatures {
+        /// 旧版 .npy 特征文件
+        source: PathBuf,
+        /// 目标特征文件，必须不存在
         destination: PathBuf,
     },
     /// 打印工作进程的握手信息：后端、设备、支持的命令

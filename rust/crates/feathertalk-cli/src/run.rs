@@ -8,8 +8,8 @@ use feathertalk_client::{
 };
 use feathertalk_domain::{
     ExtractFeaturesParams, ExtractFramesParams, ImportLegacyModelParams, InspectModelParams,
-    LegacyModelKind, NormalizeMediaParams, ProbeMediaParams, ProjectDirParams, RenderParams,
-    Request, TaskId, TrainParams, TrainingMode, UnetVariant,
+    LegacyModelKind, MigrateLegacyFeaturesParams, NormalizeMediaParams, ProbeMediaParams,
+    ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
 };
 
 use crate::cli::{Cli, Command, LegacyModelKindArg, TrainMode, TrainVariant};
@@ -171,6 +171,19 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
                 kind: legacy_model_kind(*kind),
                 destination: destination.clone(),
             })))
+        }
+        Command::MigrateLegacyFeatures {
+            source,
+            destination,
+        } => {
+            reject_empty(source, "旧特征文件")?;
+            reject_empty(destination, "目标文件")?;
+            Ok(Some(Request::MigrateLegacyFeatures(
+                MigrateLegacyFeaturesParams {
+                    source: source.clone(),
+                    destination: destination.clone(),
+                },
+            )))
         }
     }
 }
@@ -644,5 +657,42 @@ mod tests {
         })
         .expect_err("an empty destination is refused");
         assert_eq!(error, "目标目录不能为空。");
+    }
+
+    #[test]
+    fn migrate_legacy_features_carries_both_paths() {
+        let request = build_request(&Command::MigrateLegacyFeatures {
+            source: PathBuf::from("legacy/aud_hu.npy"),
+            destination: PathBuf::from("assets/features/features.f32"),
+        })
+        .expect("the arguments are accepted")
+        .expect("migration needs a task");
+        let Request::MigrateLegacyFeatures(params) = request else {
+            panic!("migrate-legacy-features must build a MigrateLegacyFeatures request");
+        };
+        // Relative here, absolute demanded by the worker: which paths are usable
+        // is the worker's judgement, like every other path in this file.
+        assert_eq!(params.source, PathBuf::from("legacy/aud_hu.npy"));
+        assert_eq!(
+            params.destination,
+            PathBuf::from("assets/features/features.f32")
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_features_refuses_empty_paths() {
+        let error = build_request(&Command::MigrateLegacyFeatures {
+            source: PathBuf::new(),
+            destination: PathBuf::from("features.f32"),
+        })
+        .expect_err("an empty source is refused");
+        assert_eq!(error, "旧特征文件不能为空。");
+
+        let error = build_request(&Command::MigrateLegacyFeatures {
+            source: PathBuf::from("aud_hu.npy"),
+            destination: PathBuf::new(),
+        })
+        .expect_err("an empty destination is refused");
+        assert_eq!(error, "目标文件不能为空。");
     }
 }
