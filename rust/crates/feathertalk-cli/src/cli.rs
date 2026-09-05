@@ -35,8 +35,9 @@ pub struct Cli {
 
 /// The task commands, kebab-cased by clap: `validate-project`, `probe-media`,
 /// `normalize-media`, `extract-frames`, `extract-features`,
-/// `lock-asset-package`, `train`, `inspect-model`, `import-legacy-model`,
-/// `migrate-legacy-features`, `capabilities`.
+/// `lock-asset-package`, `train`, `render`, `inspect-model`,
+/// `import-legacy-model`, `migrate-legacy-features`, `export-model-package`,
+/// `capabilities`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// 校验工程目录
@@ -126,6 +127,13 @@ pub enum Command {
         /// 旧版 .npy 特征文件
         source: PathBuf,
         /// 目标特征文件，必须不存在
+        destination: PathBuf,
+    },
+    /// 将训练检查点导出为标准模型包
+    ExportModelPackage {
+        /// 训练检查点目录，例如 models/unet/checkpoint-00000004
+        source: PathBuf,
+        /// 新模型包目录，必须不存在
         destination: PathBuf,
     },
     /// 打印工作进程的握手信息：后端、设备、支持的命令

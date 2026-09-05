@@ -7,9 +7,10 @@ use feathertalk_client::{
     generate_task_id,
 };
 use feathertalk_domain::{
-    ExtractFeaturesParams, ExtractFramesParams, ImportLegacyModelParams, InspectModelParams,
-    LegacyModelKind, MigrateLegacyFeaturesParams, NormalizeMediaParams, ProbeMediaParams,
-    ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode, UnetVariant,
+    ExportModelPackageParams, ExtractFeaturesParams, ExtractFramesParams, ImportLegacyModelParams,
+    InspectModelParams, LegacyModelKind, MigrateLegacyFeaturesParams, NormalizeMediaParams,
+    ProbeMediaParams, ProjectDirParams, RenderParams, Request, TaskId, TrainParams, TrainingMode,
+    UnetVariant,
 };
 
 use crate::cli::{Cli, Command, LegacyModelKindArg, TrainMode, TrainVariant};
@@ -180,6 +181,19 @@ fn build_request(command: &Command) -> Result<Option<Request>, String> {
             reject_empty(destination, "目标文件")?;
             Ok(Some(Request::MigrateLegacyFeatures(
                 MigrateLegacyFeaturesParams {
+                    source: source.clone(),
+                    destination: destination.clone(),
+                },
+            )))
+        }
+        Command::ExportModelPackage {
+            source,
+            destination,
+        } => {
+            reject_empty(source, "检查点目录")?;
+            reject_empty(destination, "目标目录")?;
+            Ok(Some(Request::ExportModelPackage(
+                ExportModelPackageParams {
                     source: source.clone(),
                     destination: destination.clone(),
                 },
@@ -694,5 +708,45 @@ mod tests {
         })
         .expect_err("an empty destination is refused");
         assert_eq!(error, "目标文件不能为空。");
+    }
+
+    #[test]
+    fn export_model_package_carries_both_paths() {
+        let request = build_request(&Command::ExportModelPackage {
+            source: PathBuf::from("models/unet/checkpoint-00000004"),
+            destination: PathBuf::from("models/unet/original_unet_v1"),
+        })
+        .expect("the arguments are accepted")
+        .expect("an export needs a task");
+        let Request::ExportModelPackage(params) = request else {
+            panic!("export-model-package must build an ExportModelPackage request");
+        };
+        // Relative here, absolute demanded by the worker: which paths are usable
+        // is the worker's judgement, like every other path in this file.
+        assert_eq!(
+            params.source,
+            PathBuf::from("models/unet/checkpoint-00000004")
+        );
+        assert_eq!(
+            params.destination,
+            PathBuf::from("models/unet/original_unet_v1")
+        );
+    }
+
+    #[test]
+    fn export_model_package_refuses_empty_paths() {
+        let error = build_request(&Command::ExportModelPackage {
+            source: PathBuf::new(),
+            destination: PathBuf::from("models/unet/original_unet_v1"),
+        })
+        .expect_err("an empty source is refused");
+        assert_eq!(error, "检查点目录不能为空。");
+
+        let error = build_request(&Command::ExportModelPackage {
+            source: PathBuf::from("models/unet/checkpoint-00000004"),
+            destination: PathBuf::new(),
+        })
+        .expect_err("an empty destination is refused");
+        assert_eq!(error, "目标目录不能为空。");
     }
 }
