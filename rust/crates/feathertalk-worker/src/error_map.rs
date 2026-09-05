@@ -124,6 +124,16 @@ pub fn legacy_task_error(error: &impl Display, stage: TaskStage) -> TaskError {
     )
 }
 
+/// Maps a legacy feature migration failure onto the model recovery contract.
+pub fn legacy_feature_task_error(error: &impl Display, stage: TaskStage) -> TaskError {
+    TaskError::new(
+        ErrorCode::ModelIncompatible,
+        "特征迁移失败",
+        &clamp(&error.to_string()),
+        stage,
+    )
+}
+
 /// Maps a training failure onto the wire.
 ///
 /// The stage is a parameter, unlike every other mapper in this file: a run that

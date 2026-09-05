@@ -23,6 +23,7 @@ mod inspect_result;
 mod inspecting;
 mod lock_asset_package;
 mod lock_result;
+mod migrating_features;
 mod models;
 mod normalize_result;
 mod probe_result;
@@ -45,9 +46,9 @@ pub use config::{
 };
 pub use error_map::{
     audio_task_error, is_audio_cancellation, is_inference_cancellation, is_media_cancellation,
-    is_pipeline_cancellation, legacy_task_error, media_task_error, package_task_error,
-    pipeline_task_error, project_task_error, quality_task_error, render_task_error,
-    training_data_task_error, training_task_error,
+    is_pipeline_cancellation, legacy_feature_task_error, legacy_task_error, media_task_error,
+    package_task_error, pipeline_task_error, project_task_error, quality_task_error,
+    render_task_error, training_data_task_error, training_task_error,
 };
 pub use extract_features::execute_extract_features;
 pub use extract_frames::execute_extract_frames;
@@ -63,6 +64,7 @@ pub use inspecting::{
 };
 pub use lock_asset_package::execute_lock_asset_package;
 pub use lock_result::lock_to_json;
+pub use migrating_features::{MigrateLegacyFeaturesError, execute_migrate_legacy_features};
 pub use models::FrameModels;
 pub use normalize_result::normalize_to_json;
 pub use probe_result::probe_to_json;

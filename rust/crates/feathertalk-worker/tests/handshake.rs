@@ -42,6 +42,7 @@ fn a_configured_worker_reports_a_cpu_adapter_and_both_commands() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render
@@ -71,10 +72,11 @@ fn a_worker_without_a_media_toolchain_only_offers_the_toolchain_free_commands() 
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
         ]
     );
     assert!(!frame.capabilities.ffmpeg);
-    assert_eq!(supported_commands(&config).len(), 3);
+    assert_eq!(supported_commands(&config).len(), 4);
 }
 
 #[test]
@@ -85,6 +87,19 @@ fn a_worker_always_announces_legacy_model_import() {
         ready_frame(&config)
             .supported_commands
             .contains(&TaskKind::ImportLegacyModel)
+    );
+}
+
+/// Feature migration reads one NPY file and writes one artifact, so no
+/// toolchain gates it either.
+#[test]
+fn a_worker_always_announces_legacy_feature_migration() {
+    let config = WorkerConfig::from_values(None, None, None);
+    assert!(supported_commands(&config).contains(&TaskKind::MigrateLegacyFeatures));
+    assert!(
+        ready_frame(&config)
+            .supported_commands
+            .contains(&TaskKind::MigrateLegacyFeatures)
     );
 }
 
@@ -169,6 +184,7 @@ fn a_fully_configured_worker_offers_extract_frames() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -208,6 +224,7 @@ fn models_without_a_media_toolchain_offer_nothing_new() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
         ]
     );
 }
@@ -237,6 +254,7 @@ fn a_worker_with_a_feature_model_offers_extract_features() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,
@@ -276,6 +294,7 @@ fn a_feature_model_without_a_media_toolchain_still_offers_extract_features() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ExtractFeatures,
             TaskKind::LockAssetPackage
         ]
@@ -308,6 +327,7 @@ fn a_worker_with_a_vgg19_package_offers_train() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::Train
         ]
     );
@@ -338,6 +358,7 @@ fn every_toolchain_plus_vgg19_offers_every_command() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,

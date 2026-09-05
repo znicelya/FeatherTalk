@@ -462,6 +462,7 @@ fn a_usable_media_toolchain_enables_probe_media_in_the_handshake() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render
@@ -482,6 +483,7 @@ fn a_rejected_media_configuration_leaves_probe_media_out_of_the_handshake() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
         ]
     );
 }
@@ -1070,6 +1072,7 @@ fn a_fully_configured_worker_enables_extract_frames_in_the_handshake() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
             TaskKind::ProbeMedia,
             TaskKind::NormalizeMedia,
             TaskKind::Render,

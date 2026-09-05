@@ -43,6 +43,7 @@ fn the_binary_announces_itself_and_exits_zero_on_shutdown() {
             TaskKind::ValidateProject,
             TaskKind::InspectModel,
             TaskKind::ImportLegacyModel,
+            TaskKind::MigrateLegacyFeatures,
         ]
     );
 

@@ -2782,6 +2782,8 @@ dependencies = [
  "feathertalk-training-run",
  "feathertalk-weights",
  "hex",
+ "ndarray 0.17.2",
+ "ndarray-npy",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",

@@ -26,6 +26,7 @@ pub fn supported_commands(config: &WorkerConfig) -> Vec<TaskKind> {
         TaskKind::ValidateProject,
         TaskKind::InspectModel,
         TaskKind::ImportLegacyModel,
+        TaskKind::MigrateLegacyFeatures,
     ];
     // Both media commands shell out to the same two binaries, so they are
     // available together or not at all.
